@@ -1,0 +1,149 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_backend"
+
+[project]
+name = "logai"
+version = "0.1.0"
+description = "AI-powered observability assistant for querying AWS CloudWatch logs using natural language"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "LogAI Team", email = "team@logai.dev"}
+]
+keywords = ["observability", "logs", "ai", "cloudwatch", "llm", "devops", "sre"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System :: Monitoring",
+    "Topic :: System :: Logging",
+]
+
+dependencies = [
+    # Core
+    "textual>=0.47.0",
+    "rich>=13.7.0",
+    
+    # LLM Integration
+    "litellm>=1.30.0",
+    "anthropic>=0.18.0",
+    "openai>=1.12.0",
+    
+    # AWS
+    "boto3>=1.34.0",
+    "botocore>=1.34.0",
+    
+    # Configuration & Validation
+    "pydantic>=2.6.0",
+    "pydantic-settings>=2.2.0",
+    "python-dotenv>=1.0.0",
+    
+    # Utilities
+    "structlog>=24.1.0",
+    "tenacity>=8.2.0",
+    "aiosqlite>=0.19.0",
+    "aiofiles>=23.2.0",
+    "httpx>=0.27.0",
+    
+    # Date/Time
+    "python-dateutil>=2.8.0",
+    "pendulum>=3.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "mypy>=1.8.0",
+    "ruff>=0.2.0",
+    "moto>=5.0.0",
+    "respx>=0.20.0",
+    "pytest-mock>=3.12.0",
+    "types-python-dateutil>=2.8.0",
+    "types-aiofiles>=23.2.0",
+]
+
+[project.scripts]
+logai = "logai.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/logai/logai"
+Documentation = "https://github.com/logai/logai/docs"
+Repository = "https://github.com/logai/logai"
+Issues = "https://github.com/logai/logai/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-v --cov=logai --cov-report=term-missing --cov-report=html"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_any_generics = true
+disallow_subclassing_any = true
+disallow_untyped_calls = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+
+[[tool.mypy.overrides]]
+module = [
+    "litellm.*",
+    "moto.*",
+    "respx.*",
+    "textual.*",
+]
+ignore_missing_imports = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long (handled by formatter)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]  # Allow unused imports in __init__.py
+
+[tool.coverage.run]
+source = ["src/logai"]
+omit = ["*/tests/*", "*/test_*.py"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+]
