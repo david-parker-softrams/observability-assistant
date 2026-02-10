@@ -56,3 +56,52 @@ def temp_cache_dir(tmp_path: Path) -> Path:
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
     return cache_dir
+
+
+@pytest.fixture
+def mock_cloudwatch_log_groups() -> list[dict[str, Any]]:
+    """Sample CloudWatch log groups for testing."""
+    return [
+        {
+            "logGroupName": "/aws/lambda/auth-service",
+            "creationTime": 1705314000000,
+            "storedBytes": 1024000,
+            "retentionInDays": 7,
+        },
+        {
+            "logGroupName": "/aws/lambda/user-service",
+            "creationTime": 1705314000000,
+            "storedBytes": 2048000,
+            "retentionInDays": 14,
+        },
+        {
+            "logGroupName": "/aws/ecs/api-service",
+            "creationTime": 1705314000000,
+            "storedBytes": 5120000,
+        },
+    ]
+
+
+@pytest.fixture
+def mock_cloudwatch_log_events() -> list[dict[str, Any]]:
+    """Sample CloudWatch log events for testing."""
+    return [
+        {
+            "timestamp": 1705314060000,
+            "message": "ERROR: Failed to authenticate user",
+            "logStreamName": "2024/01/15/[$LATEST]abc123",
+            "eventId": "event-001",
+        },
+        {
+            "timestamp": 1705314120000,
+            "message": "ERROR: Database connection timeout",
+            "logStreamName": "2024/01/15/[$LATEST]abc123",
+            "eventId": "event-002",
+        },
+        {
+            "timestamp": 1705314180000,
+            "message": "INFO: Request completed successfully",
+            "logStreamName": "2024/01/15/[$LATEST]abc123",
+            "eventId": "event-003",
+        },
+    ]
