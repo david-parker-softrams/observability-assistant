@@ -16,6 +16,24 @@ from .base import (
     RateLimitError,
 )
 
+# Register Ollama models that support function calling
+# Based on LiteLLM documentation: https://docs.litellm.ai/docs/providers/ollama
+#
+# Supported model families (as of Feb 2026):
+# - Qwen 2.5/3 series: Native tool calling support
+# - Llama 3.1+: Native tool calling support
+#
+# Note: If your model isn't listed, LiteLLM will fall back to JSON mode
+# for tool calling, which may have reduced accuracy.
+litellm.register_model(
+    model_cost={
+        "ollama_chat/qwen2.5": {"supports_function_calling": True},
+        "ollama_chat/qwen3": {"supports_function_calling": True},
+        "ollama_chat/llama3.1": {"supports_function_calling": True},
+        "ollama_chat/llama3.2": {"supports_function_calling": True},
+    }
+)
+
 
 class LiteLLMProvider(BaseLLMProvider):
     """
@@ -92,6 +110,24 @@ class LiteLLMProvider(BaseLLMProvider):
         else:
             raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
 
+    def _supports_tools(self) -> bool:
+        """Check if the current model supports tool calling."""
+        if self.provider in ["anthropic", "openai"]:
+            return True
+        if self.provider == "ollama":
+            # Check if model family is registered as supporting tools
+            model_name = self._get_model_name()
+            supported_families = [
+                "qwen2.5",
+                "qwen3",
+                "llama3.1",
+                "llama3.2",
+                "mistral-nemo",
+                "firefunction",
+            ]
+            return any(f"ollama_chat/{family}" in model_name for family in supported_families)
+        return False
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -136,8 +172,8 @@ class LiteLLMProvider(BaseLLMProvider):
             if self.max_tokens:
                 params["max_tokens"] = self.max_tokens
 
-            # Only send tools to providers that support them (not Ollama)
-            if tools and self.provider in ["anthropic", "openai"]:
+            # Only send tools if the model supports them
+            if tools and self._supports_tools():
                 params["tools"] = tools
 
             # Run litellm completion in executor (it's synchronous)
@@ -223,8 +259,8 @@ class LiteLLMProvider(BaseLLMProvider):
             if self.max_tokens:
                 params["max_tokens"] = self.max_tokens
 
-            # Only send tools to providers that support them (not Ollama)
-            if tools and self.provider in ["anthropic", "openai"]:
+            # Only send tools if the model supports them
+            if tools and self._supports_tools():
                 params["tools"] = tools
 
             # Run litellm streaming in executor
@@ -253,7 +289,7 @@ class LiteLLMProvider(BaseLLMProvider):
         elif self.provider == "openai":
             return f"openai/{self.model}"
         elif self.provider == "ollama":
-            return f"ollama/{self.model}"
+            return f"ollama_chat/{self.model}"
         else:
             return self.model
 

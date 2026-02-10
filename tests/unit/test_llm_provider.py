@@ -288,7 +288,7 @@ class TestLiteLLMProvider:
             api_base="http://localhost:11434",
         )
 
-        assert provider._get_model_name() == "ollama/llama3.1:8b"
+        assert provider._get_model_name() == "ollama_chat/llama3.1:8b"
 
     def test_anthropic_model_name(self):
         """Test Anthropic model name formatting."""
