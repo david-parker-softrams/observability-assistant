@@ -17,6 +17,7 @@ Header {
     background: $surface;
     border: solid $primary;
     height: 1fr;
+    width: 1fr;
 }
 
 /* Message styles */
@@ -72,13 +73,13 @@ Header {
 #input-container {
     height: auto;
     background: $surface;
+    width: 1fr;
 }
 
 /* Chat input */
 ChatInput {
     border: solid $primary;
     padding: 0 1;
-    height: 3;
     background: $panel;
 }
 

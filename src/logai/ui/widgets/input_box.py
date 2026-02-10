@@ -8,7 +8,6 @@ class ChatInput(Input):
 
     DEFAULT_CSS = """
     ChatInput {
-        dock: bottom;
         border: solid $primary;
         padding: 1 2;
         height: auto;
