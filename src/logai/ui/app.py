@@ -3,7 +3,7 @@
 import logging
 from pathlib import Path
 
-from textual.app import App, ComposeResult
+from textual.app import App
 from textual.binding import Binding
 
 from logai.cache.manager import CacheManager
@@ -53,9 +53,11 @@ class LogAIApp(App[None]):
 
         logger.info("LogAIApp initialized successfully")
 
-    def compose(self) -> ComposeResult:
-        """Create child widgets for the app."""
-        yield ChatScreen(orchestrator=self.orchestrator, cache_manager=self.cache_manager)
+    async def on_mount(self) -> None:
+        """Mount the chat screen when app starts."""
+        await self.push_screen(
+            ChatScreen(orchestrator=self.orchestrator, cache_manager=self.cache_manager)
+        )
 
     async def action_quit(self) -> None:
         """Quit the application with cleanup."""
