@@ -1,0 +1,90 @@
+/* LogAI TUI Stylesheet */
+
+/* Application-wide styles */
+Screen {
+    background: $surface;
+}
+
+/* Header styles */
+Header {
+    background: $primary;
+    color: $text;
+    height: 3;
+}
+
+/* Messages container */
+#messages-container {
+    background: $surface;
+    border: solid $primary;
+}
+
+/* Message styles */
+.user-message {
+    background: $primary;
+    color: $text;
+    padding: 1 2;
+    margin: 1 0 1 4;
+    border: solid $primary-darken-2;
+    border-title-align: left;
+}
+
+.assistant-message {
+    background: $panel;
+    color: $text;
+    padding: 1 2;
+    margin: 1 4 1 0;
+    border: solid $panel-darken-2;
+    border-title-align: left;
+}
+
+.system-message {
+    background: $surface;
+    color: $text-muted;
+    padding: 1 2;
+    margin: 1;
+    text-align: center;
+    text-style: italic;
+}
+
+.loading-indicator {
+    background: $panel;
+    color: $text-muted;
+    padding: 1 2;
+    margin: 1 4 1 0;
+    border: solid $panel-darken-2;
+}
+
+.error-message {
+    background: $error;
+    color: $text;
+    padding: 1 2;
+    margin: 1;
+    border: solid $error-darken-2;
+}
+
+/* Input container */
+#input-container {
+    height: auto;
+    background: $surface;
+}
+
+/* Chat input */
+ChatInput {
+    border: solid $primary;
+    padding: 0 1;
+    height: 3;
+    background: $panel;
+}
+
+ChatInput:focus {
+    border: solid $accent;
+}
+
+/* Status bar */
+StatusBar {
+    height: 1;
+    background: $panel;
+    color: $text-muted;
+    padding: 0 2;
+    dock: bottom;
+}
