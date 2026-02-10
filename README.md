@@ -11,14 +11,14 @@ Query your AWS CloudWatch logs using natural language. LogAI uses Large Language
 - 🛡️ **PII Sanitization**: Automatic redaction of sensitive data (emails, IPs, API keys, etc.)
 - ⚡ **Smart Caching**: SQLite-based caching to minimize AWS API calls
 - 🎨 **Interactive TUI**: Beautiful terminal user interface built with Textual
-- 🔌 **Multiple LLM Providers**: Support for Anthropic Claude and OpenAI GPT models
+- 🔌 **Multiple LLM Providers**: Support for Anthropic Claude, OpenAI GPT, and Ollama (local models)
 - 📊 **AWS CloudWatch Integration**: Seamless integration with CloudWatch Logs
 
 ## 📋 Requirements
 
 - Python 3.11 or higher
 - AWS credentials with CloudWatch Logs read access
-- API key for Anthropic Claude or OpenAI GPT
+- API key for Anthropic Claude or OpenAI GPT (or local Ollama installation)
 
 ## 🚀 Quick Start
 
@@ -55,6 +55,42 @@ AWS_ACCESS_KEY_ID=your-access-key
 AWS_SECRET_ACCESS_KEY=your-secret-key
 ```
 
+### Using Ollama (Local Models)
+
+For privacy-focused or offline usage, you can use local Ollama models:
+
+1. **Install Ollama:**
+```bash
+# macOS
+brew install ollama
+
+# Linux
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Or download from https://ollama.ai
+```
+
+2. **Pull a function-calling capable model:**
+```bash
+ollama pull llama3.1:8b
+# or for better performance (requires more RAM):
+ollama pull llama3.1:70b
+```
+
+3. **Start Ollama server (if not already running):**
+```bash
+ollama serve
+```
+
+4. **Configure `.env`:**
+```bash
+LOGAI_LLM_PROVIDER=ollama
+LOGAI_OLLAMA_BASE_URL=http://localhost:11434
+LOGAI_OLLAMA_MODEL=llama3.1:8b
+```
+
+**Note**: Only models with function calling support will work (Llama 3.1, Mistral, etc.)
+
 ### Usage
 
 Start the interactive chat interface:
@@ -89,9 +125,11 @@ Once LogAI is running, try these example queries:
 
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
-| `LOGAI_LLM_PROVIDER` | LLM provider (anthropic/openai) | `anthropic` | Yes |
+| `LOGAI_LLM_PROVIDER` | LLM provider (anthropic/openai/ollama) | `anthropic` | Yes |
 | `LOGAI_ANTHROPIC_API_KEY` | Anthropic API key | - | If using Anthropic |
 | `LOGAI_OPENAI_API_KEY` | OpenAI API key | - | If using OpenAI |
+| `LOGAI_OLLAMA_BASE_URL` | Ollama base URL | `http://localhost:11434` | If using Ollama |
+| `LOGAI_OLLAMA_MODEL` | Ollama model name | `llama3.1:8b` | If using Ollama |
 | `LOGAI_PII_SANITIZATION_ENABLED` | Enable PII redaction | `true` | No |
 | `LOGAI_CACHE_DIR` | Cache directory path | `~/.logai/cache` | No |
 | `LOGAI_CACHE_MAX_SIZE_MB` | Max cache size (MB) | `500` | No |

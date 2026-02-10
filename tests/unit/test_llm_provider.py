@@ -20,8 +20,8 @@ def mock_settings():
     """Create mock settings."""
     settings = Mock(spec=LogAISettings)
     settings.llm_provider = "anthropic"
-    settings.current_llm_api_key = "test-api-key"
-    settings.current_llm_model = "claude-3-5-sonnet-20241022"
+    settings.anthropic_api_key = "test-api-key"
+    settings.anthropic_model = "claude-3-5-sonnet-20241022"
     return settings
 
 
@@ -250,3 +250,62 @@ class TestLiteLLMProvider:
 
             assert tokens == ["Hello", " ", "world"]
             assert "".join(tokens) == "Hello world"
+
+    def test_ollama_provider_initialization(self):
+        """Test Ollama provider initialization."""
+        provider = LiteLLMProvider(
+            provider="ollama",
+            api_key="",
+            model="llama3.1:8b",
+            api_base="http://localhost:11434",
+        )
+
+        assert provider.provider == "ollama"
+        assert provider.model == "llama3.1:8b"
+        assert provider.api_base == "http://localhost:11434"
+        assert provider.api_key == ""  # No API key for Ollama
+
+    def test_ollama_from_settings(self):
+        """Test creating Ollama provider from settings."""
+        settings = Mock(spec=LogAISettings)
+        settings.llm_provider = "ollama"
+        settings.ollama_base_url = "http://localhost:11434"
+        settings.ollama_model = "llama3.1:8b"
+
+        provider = LiteLLMProvider.from_settings(settings)
+
+        assert provider.provider == "ollama"
+        assert provider.model == "llama3.1:8b"
+        assert provider.api_base == "http://localhost:11434"
+        assert provider.api_key == ""
+
+    def test_ollama_model_name(self):
+        """Test Ollama model name formatting."""
+        provider = LiteLLMProvider(
+            provider="ollama",
+            api_key="",
+            model="llama3.1:8b",
+            api_base="http://localhost:11434",
+        )
+
+        assert provider._get_model_name() == "ollama/llama3.1:8b"
+
+    def test_anthropic_model_name(self):
+        """Test Anthropic model name formatting."""
+        provider = LiteLLMProvider(
+            provider="anthropic",
+            api_key="test-key",
+            model="claude-3-5-sonnet-20241022",
+        )
+
+        assert provider._get_model_name() == "anthropic/claude-3-5-sonnet-20241022"
+
+    def test_openai_model_name(self):
+        """Test OpenAI model name formatting."""
+        provider = LiteLLMProvider(
+            provider="openai",
+            api_key="test-key",
+            model="gpt-4-turbo-preview",
+        )
+
+        assert provider._get_model_name() == "openai/gpt-4-turbo-preview"

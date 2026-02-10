@@ -20,7 +20,7 @@ class LogAISettings(BaseSettings):
     )
 
     # === LLM Provider Configuration ===
-    llm_provider: Literal["anthropic", "openai"] = Field(
+    llm_provider: Literal["anthropic", "openai", "ollama"] = Field(
         default="anthropic",
         description="LLM provider to use",
     )
@@ -43,6 +43,17 @@ class LogAISettings(BaseSettings):
     openai_model: str = Field(
         default="gpt-4-turbo-preview",
         description="OpenAI model to use",
+    )
+
+    # === Ollama Configuration ===
+    ollama_base_url: str = Field(
+        default="http://localhost:11434",
+        description="Base URL for Ollama API",
+    )
+
+    ollama_model: str = Field(
+        default="llama3.1:8b",
+        description="Ollama model to use (must support function calling)",
     )
 
     # === AWS Configuration ===
@@ -132,6 +143,13 @@ class LogAISettings(BaseSettings):
         elif self.llm_provider == "openai":
             if not self.openai_api_key:
                 raise ValueError("LOGAI_OPENAI_API_KEY is required when using OpenAI provider")
+        elif self.llm_provider == "ollama":
+            # Ollama doesn't need API key, but needs base URL
+            if not self.ollama_base_url:
+                raise ValueError("LOGAI_OLLAMA_BASE_URL is required when using Ollama provider")
+            # No API key validation needed for local Ollama
+        else:
+            raise ValueError(f"Unsupported LLM provider: {self.llm_provider}")
 
         # Validate AWS credentials (either explicit or profile)
         if not self.aws_region:
@@ -163,6 +181,8 @@ class LogAISettings(BaseSettings):
             return self.anthropic_api_key or ""
         elif self.llm_provider == "openai":
             return self.openai_api_key or ""
+        elif self.llm_provider == "ollama":
+            return ""  # Ollama doesn't need API key
         raise ValueError(f"Unknown LLM provider: {self.llm_provider}")
 
     @property
@@ -172,6 +192,8 @@ class LogAISettings(BaseSettings):
             return self.anthropic_model
         elif self.llm_provider == "openai":
             return self.openai_model
+        elif self.llm_provider == "ollama":
+            return self.ollama_model
         raise ValueError(f"Unknown LLM provider: {self.llm_provider}")
 
 

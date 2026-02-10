@@ -32,28 +32,32 @@ class LiteLLMProvider(BaseLLMProvider):
         model: str,
         temperature: float = 0.7,
         max_tokens: int | None = None,
+        api_base: str | None = None,
     ):
         """
         Initialize LiteLLM provider.
 
         Args:
-            provider: Provider name ('anthropic' or 'openai')
-            api_key: API key for the provider
-            model: Model name (e.g., 'claude-3-5-sonnet-20241022', 'gpt-4-turbo-preview')
+            provider: Provider name ('anthropic', 'openai', or 'ollama')
+            api_key: API key for the provider (empty string for Ollama)
+            model: Model name (e.g., 'claude-3-5-sonnet-20241022', 'gpt-4-turbo-preview', 'llama3.1:8b')
             temperature: Sampling temperature (0.0 to 1.0)
             max_tokens: Maximum tokens to generate (None for default)
+            api_base: Base URL for API (used by Ollama)
         """
         self.provider = provider
         self.api_key = api_key
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.api_base = api_base
 
         # Set API key in environment for litellm
         if provider == "anthropic":
             litellm.api_key = api_key
         elif provider == "openai":
             litellm.openai_key = api_key
+        # Ollama doesn't need API key to be set
 
     @classmethod
     def from_settings(cls, settings: LogAISettings) -> "LiteLLMProvider":
@@ -66,11 +70,27 @@ class LiteLLMProvider(BaseLLMProvider):
         Returns:
             Configured LiteLLMProvider instance
         """
-        return cls(
-            provider=settings.llm_provider,
-            api_key=settings.current_llm_api_key,
-            model=settings.current_llm_model,
-        )
+        if settings.llm_provider == "anthropic":
+            return cls(
+                provider="anthropic",
+                api_key=settings.anthropic_api_key or "",
+                model=settings.anthropic_model,
+            )
+        elif settings.llm_provider == "openai":
+            return cls(
+                provider="openai",
+                api_key=settings.openai_api_key or "",
+                model=settings.openai_model,
+            )
+        elif settings.llm_provider == "ollama":
+            return cls(
+                provider="ollama",
+                api_key="",  # Ollama doesn't need API key
+                model=settings.ollama_model,
+                api_base=settings.ollama_base_url,
+            )
+        else:
+            raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
 
     async def chat(
         self,
@@ -100,10 +120,18 @@ class LiteLLMProvider(BaseLLMProvider):
         try:
             # Prepare litellm parameters
             params: dict[str, Any] = {
-                "model": self.model,
+                "model": self._get_model_name(),
                 "messages": messages,
                 "temperature": kwargs.get("temperature", self.temperature),
             }
+
+            # Add API base for Ollama
+            if self.api_base:
+                params["api_base"] = self.api_base
+
+            # Only add API key if it's not empty (Ollama doesn't need it)
+            if self.api_key:
+                params["api_key"] = self.api_key
 
             if self.max_tokens:
                 params["max_tokens"] = self.max_tokens
@@ -177,11 +205,19 @@ class LiteLLMProvider(BaseLLMProvider):
         try:
             # Prepare litellm parameters
             params: dict[str, Any] = {
-                "model": self.model,
+                "model": self._get_model_name(),
                 "messages": messages,
                 "temperature": kwargs.get("temperature", self.temperature),
                 "stream": True,
             }
+
+            # Add API base for Ollama
+            if self.api_base:
+                params["api_base"] = self.api_base
+
+            # Only add API key if it's not empty (Ollama doesn't need it)
+            if self.api_key:
+                params["api_key"] = self.api_key
 
             if self.max_tokens:
                 params["max_tokens"] = self.max_tokens
@@ -202,6 +238,22 @@ class LiteLLMProvider(BaseLLMProvider):
 
         except Exception as e:
             self._handle_error(e)
+
+    def _get_model_name(self) -> str:
+        """
+        Get the full model name for LiteLLM.
+
+        Returns:
+            Model name in the format expected by LiteLLM
+        """
+        if self.provider == "anthropic":
+            return f"anthropic/{self.model}"
+        elif self.provider == "openai":
+            return f"openai/{self.model}"
+        elif self.provider == "ollama":
+            return f"ollama/{self.model}"
+        else:
+            return self.model
 
     def _handle_error(self, error: Exception) -> None:
         """

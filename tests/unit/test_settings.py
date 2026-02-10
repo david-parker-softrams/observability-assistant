@@ -190,6 +190,45 @@ class TestLogAISettings:
         settings = LogAISettings()  # type: ignore
         assert settings.cache_max_size_mb == 100
 
+    def test_ollama_configuration(self, clean_env: None) -> None:
+        """Test Ollama LLM configuration."""
+        os.environ["LOGAI_LLM_PROVIDER"] = "ollama"
+        os.environ["LOGAI_OLLAMA_BASE_URL"] = "http://localhost:11434"
+        os.environ["LOGAI_OLLAMA_MODEL"] = "llama3.1:8b"
+        os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
+
+        settings = LogAISettings()  # type: ignore
+
+        assert settings.llm_provider == "ollama"
+        assert settings.ollama_base_url == "http://localhost:11434"
+        assert settings.ollama_model == "llama3.1:8b"
+        assert settings.current_llm_model == "llama3.1:8b"
+
+    def test_ollama_no_api_key_required(self, clean_env: None) -> None:
+        """Test that Ollama doesn't require API key."""
+        os.environ["LOGAI_LLM_PROVIDER"] = "ollama"
+        os.environ["LOGAI_OLLAMA_BASE_URL"] = "http://localhost:11434"
+        os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
+
+        settings = LogAISettings()  # type: ignore
+
+        # Should not raise an error even without API key
+        settings.validate_required_credentials()
+
+        # API key should be empty for Ollama
+        assert settings.current_llm_api_key == ""
+
+    def test_ollama_missing_base_url(self, clean_env: None) -> None:
+        """Test that Ollama requires base URL."""
+        os.environ["LOGAI_LLM_PROVIDER"] = "ollama"
+        os.environ["LOGAI_OLLAMA_BASE_URL"] = ""
+        os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
+
+        settings = LogAISettings()  # type: ignore
+
+        with pytest.raises(ValueError, match="LOGAI_OLLAMA_BASE_URL is required"):
+            settings.validate_required_credentials()
+
 
 class TestGlobalSettings:
     """Test global settings functions."""
