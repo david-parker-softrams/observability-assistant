@@ -1,6 +1,7 @@
 """Main chat screen for LogAI TUI."""
 
 import asyncio
+import logging
 
 from textual import on, work
 from textual.app import ComposeResult
@@ -21,6 +22,8 @@ from logai.ui.widgets.messages import (
     UserMessage,
 )
 from logai.ui.widgets.status_bar import StatusBar
+
+logger = logging.getLogger(__name__)
 
 
 class ChatScreen(Screen[None]):
@@ -66,19 +69,36 @@ class ChatScreen(Screen[None]):
         yield Container(ChatInput(), id="input-container")
         yield StatusBar(model=self.settings.current_llm_model)
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
         """Set up the screen when mounted."""
-        # Add welcome message
-        messages_container = self.query_one("#messages-container", VerticalScroll)
-        welcome = SystemMessage(
-            "Welcome to LogAI! Ask me about your AWS CloudWatch logs.\n"
-            "Type /help for available commands."
-        )
-        messages_container.mount(welcome)
+        try:
+            logger.info("Mounting ChatScreen")
 
-        # Focus the input
-        chat_input = self.query_one(ChatInput)
-        chat_input.focus()
+            # Add welcome message
+            messages_container = self.query_one("#messages-container", VerticalScroll)
+            welcome = SystemMessage(
+                "Welcome to LogAI! Ask me about your AWS CloudWatch logs.\n"
+                "Type /help for available commands."
+            )
+            messages_container.mount(welcome)
+
+            # Focus the input
+            chat_input = self.query_one(ChatInput)
+            chat_input.focus()
+
+            logger.info("ChatScreen mounted successfully")
+
+        except Exception as e:
+            logger.error(f"Error mounting ChatScreen: {e}", exc_info=True)
+            # Still try to show an error to the user if possible
+            try:
+                messages_container = self.query_one("#messages-container", VerticalScroll)
+                error_msg = ErrorMessage(f"Failed to initialize chat: {str(e)}")
+                messages_container.mount(error_msg)
+            except Exception:
+                # If we can't even show the error, log it and re-raise
+                logger.critical("Failed to display error message to user", exc_info=True)
+                raise
 
     @on(Input.Submitted)
     async def on_input_submitted(self, event: Input.Submitted) -> None:
