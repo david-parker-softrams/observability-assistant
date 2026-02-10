@@ -8,7 +8,7 @@ Screen {
 /* Header styles */
 Header {
     background: $primary;
-    color: $text;
+    color: $foreground;
     height: 3;
 }
 
@@ -16,12 +16,14 @@ Header {
 #messages-container {
     background: $surface;
     border: solid $primary;
+    height: 1fr;
 }
 
 /* Message styles */
 .user-message {
+    height: auto;
     background: $primary;
-    color: $text;
+    color: $foreground;
     padding: 1 2;
     margin: 1 0 1 4;
     border: solid $primary-darken-2;
@@ -29,8 +31,9 @@ Header {
 }
 
 .assistant-message {
+    height: auto;
     background: $panel;
-    color: $text;
+    color: $foreground;
     padding: 1 2;
     margin: 1 4 1 0;
     border: solid $panel-darken-2;
@@ -38,8 +41,9 @@ Header {
 }
 
 .system-message {
+    height: auto;
     background: $surface;
-    color: $text-muted;
+    color: $text-disabled;
     padding: 1 2;
     margin: 1;
     text-align: center;
@@ -47,16 +51,18 @@ Header {
 }
 
 .loading-indicator {
+    height: auto;
     background: $panel;
-    color: $text-muted;
+    color: $text-disabled;
     padding: 1 2;
     margin: 1 4 1 0;
     border: solid $panel-darken-2;
 }
 
 .error-message {
+    height: auto;
     background: $error;
-    color: $text;
+    color: $foreground;
     padding: 1 2;
     margin: 1;
     border: solid $error-darken-2;
@@ -84,7 +90,7 @@ ChatInput:focus {
 StatusBar {
     height: 1;
     background: $panel;
-    color: $text-muted;
+    color: $text-disabled;
     padding: 0 2;
     dock: bottom;
 }
