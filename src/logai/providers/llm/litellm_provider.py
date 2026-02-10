@@ -136,7 +136,8 @@ class LiteLLMProvider(BaseLLMProvider):
             if self.max_tokens:
                 params["max_tokens"] = self.max_tokens
 
-            if tools:
+            # Only send tools to providers that support them (not Ollama)
+            if tools and self.provider in ["anthropic", "openai"]:
                 params["tools"] = tools
 
             # Run litellm completion in executor (it's synchronous)
@@ -222,7 +223,8 @@ class LiteLLMProvider(BaseLLMProvider):
             if self.max_tokens:
                 params["max_tokens"] = self.max_tokens
 
-            if tools:
+            # Only send tools to providers that support them (not Ollama)
+            if tools and self.provider in ["anthropic", "openai"]:
                 params["tools"] = tools
 
             # Run litellm streaming in executor
