@@ -49,27 +49,33 @@ class CloudWatchDataSource(BaseDataSource):
         )
 
         # Create CloudWatch Logs client
-        # boto3 will use standard credential chain:
-        # 1. Explicit credentials (if provided)
-        # 2. Environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
-        # 3. Shared credential file (~/.aws/credentials)
-        # 4. AWS config file (~/.aws/config)
-        # 5. IAM role (if running on EC2/ECS/Lambda)
+        # Credential priority: Profile > Explicit Keys > Default Chain
+        # When profile is specified, ignore explicit keys from environment
+        # to prevent expired environment credentials from overriding profile
         client_kwargs: dict[str, Any] = {
             "service_name": "logs",
             "region_name": settings.aws_region,
             "config": self.config,
         }
 
-        if settings.aws_access_key_id and settings.aws_secret_access_key:
+        if settings.aws_profile:
+            # Use a session with profile - this ignores environment AWS_* variables
+            # when credentials are loaded from the profile
+            session = boto3.Session(
+                profile_name=settings.aws_profile, region_name=settings.aws_region
+            )
+            self.client = session.client("logs", config=self.config)
+        elif settings.aws_access_key_id and settings.aws_secret_access_key:
+            # Explicit credentials provided (not from environment)
             client_kwargs["aws_access_key_id"] = settings.aws_access_key_id
             client_kwargs["aws_secret_access_key"] = settings.aws_secret_access_key
-
-        if settings.aws_profile:
-            # Use a session with profile
-            session = boto3.Session(profile_name=settings.aws_profile)
-            self.client = session.client(**client_kwargs)
+            self.client = boto3.client(**client_kwargs)
         else:
+            # Use default credential chain:
+            # 1. Environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
+            # 2. Shared credential file (~/.aws/credentials)
+            # 3. AWS config file (~/.aws/config)
+            # 4. IAM role (if running on EC2/ECS/Lambda)
             self.client = boto3.client(**client_kwargs)
 
     @retry(
