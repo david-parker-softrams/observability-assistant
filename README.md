@@ -103,6 +103,85 @@ Or run as a Python module:
 python -m logai
 ```
 
+## 🔧 Command-Line Arguments
+
+LogAI supports command-line arguments to override AWS configuration without modifying environment variables or `.env` files. This is especially useful for DevOps engineers and SREs who frequently switch between AWS accounts, profiles, or regions.
+
+### AWS Profile and Region
+
+Specify AWS profile and region directly via CLI arguments:
+
+```bash
+# Use a specific AWS profile
+logai --aws-profile my-profile
+
+# Specify both profile and region
+logai --aws-profile prod --aws-region us-west-2
+
+# Override environment variables
+AWS_PROFILE=dev logai --aws-profile prod  # Uses 'prod', not 'dev'
+```
+
+### Configuration Precedence
+
+When determining which AWS configuration to use, LogAI follows this precedence order (highest to lowest):
+
+1. **Command-line arguments** (`--aws-profile`, `--aws-region`) - Highest priority
+2. **Environment variables** (`AWS_PROFILE`, `AWS_DEFAULT_REGION`)
+3. **Values from `.env` file**
+4. **AWS default credential chain** (for profiles only)
+
+**Key principle:** Command-line arguments always override environment variables and `.env` file settings.
+
+### Practical Examples
+
+**Switch between environments without changing `.env`:**
+```bash
+# Query production logs
+logai --aws-profile prod --aws-region us-east-1
+
+# Then query staging without modifying any files
+logai --aws-profile staging --aws-region us-west-2
+```
+
+**Use different profiles for different accounts:**
+```bash
+# Client A logs
+logai --aws-profile client-a
+
+# Client B logs
+logai --aws-profile client-b
+```
+
+**Override environment for one-off queries:**
+```bash
+# Your .env has AWS_PROFILE=dev, but you need to check prod
+logai --aws-profile prod
+```
+
+**View configuration at startup:**
+
+When you launch LogAI with CLI arguments, the startup output shows which configuration is active and where it came from:
+
+```
+LogAI v0.1.0
+✓ LLM Provider: anthropic
+✓ LLM Model: claude-3-5-sonnet-20241022
+✓ AWS Region: us-west-2 (from CLI argument)
+✓ AWS Profile: prod (from CLI argument)
+✓ PII Sanitization: Enabled
+✓ Cache Directory: ~/.logai/cache
+```
+
+### Available CLI Options
+
+| Argument | Description | Example |
+|----------|-------------|---------|
+| `--aws-profile PROFILE` | AWS profile name for CloudWatch access | `--aws-profile prod` |
+| `--aws-region REGION` | AWS region for CloudWatch | `--aws-region us-west-2` |
+| `--version` | Display LogAI version | `--version` |
+| `--help` | Show help message and examples | `--help` |
+
 ## 💬 Example Queries
 
 Once LogAI is running, try these example queries:
@@ -133,12 +212,14 @@ Once LogAI is running, try these example queries:
 | `LOGAI_PII_SANITIZATION_ENABLED` | Enable PII redaction | `true` | No |
 | `LOGAI_CACHE_DIR` | Cache directory path | `~/.logai/cache` | No |
 | `LOGAI_CACHE_MAX_SIZE_MB` | Max cache size (MB) | `500` | No |
-| `AWS_DEFAULT_REGION` | AWS region | - | Yes |
+| `AWS_DEFAULT_REGION` | AWS region (overridden by `--aws-region`) | - | Yes |
 | `AWS_ACCESS_KEY_ID` | AWS access key | - | Yes* |
 | `AWS_SECRET_ACCESS_KEY` | AWS secret key | - | Yes* |
-| `AWS_PROFILE` | AWS CLI profile | - | Yes* |
+| `AWS_PROFILE` | AWS CLI profile (overridden by `--aws-profile`) | - | Yes* |
 
 \* Either provide `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` or `AWS_PROFILE`
+
+**Note:** AWS-related environment variables can be overridden using command-line arguments. See [Command-Line Arguments](#-command-line-arguments) for details.
 
 ### Special Commands
 

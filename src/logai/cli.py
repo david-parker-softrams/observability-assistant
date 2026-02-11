@@ -23,9 +23,11 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  logai                    # Start interactive TUI chat
-  logai --version         # Show version information
-  logai --help            # Show this help message
+  logai                                      # Start with default configuration
+  logai --aws-profile my-profile             # Use specific AWS profile
+  logai --aws-profile prod --aws-region us-west-2  # Use profile and region
+  logai --version                            # Show version information
+  logai --help                               # Show this help message
 
 Environment Variables:
   LOGAI_LLM_PROVIDER              # LLM provider: anthropic (default) or openai
@@ -33,9 +35,12 @@ Environment Variables:
   LOGAI_OPENAI_API_KEY            # OpenAI API key
   LOGAI_PII_SANITIZATION_ENABLED  # Enable PII sanitization (default: true)
   LOGAI_CACHE_DIR                 # Cache directory (default: ~/.logai/cache)
-  AWS_DEFAULT_REGION              # AWS region for CloudWatch
+  AWS_DEFAULT_REGION              # AWS region (can be overridden with --aws-region)
+  AWS_PROFILE                     # AWS profile (can be overridden with --aws-profile)
   AWS_ACCESS_KEY_ID               # AWS credentials
   AWS_SECRET_ACCESS_KEY           # AWS credentials
+
+Note: Command-line arguments take precedence over environment variables.
 
 For more information, visit: https://github.com/logai/logai
         """,
@@ -54,12 +59,36 @@ For more information, visit: https://github.com/logai/logai
         default=None,
     )
 
-    # Parse arguments (reserved for future use)
-    _ = parser.parse_args()
+    parser.add_argument(
+        "--aws-profile",
+        type=str,
+        help="AWS profile name to use for CloudWatch access (overrides AWS_PROFILE)",
+        default=None,
+        metavar="PROFILE",
+    )
+
+    parser.add_argument(
+        "--aws-region",
+        type=str,
+        help="AWS region for CloudWatch (overrides AWS_DEFAULT_REGION)",
+        default=None,
+        metavar="REGION",
+    )
+
+    # Parse arguments
+    args = parser.parse_args()
 
     # Load and validate configuration
     try:
         settings = get_settings()
+
+        # Override AWS settings from CLI arguments if provided
+        # CLI arguments take precedence over environment variables
+        if args.aws_profile is not None:
+            settings.aws_profile = args.aws_profile
+        if args.aws_region is not None:
+            settings.aws_region = args.aws_region
+
         settings.validate_required_credentials()
         settings.ensure_cache_dir_exists()
     except ValueError as e:
@@ -81,7 +110,16 @@ For more information, visit: https://github.com/logai/logai
     print(f"LogAI v{__version__}")
     print(f"✓ LLM Provider: {settings.llm_provider}")
     print(f"✓ LLM Model: {settings.current_llm_model}")
-    print(f"✓ AWS Region: {settings.aws_region}")
+
+    # Show AWS region with source indication
+    region_source = "CLI argument" if args.aws_region else "environment/default"
+    print(f"✓ AWS Region: {settings.aws_region} (from {region_source})")
+
+    # Show AWS profile if configured
+    if settings.aws_profile:
+        profile_source = "CLI argument" if args.aws_profile else "environment"
+        print(f"✓ AWS Profile: {settings.aws_profile} (from {profile_source})")
+
     print(f"✓ PII Sanitization: {'Enabled' if settings.pii_sanitization_enabled else 'Disabled'}")
     print(f"✓ Cache Directory: {settings.cache_dir}")
     print("\nInitializing components...")

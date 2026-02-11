@@ -36,10 +36,21 @@ Start the TUI:
 logai
 ```
 
+With AWS profile and region options:
+```bash
+# Use specific AWS profile
+logai --aws-profile prod
+
+# Specify profile and region
+logai --aws-profile prod --aws-region us-west-2
+```
+
 The application will:
-1. Load and validate configuration
+1. Load and validate configuration (including CLI arguments)
 2. Initialize all components (LLM, CloudWatch, cache)
 3. Launch the interactive chat interface
+
+See the [README](../README.md#-command-line-arguments) for more details on CLI arguments.
 
 ## Architecture
 
@@ -114,7 +125,8 @@ pytest tests/unit/test_commands.py -v
 LogAI v0.1.0
 ✓ LLM Provider: anthropic
 ✓ LLM Model: claude-3-5-sonnet-20241022
-✓ AWS Region: us-east-1
+✓ AWS Region: us-east-1 (from environment/default)
+✓ AWS Profile: prod (from CLI argument)
 ✓ PII Sanitization: Enabled
 ✓ Cache Directory: /Users/user/.logai/cache
 
