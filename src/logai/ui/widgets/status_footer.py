@@ -2,6 +2,7 @@
 
 from rich.text import Text
 from textual.reactive import reactive
+from textual.renderables.blank import Blank
 from textual.widgets import Footer
 
 
@@ -103,7 +104,20 @@ class StatusFooter(Footer):
 
         # Get terminal width to calculate spacing
         width = self.size.width
-        shortcuts_width = len(base_render.plain)
+
+        # Handle different render types from parent Footer
+        # Footer returns Blank when there are no bindings to show
+        # Footer returns Text when there are keyboard shortcuts
+        if isinstance(base_render, Blank):
+            # No shortcuts to show, just display status info
+            shortcuts_width = 0
+        elif hasattr(base_render, "plain"):
+            # base_render is a Text object with keyboard shortcuts
+            shortcuts_width = len(base_render.plain)
+        else:
+            # Fallback for unknown types - assume no shortcuts
+            shortcuts_width = 0
+
         status_width = len(status_text.plain)
 
         # Calculate padding needed to push status to the right
@@ -111,13 +125,26 @@ class StatusFooter(Footer):
 
         if padding_needed > 0:
             # Add padding to base render and append status
-            result = Text(base_render)
-            result.append(" " * padding_needed)
-            result.append(status_text)
+            if isinstance(base_render, Blank):
+                # Create new Text with status on the right
+                result = Text(" " * padding_needed)
+                result.append(status_text)
+            else:
+                # Add padding to base render (shortcuts) and append status
+                # Make a copy of the Text object
+                result = Text()
+                result.append(base_render)
+                result.append(" " * padding_needed)
+                result.append(status_text)
             return result
         else:
-            # Not enough space, just show shortcuts (footer takes priority)
-            return base_render
+            # Not enough space for status info
+            if isinstance(base_render, Blank):
+                # No shortcuts, return just status (truncated if needed)
+                return status_text
+            else:
+                # Show shortcuts only (footer takes priority)
+                return base_render
 
     def set_status(self, status: str) -> None:
         """
