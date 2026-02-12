@@ -281,6 +281,24 @@ Before giving up on a search:
 - You MUST have used at least 2 different parameter combinations
 - You SHOULD expand time ranges before concluding "no logs found"
 
+## Cached Result Handling
+
+When you receive a tool result with "cached": true:
+1. The full result was too large for context and has been cached
+2. You MUST immediately use fetch_cached_result_chunk(cache_id, offset, limit) to retrieve events
+3. Start with offset=0, limit=100 for the first chunk
+4. Analyze the chunk and decide if more data is needed to answer the user's question
+5. Fetch additional chunks if necessary (increment offset by limit)
+6. DO NOT wait for the user to ask - proceed automatically with chunk fetching
+
+The fetch_cached_result_chunk tool supports:
+- offset: Starting index (0-based)
+- limit: Number of events (max 200)
+- filter_pattern: Text to search for (case-insensitive)
+- time_start/time_end: Unix timestamps to filter by time range
+
+Always fetch at least one chunk to provide concrete results to the user.
+
 ## Context
 Current time: {current_time}
 """
@@ -323,6 +341,9 @@ Current time: {current_time}
 
         # Runtime context injections (for /refresh updates)
         self._pending_context_injection: str | None = None
+
+        # Track pending context injections for cached results
+        self._pending_cache_guidance: dict[str, Any] | None = None
 
         # Context management components
         self.budget_tracker = ContextBudgetTracker(
@@ -411,6 +432,26 @@ Use this tool to find available log groups before querying logs."""
 
     def _get_pending_context_injection(self) -> str | None:
         """Get and clear any pending context injection."""
+        # Check for cache guidance first (higher priority)
+        if self._pending_cache_guidance and self.settings.enable_auto_fetch_guidance:
+            guidance = self._pending_cache_guidance
+            self._pending_cache_guidance = None  # Clear after use
+
+            return f"""SYSTEM INSTRUCTION: The previous tool call returned a large result that was automatically cached.
+
+Cache ID: {guidance["cache_id"]}
+Total Events: {guidance["total_events"]}
+
+You MUST now fetch chunks to show the user actual log events:
+1. Immediately call: fetch_cached_result_chunk(cache_id="{guidance["cache_id"]}", offset=0, limit={self.settings.initial_chunk_size})
+2. Analyze the results and determine if they answer the user's question
+3. If needed, fetch more chunks with increased offset: fetch_cached_result_chunk(cache_id="{guidance["cache_id"]}", offset={self.settings.initial_chunk_size}, limit={self.settings.initial_chunk_size})
+4. Provide a comprehensive response to the user with actual log events
+
+DO NOT just acknowledge the cache - the user expects to see log events. Execute the fetch immediately.
+"""
+
+        # Fall back to regular context injection (e.g., /refresh updates)
         injection = self._pending_context_injection
         self._pending_context_injection = None
         return injection
@@ -494,6 +535,13 @@ Use this tool to find available log groups before querying logs."""
                     query_params=query_params,
                     result=result_data,
                 )
+
+                # Store pending injection for next LLM call
+                self._pending_cache_guidance = {
+                    "cache_id": summary.cache_id,
+                    "tool_name": tool_name,
+                    "total_events": summary.total_events,
+                }
 
                 # Use summary instead of full result
                 modified_result = summary.to_context_dict()

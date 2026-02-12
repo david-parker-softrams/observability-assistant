@@ -716,3 +716,229 @@ class TestIntegration:
             f"Budget tracker ({usage_after.history_tokens}) should match actual "
             f"({actual_tokens}) within {tolerance} tokens"
         )
+
+
+class TestCachedResultGuidance:
+    """Test automatic guidance for fetching cached results."""
+
+    @pytest.mark.asyncio
+    async def test_cached_result_triggers_guidance_injection(
+        self, settings, mock_llm_provider, mock_sanitizer, mock_result_cache
+    ):
+        """Test that caching a result triggers guidance injection."""
+        settings.enable_result_caching = True
+        settings.cache_large_results_threshold = 1000
+        settings.enable_auto_fetch_guidance = True
+
+        orchestrator = LLMOrchestrator(
+            llm_provider=mock_llm_provider,
+            tool_registry=ToolRegistry,
+            sanitizer=mock_sanitizer,
+            settings=settings,
+            result_cache=mock_result_cache,
+        )
+
+        # Simulate a large tool result that gets cached
+        large_result = {
+            "success": True,
+            "events": [{"message": f"log {i}"} for i in range(1000)],
+            "count": 1000,
+        }
+        tool_result = {
+            "tool_call_id": "call_123",
+            "result": large_result,
+        }
+
+        processed = await orchestrator._process_tool_result(tool_result, "query_logs")
+
+        # Should have cached result
+        assert processed["result"]["cached"] is True
+
+        # Should have pending guidance
+        assert orchestrator._pending_cache_guidance is not None
+        assert "cache_id" in orchestrator._pending_cache_guidance
+        assert orchestrator._pending_cache_guidance["tool_name"] == "query_logs"
+        assert orchestrator._pending_cache_guidance["total_events"] == 1000
+
+        # Get the injection
+        injection = orchestrator._get_pending_context_injection()
+        assert injection is not None
+        assert "fetch_cached_result_chunk" in injection
+        assert orchestrator._pending_cache_guidance is None  # Should be cleared
+
+    @pytest.mark.asyncio
+    async def test_auto_fetch_guidance_can_be_disabled(
+        self, settings, mock_llm_provider, mock_sanitizer, mock_result_cache
+    ):
+        """Test that auto-fetch guidance can be disabled via settings."""
+        settings.enable_result_caching = True
+        settings.cache_large_results_threshold = 1000
+        settings.enable_auto_fetch_guidance = False  # Disabled
+
+        orchestrator = LLMOrchestrator(
+            llm_provider=mock_llm_provider,
+            tool_registry=ToolRegistry,
+            sanitizer=mock_sanitizer,
+            settings=settings,
+            result_cache=mock_result_cache,
+        )
+
+        # Simulate large result
+        large_result = {
+            "success": True,
+            "events": [{"message": f"log {i}"} for i in range(1000)],
+            "count": 1000,
+        }
+        tool_result = {
+            "tool_call_id": "call_123",
+            "result": large_result,
+        }
+
+        await orchestrator._process_tool_result(tool_result, "query_logs")
+
+        # Should have pending guidance stored
+        assert orchestrator._pending_cache_guidance is not None
+
+        # But injection should NOT be returned when disabled
+        injection = orchestrator._get_pending_context_injection()
+        assert injection is None
+
+    @pytest.mark.asyncio
+    async def test_initial_chunk_size_setting_used_in_guidance(
+        self, settings, mock_llm_provider, mock_sanitizer, mock_result_cache
+    ):
+        """Test that initial_chunk_size setting is reflected in guidance."""
+        settings.enable_result_caching = True
+        settings.enable_auto_fetch_guidance = True
+        settings.initial_chunk_size = 150  # Custom size
+
+        orchestrator = LLMOrchestrator(
+            llm_provider=mock_llm_provider,
+            tool_registry=ToolRegistry,
+            sanitizer=mock_sanitizer,
+            settings=settings,
+            result_cache=mock_result_cache,
+        )
+
+        # Trigger cache
+        large_result = {
+            "success": True,
+            "events": [{"message": f"log {i}"} for i in range(1000)],
+            "count": 1000,
+        }
+        tool_result = {"tool_call_id": "call_123", "result": large_result}
+        await orchestrator._process_tool_result(tool_result, "query_logs")
+
+        # Check injection uses custom chunk size
+        injection = orchestrator._get_pending_context_injection()
+        assert injection is not None
+        assert "limit=150" in injection
+
+    @pytest.mark.asyncio
+    async def test_cache_guidance_includes_cache_id_in_injection(
+        self, settings, mock_llm_provider, mock_sanitizer, mock_result_cache
+    ):
+        """Test that cache_id is included in the injection message."""
+        settings.enable_result_caching = True
+        settings.enable_auto_fetch_guidance = True
+
+        orchestrator = LLMOrchestrator(
+            llm_provider=mock_llm_provider,
+            tool_registry=ToolRegistry,
+            sanitizer=mock_sanitizer,
+            settings=settings,
+            result_cache=mock_result_cache,
+        )
+
+        # Trigger cache
+        large_result = {
+            "success": True,
+            "events": [{"message": f"log {i}"} for i in range(1000)],
+            "count": 1000,
+        }
+        tool_result = {"tool_call_id": "call_123", "result": large_result}
+        processed = await orchestrator._process_tool_result(tool_result, "query_logs")
+
+        cache_id = processed["result"]["cache_id"]
+
+        # Check injection includes the cache_id
+        injection = orchestrator._get_pending_context_injection()
+        assert injection is not None
+        assert f'cache_id="{cache_id}"' in injection
+
+    @pytest.mark.asyncio
+    async def test_pending_cache_guidance_cleared_after_use(
+        self, settings, mock_llm_provider, mock_sanitizer, mock_result_cache
+    ):
+        """Test that pending cache guidance is cleared after being retrieved."""
+        settings.enable_result_caching = True
+        settings.enable_auto_fetch_guidance = True
+
+        orchestrator = LLMOrchestrator(
+            llm_provider=mock_llm_provider,
+            tool_registry=ToolRegistry,
+            sanitizer=mock_sanitizer,
+            settings=settings,
+            result_cache=mock_result_cache,
+        )
+
+        # Trigger cache
+        large_result = {
+            "success": True,
+            "events": [{"message": f"log {i}"} for i in range(1000)],
+            "count": 1000,
+        }
+        tool_result = {"tool_call_id": "call_123", "result": large_result}
+        await orchestrator._process_tool_result(tool_result, "query_logs")
+
+        # Verify pending guidance exists
+        assert orchestrator._pending_cache_guidance is not None
+
+        # Get the injection (should clear it)
+        injection = orchestrator._get_pending_context_injection()
+        assert injection is not None
+
+        # Verify guidance was cleared
+        assert orchestrator._pending_cache_guidance is None
+
+        # Second call should return None
+        injection2 = orchestrator._get_pending_context_injection()
+        assert injection2 is None
+
+    @pytest.mark.asyncio
+    async def test_cache_guidance_prioritized_over_regular_injection(
+        self, settings, mock_llm_provider, mock_sanitizer, mock_result_cache
+    ):
+        """Test that cache guidance takes priority over regular context injection."""
+        settings.enable_result_caching = True
+        settings.enable_auto_fetch_guidance = True
+
+        orchestrator = LLMOrchestrator(
+            llm_provider=mock_llm_provider,
+            tool_registry=ToolRegistry,
+            sanitizer=mock_sanitizer,
+            settings=settings,
+            result_cache=mock_result_cache,
+        )
+
+        # Set a regular context injection
+        orchestrator.inject_context_update("Regular context update")
+
+        # Trigger cache (should set cache guidance)
+        large_result = {
+            "success": True,
+            "events": [{"message": f"log {i}"} for i in range(1000)],
+            "count": 1000,
+        }
+        tool_result = {"tool_call_id": "call_123", "result": large_result}
+        await orchestrator._process_tool_result(tool_result, "query_logs")
+
+        # Get injection - should be cache guidance, not regular injection
+        injection = orchestrator._get_pending_context_injection()
+        assert injection is not None
+        assert "fetch_cached_result_chunk" in injection
+        assert "Regular context update" not in injection
+
+        # Regular injection should still be pending
+        injection2 = orchestrator._get_pending_context_injection()
+        assert injection2 == "Regular context update"

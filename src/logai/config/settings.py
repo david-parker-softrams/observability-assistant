@@ -248,6 +248,26 @@ class LogAISettings(BaseSettings):
         description="Enable summarization of pruned history (future feature)",
     )
 
+    # === Cached result agent guidance settings ===
+    enable_auto_fetch_guidance: bool = Field(
+        default=True,
+        description="Automatically guide agent to fetch cached result chunks",
+    )
+
+    initial_chunk_size: int = Field(
+        default=100,
+        ge=50,
+        le=200,
+        description="Default number of events in first chunk fetch",
+    )
+
+    max_auto_chunk_fetches: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Maximum number of automatic chunk fetches per turn",
+    )
+
     # === Context Allocation Strategy ===
     context_allocation_strategy: Literal["adaptive", "history-focused", "result-focused"] = Field(
         default="adaptive",
