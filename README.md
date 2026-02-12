@@ -347,36 +347,65 @@ LogAI follows a layered architecture:
 
 ### Running Tests
 
+Run all checks (tests + type checking + linting):
 ```bash
-# Run all tests
-pytest
+./scripts/test.sh
+```
 
-# Run with coverage
+Or run individually:
+```bash
+pytest                  # Tests only
+mypy src/logai/        # Type checking only
+ruff check src/logai/  # Linting only
+```
+
+Run with coverage:
+```bash
 pytest --cov=logai --cov-report=html
+```
 
-# Run specific test file
+Run specific test file:
+```bash
 pytest tests/unit/test_sanitizer.py
+```
 
-# Run integration tests (requires AWS credentials)
+Run integration tests (requires AWS credentials):
+```bash
 pytest tests/integration/
 ```
 
-### Type Checking
+### Pre-commit Hooks
 
+Install pre-commit hooks (recommended):
 ```bash
-mypy src/logai
+pip install -e ".[dev]"
+pre-commit install
 ```
 
-### Linting
-
+Run manually:
 ```bash
-ruff check src/logai tests/
+pre-commit run --all-files
 ```
+
+Pre-commit hooks will automatically:
+- Run type checking with mypy
+- Run linting with ruff (and auto-fix issues)
+- Format code with ruff
+- Check for trailing whitespace
+- Ensure files end with newline
+- Validate YAML files
 
 ### Code Formatting
 
+Format code automatically:
 ```bash
-ruff format src/logai tests/
+./scripts/format.sh
+```
+
+Or manually:
+```bash
+ruff format src/logai/ tests/
+ruff check --fix src/logai/ tests/
 ```
 
 ## 📚 Documentation

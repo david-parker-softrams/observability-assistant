@@ -5,7 +5,6 @@ import logging
 from typing import Any
 
 from textual.app import ComposeResult
-from textual.containers import VerticalScroll
 from textual.widgets import Static, Tree
 from textual.widgets.tree import TreeNode
 
@@ -66,11 +65,11 @@ class ToolCallsSidebar(Static):
     # Maximum number of tool calls to display
     MAX_DISPLAYED_CALLS = 20
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Any) -> None:
         """Initialize the tool calls sidebar."""
         super().__init__(**kwargs)
         self._history: list[ToolCallRecord] = []
-        self._tree: Tree | None = None
+        self._tree: Tree[Any] | None = None
 
     def compose(self) -> ComposeResult:
         """Compose the sidebar layout."""
@@ -84,7 +83,7 @@ class ToolCallsSidebar(Static):
 
     def on_mount(self) -> None:
         """Set up the sidebar when mounted."""
-        self._tree = self.query_one("#tool-tree", Tree)
+        self._tree = self.query_one("#tool-tree", Tree[Any])
         self._tree.show_root = False
         self._update_empty_state()
 
@@ -163,7 +162,7 @@ class ToolCallsSidebar(Static):
         }
         return icons.get(status, "?")
 
-    def _format_args(self, args: dict, max_len: int = 40) -> str:
+    def _format_args(self, args: dict[str, Any], max_len: int = 40) -> str:
         """Format arguments for display."""
         if not args:
             return "{}"
@@ -180,7 +179,7 @@ class ToolCallsSidebar(Static):
 
         return result
 
-    def _add_result_node(self, parent_node: TreeNode, result: dict) -> None:
+    def _add_result_node(self, parent_node: TreeNode[Any], result: dict[str, Any]) -> None:
         """
         Add result to the tree with expandable sections for large datasets.
 
@@ -221,7 +220,9 @@ class ToolCallsSidebar(Static):
             result_str = str(result)
             parent_node.add_leaf(f"Result: {result_str}")
 
-    def _add_log_groups_node(self, parent_node: TreeNode, log_groups: list[dict]) -> None:
+    def _add_log_groups_node(
+        self, parent_node: TreeNode[Any], log_groups: list[dict[str, Any]]
+    ) -> None:
         """
         Add log groups with expandable list for large datasets.
 
@@ -256,7 +257,9 @@ class ToolCallsSidebar(Static):
                 name = group.get("name", str(group))
                 more_node.add_leaf(f"  • {name}")
 
-    def _add_log_events_node(self, parent_node: TreeNode, events: list[dict]) -> None:
+    def _add_log_events_node(
+        self, parent_node: TreeNode[Any], events: list[dict[str, Any]]
+    ) -> None:
         """
         Add log events with expandable list for large datasets.
 
@@ -288,7 +291,7 @@ class ToolCallsSidebar(Static):
                 event = events[i]
                 self._add_single_event(more_node, event)
 
-    def _add_single_event(self, parent_node: TreeNode, event: dict) -> None:
+    def _add_single_event(self, parent_node: TreeNode[Any], event: dict[str, Any]) -> None:
         """
         Add a single log event to the tree.
 

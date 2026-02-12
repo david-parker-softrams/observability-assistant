@@ -6,24 +6,24 @@ data flow, configuration, and UI behavior.
 """
 
 import asyncio
-import pytest
-from unittest.mock import AsyncMock, Mock, MagicMock, patch, call
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
 
-from logai.core.log_group_manager import (
-    LogGroupManager,
-    LogGroupManagerState,
-    LogGroupInfo,
-    LogGroupManagerResult,
-)
-from logai.ui.widgets.log_groups_sidebar import LogGroupsSidebar
-from logai.ui.screens.chat import ChatScreen
-from logai.ui.commands import CommandHandler
-from logai.config.settings import LogAISettings
+import pytest
 from logai.cache.manager import CacheManager
+from logai.config.settings import LogAISettings
+from logai.core.log_group_manager import (
+    LogGroupInfo,
+    LogGroupManager,
+    LogGroupManagerResult,
+    LogGroupManagerState,
+)
 from logai.core.orchestrator import LLMOrchestrator
 from logai.core.sanitizer import LogSanitizer
 from logai.core.tools.registry import ToolRegistry
+from logai.ui.commands import CommandHandler
+from logai.ui.screens.chat import ChatScreen
+from logai.ui.widgets.log_groups_sidebar import LogGroupsSidebar
 
 
 class TestStartupBehavior:

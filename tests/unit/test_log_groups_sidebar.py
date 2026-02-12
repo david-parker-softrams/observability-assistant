@@ -1,8 +1,8 @@
 """Unit tests for LogGroupsSidebar widget."""
 
-import pytest
 from unittest.mock import MagicMock
 
+import pytest
 from logai.ui.widgets.log_groups_sidebar import LogGroupsSidebar
 
 

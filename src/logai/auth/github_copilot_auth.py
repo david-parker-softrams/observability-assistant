@@ -6,7 +6,7 @@ import asyncio
 import os
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -222,7 +222,7 @@ class GitHubCopilotAuth:
             # Step 4: Save token
             token_data = TokenData(
                 token=token,
-                created_at=datetime.now(timezone.utc).isoformat(),
+                created_at=datetime.now(UTC).isoformat(),
                 device_code=device_response.device_code,
             )
             self._storage.save_token(token_data)
@@ -366,7 +366,8 @@ class GitHubCopilotAuth:
 
                     # Success - got access token
                     if "access_token" in data:
-                        return data["access_token"]
+                        access_token: str = data["access_token"]
+                        return access_token
 
                     # Handle errors
                     error = data.get("error")

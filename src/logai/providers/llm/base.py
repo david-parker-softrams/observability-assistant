@@ -1,7 +1,8 @@
 """Base class for LLM providers."""
 
 from abc import ABC, abstractmethod
-from typing import Any, AsyncGenerator
+from collections.abc import AsyncGenerator
+from typing import Any
 
 
 class LLMResponse:
@@ -87,7 +88,9 @@ class BaseLLMProvider(ABC):
         Raises:
             LLMProviderError: If the LLM request fails
         """
-        pass
+        # This is an async generator, must yield
+        if False:  # pragma: no cover
+            yield
 
 
 class LLMProviderError(Exception):

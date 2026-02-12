@@ -246,7 +246,8 @@ class TokenStorage:
             return {}
 
         with open(self._auth_file) as f:
-            return json.load(f)
+            data: dict[str, Any] = json.load(f)
+            return data
 
     def _write_auth_file_atomic(self, auth_data: dict[str, Any]) -> None:
         """

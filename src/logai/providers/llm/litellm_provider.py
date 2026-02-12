@@ -1,7 +1,8 @@
 """LiteLLM provider implementation for unified LLM access."""
 
 import asyncio
-from typing import Any, AsyncGenerator
+from collections.abc import AsyncGenerator
+from typing import Any, NoReturn
 
 import litellm
 
@@ -78,7 +79,7 @@ class LiteLLMProvider(BaseLLMProvider):
         # Ollama doesn't need API key to be set
 
     @classmethod
-    def from_settings(cls, settings: LogAISettings):
+    def from_settings(cls, settings: LogAISettings) -> "BaseLLMProvider":
         """
         Create LLM provider from settings.
 
@@ -301,7 +302,7 @@ class LiteLLMProvider(BaseLLMProvider):
         else:
             return self.model
 
-    def _handle_error(self, error: Exception) -> None:
+    def _handle_error(self, error: Exception) -> NoReturn:
         """
         Handle and convert litellm errors to our error types.
 

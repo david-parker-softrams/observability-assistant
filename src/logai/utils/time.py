@@ -1,8 +1,7 @@
 """Time parsing and conversion utilities for CloudWatch timestamps."""
 
 import re
-from datetime import datetime, timedelta, timezone
-from typing import Any
+from datetime import UTC, datetime, timedelta
 
 import pendulum
 from dateutil import parser as dateutil_parser
@@ -36,7 +35,7 @@ def parse_relative_time(relative_str: str) -> datetime:
         TimeParseError: If the format is not recognized
     """
     # Get current time once at the start for consistency
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     relative_str = relative_str.strip().lower()
 
@@ -102,19 +101,19 @@ def parse_iso8601(iso_str: str) -> datetime:
         if isinstance(dt, pendulum.DateTime):
             # Convert pendulum DateTime to stdlib datetime in UTC
             # Use timestamp() to get a consistent conversion
-            return datetime.fromtimestamp(dt.timestamp(), tz=timezone.utc)
+            return datetime.fromtimestamp(dt.timestamp(), tz=UTC)
         # Handle cases where pendulum returns Date or Time objects
         raise TimeParseError(f"Unexpected pendulum parse result type for: {iso_str}")
     except Exception as e:
         # Fallback to dateutil parser
         try:
-            dt = dateutil_parser.parse(iso_str)
+            parsed_dt = dateutil_parser.parse(iso_str)
             # Ensure UTC timezone
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
+            if parsed_dt.tzinfo is None:
+                parsed_dt = parsed_dt.replace(tzinfo=UTC)
             else:
-                dt = dt.astimezone(timezone.utc)
-            return dt
+                parsed_dt = parsed_dt.astimezone(UTC)
+            return parsed_dt
         except Exception:
             raise TimeParseError(f"Failed to parse ISO 8601 timestamp: {iso_str}") from e
 
@@ -135,7 +134,7 @@ def parse_epoch_milliseconds(epoch_ms: int | str) -> datetime:
     try:
         ms = int(epoch_ms) if isinstance(epoch_ms, str) else epoch_ms
         # CloudWatch uses milliseconds
-        return datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc)
+        return datetime.fromtimestamp(ms / 1000.0, tz=UTC)
     except (ValueError, OSError) as e:
         raise TimeParseError(f"Failed to parse epoch milliseconds: {epoch_ms}") from e
 
@@ -163,8 +162,8 @@ def parse_time(time_str: str | int | datetime) -> datetime:
     if isinstance(time_str, datetime):
         # Ensure UTC timezone
         if time_str.tzinfo is None:
-            return time_str.replace(tzinfo=timezone.utc)
-        return time_str.astimezone(timezone.utc)
+            return time_str.replace(tzinfo=UTC)
+        return time_str.astimezone(UTC)
 
     # Try epoch milliseconds (int)
     if isinstance(time_str, int):
@@ -238,7 +237,7 @@ def calculate_time_range(
     """
     # Calculate end time (defaults to now)
     if end_time is None:
-        end_dt = datetime.now(timezone.utc)
+        end_dt = datetime.now(UTC)
     else:
         end_dt = parse_time(end_time)
 
@@ -268,7 +267,7 @@ def format_timestamp(timestamp_ms: int, format_str: str = "%Y-%m-%d %H:%M:%S UTC
     Returns:
         Formatted timestamp string
     """
-    dt = datetime.fromtimestamp(timestamp_ms / 1000.0, tz=timezone.utc)
+    dt = datetime.fromtimestamp(timestamp_ms / 1000.0, tz=UTC)
     return dt.strftime(format_str)
 
 
@@ -287,8 +286,8 @@ def time_ago(timestamp_ms: int) -> str:
     Returns:
         Human-readable time ago string
     """
-    dt = datetime.fromtimestamp(timestamp_ms / 1000.0, tz=timezone.utc)
-    now = datetime.now(timezone.utc)
+    dt = datetime.fromtimestamp(timestamp_ms / 1000.0, tz=UTC)
+    now = datetime.now(UTC)
     delta = now - dt
 
     seconds = int(delta.total_seconds())

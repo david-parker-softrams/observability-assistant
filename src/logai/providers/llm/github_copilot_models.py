@@ -111,13 +111,14 @@ def is_cache_valid(cache_path: Path) -> bool:
         return False
 
     try:
-        with open(cache_path, "r") as f:
+        with open(cache_path) as f:
             cache_data = json.load(f)
 
         cached_at = cache_data.get("cached_at", 0)
         cache_age_hours = (time.time() - cached_at) / 3600
 
-        return cache_age_hours < CACHE_DURATION_HOURS
+        is_valid: bool = cache_age_hours < CACHE_DURATION_HOURS
+        return is_valid
     except (json.JSONDecodeError, OSError, KeyError):
         return False
 
@@ -187,9 +188,9 @@ async def get_available_models(force_refresh: bool = False) -> list[str]:
     # Check cache first (unless forcing refresh)
     if not force_refresh and is_cache_valid(cache_path):
         try:
-            with open(cache_path, "r") as f:
+            with open(cache_path) as f:
                 cache_data = json.load(f)
-                models = cache_data.get("models", [])
+                models: list[str] = cache_data.get("models", [])
                 if models:
                     return models
         except (json.JSONDecodeError, OSError):
@@ -239,9 +240,9 @@ def get_available_models_sync() -> list[str]:
     # Check cache
     if is_cache_valid(cache_path):
         try:
-            with open(cache_path, "r") as f:
+            with open(cache_path) as f:
                 cache_data = json.load(f)
-                models = cache_data.get("models", [])
+                models: list[str] = cache_data.get("models", [])
                 if models:
                     return models
         except (json.JSONDecodeError, OSError):

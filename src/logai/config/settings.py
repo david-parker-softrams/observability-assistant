@@ -260,12 +260,12 @@ def get_settings() -> LogAISettings:
     """Get or create the global settings instance."""
     global _settings
     if _settings is None:
-        _settings = LogAISettings()  # type: ignore
+        _settings = LogAISettings()
     return _settings
 
 
 def reload_settings() -> LogAISettings:
     """Reload settings from environment (useful for testing)."""
     global _settings
-    _settings = LogAISettings()  # type: ignore
+    _settings = LogAISettings()
     return _settings

@@ -2,10 +2,11 @@
 
 import asyncio
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Callable
+from typing import Any
 
 from logai.providers.datasources.cloudwatch import CloudWatchDataSource
 
@@ -204,7 +205,7 @@ class LogGroupManager:
             # Update state
             self._log_groups = all_groups
             self._state = LogGroupManagerState.READY
-            self._last_refresh = datetime.now(timezone.utc)
+            self._last_refresh = datetime.now(UTC)
 
             duration_ms = int((time.monotonic() - start_time) * 1000)
 
@@ -340,7 +341,7 @@ Use the `list_log_groups` tool to discover available log groups.
 
 **Status:** No log groups found in this AWS account/region
 
-The AWS account appears to have no CloudWatch log groups, or you may not have 
+The AWS account appears to have no CloudWatch log groups, or you may not have
 permission to list them. Verify your AWS credentials and permissions.
 """
 
@@ -363,6 +364,16 @@ permission to list them. Verify your AWS credentials and permissions.
 **Total:** {len(self._log_groups)} log groups
 **Last Updated:** {refresh_time}
 
+### IMPORTANT: When Users Ask to List Log Groups
+When a user asks you to "list log groups", "show log groups", or similar requests:
+1. **Acknowledge warmly** - Let them know you have access to all {len(self._log_groups)} log groups
+2. **Reference the sidebar** - Remind them that all log groups are visible in the left sidebar for easy browsing
+3. **Mention /refresh** - Tell them they can use the `/refresh` command to update the list if needed
+4. **Offer to help** - Ask if they're looking for a specific log group or pattern
+
+**Example response:** "I have access to all {len(self._log_groups)} log groups in your AWS account! They're displayed in the left sidebar for easy reference. You can scroll through them there, or use `/refresh` to update the list. Is there a specific log group you're looking for?"
+
+### Log Group List
 {group_list}
 
 ### Usage Instructions
@@ -400,6 +411,15 @@ permission to list them. Verify your AWS credentials and permissions.
 
 **Total:** {len(self._log_groups)} log groups
 **Last Updated:** {refresh_time}
+
+### IMPORTANT: When Users Ask to List Log Groups
+When a user asks you to "list log groups", "show log groups", or similar requests:
+1. **Acknowledge warmly** - Let them know you have access to all {len(self._log_groups)} log groups
+2. **Reference the sidebar** - Remind them that all log groups are visible in the left sidebar for easy browsing
+3. **Mention /refresh** - Tell them they can use the `/refresh` command to update the list if needed
+4. **Offer to help** - Ask if they're looking for a specific log group, service, or pattern
+
+**Example response:** "I have access to all {len(self._log_groups)} log groups in your AWS account! They're displayed in the left sidebar for easy reference. Since there are quite a few, you might find it easier to scroll through them there, or I can help you search for a specific service or pattern. Use `/refresh` to update the list if needed. What are you looking for?"
 
 ### Log Group Categories
 {categories_text}

@@ -3,10 +3,10 @@
 import asyncio
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, AsyncGenerator, TYPE_CHECKING
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
 from logai.cache.manager import CacheManager
 from logai.config.settings import LogAISettings
@@ -14,7 +14,7 @@ from logai.core.intent_detector import IntentDetector
 from logai.core.metrics import MetricsCollector, MetricsTimer
 from logai.core.sanitizer import LogSanitizer
 from logai.core.tools.registry import ToolRegistry
-from logai.providers.llm.base import BaseLLMProvider, LLMProviderError
+from logai.providers.llm.base import BaseLLMProvider, LLMProviderError, LLMResponse
 
 if TYPE_CHECKING:
     from logai.core.log_group_manager import LogGroupManager
@@ -326,7 +326,7 @@ Current time: {current_time}
         Returns:
             Formatted system prompt including log group context
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Get log groups context from manager if available
         if self.log_group_manager and self.log_group_manager.is_ready:
@@ -464,6 +464,7 @@ Use this tool to find available log groups before querying logs."""
 
         # Initialize retry state for this turn
         retry_state = RetryState()
+        response = None
 
         # Execute conversation loop with tool calling
         iteration = 0
@@ -473,9 +474,15 @@ Use this tool to find available log groups before querying logs."""
 
             try:
                 # Get LLM response
-                response = await self.llm_provider.chat(
+                llm_result = await self.llm_provider.chat(
                     messages=messages, tools=tools, stream=False
                 )
+
+                # Type guard: stream=False should always return LLMResponse
+                if not isinstance(llm_result, LLMResponse):
+                    raise OrchestratorError("Expected LLMResponse but got AsyncGenerator")
+
+                response = llm_result
 
                 # Check if LLM wants to use tools
                 if response.has_tool_calls():
@@ -660,7 +667,7 @@ Use this tool to find available log groups before querying logs."""
                     exc_info=True,
                 )
                 # If we have content, return it; otherwise raise
-                if hasattr(response, "content") and response.content:
+                if response is not None and isinstance(response, LLMResponse) and response.content:
                     self.conversation_history.append(
                         {"role": "assistant", "content": response.content}
                     )
@@ -705,6 +712,7 @@ Use this tool to find available log groups before querying logs."""
 
         # Initialize retry state for this turn
         retry_state = RetryState()
+        response = None
 
         # Execute conversation loop with tool calling (non-streaming)
         iteration = 0
@@ -714,9 +722,15 @@ Use this tool to find available log groups before querying logs."""
 
             try:
                 # Get LLM response (non-streaming for tool call handling)
-                response = await self.llm_provider.chat(
+                llm_result = await self.llm_provider.chat(
                     messages=messages, tools=tools, stream=False
                 )
+
+                # Type guard: stream=False should always return LLMResponse
+                if not isinstance(llm_result, LLMResponse):
+                    raise OrchestratorError("Expected LLMResponse but got AsyncGenerator")
+
+                response = llm_result
 
                 # Check if LLM wants to use tools
                 if response.has_tool_calls():
@@ -934,6 +948,7 @@ Use this tool to find available log groups before querying logs."""
             function_info = tool_call.get("function", {})
             function_name = function_info.get("name")
             function_args_str = function_info.get("arguments", "{}")
+            record = None
 
             try:
                 # Parse arguments
@@ -1004,7 +1019,7 @@ Use this tool to find available log groups before querying logs."""
                 )
 
                 # Notify ERROR status
-                if "record" in locals():
+                if record is not None:
                     record.status = ToolCallStatus.ERROR
                     record.error_message = str(e)
                     record.completed_at = datetime.now()
@@ -1093,10 +1108,12 @@ Use this tool to find available log groups before querying logs."""
         base_delays = [0.5, 1.0, 2.0]
 
         if attempt_count < len(base_delays):
-            return base_delays[attempt_count]
+            delay: float = base_delays[attempt_count]
+            return delay
 
         # For attempts beyond the base delays, use exponential growth
-        return base_delays[-1] * (2 ** (attempt_count - len(base_delays) + 1))
+        result: float = base_delays[-1] * (2 ** (attempt_count - len(base_delays) + 1))
+        return result
 
     def _confidence_bucket(self, confidence: float) -> str:
         """Convert confidence score to a bucket label for metrics.

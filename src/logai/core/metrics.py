@@ -51,7 +51,7 @@ class MetricsCollector:
     - Easy to integrate with existing monitoring infrastructure
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the metrics collector."""
         self._events: list[MetricEvent] = []
         self._enabled: bool = True

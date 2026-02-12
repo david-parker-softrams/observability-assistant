@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any, AsyncGenerator
+from collections.abc import AsyncGenerator
+from typing import Any
 
 import httpx
 
@@ -140,7 +141,8 @@ class GitHubCopilotProvider(BaseLLMProvider):
             True if model supports tools, False otherwise
         """
         metadata = get_model_metadata(self.model)
-        return metadata.get("supports_tools", True)
+        supports: bool = metadata.get("supports_tools", True)
+        return supports
 
     async def _get_http_client(self) -> httpx.AsyncClient:
         """

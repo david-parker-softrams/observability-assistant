@@ -1,7 +1,7 @@
 """Log groups sidebar widget for displaying available CloudWatch log groups."""
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from textual.app import ComposeResult
 from textual.containers import VerticalScroll
@@ -67,7 +67,7 @@ class LogGroupsSidebar(Static):
     def __init__(
         self,
         log_group_manager: "LogGroupManager | None" = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         """
         Initialize the log groups sidebar.

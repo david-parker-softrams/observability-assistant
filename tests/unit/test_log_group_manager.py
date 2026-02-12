@@ -6,7 +6,6 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
-
 from logai.core.log_group_manager import (
     LogGroupInfo,
     LogGroupManager,
@@ -236,6 +235,9 @@ class TestLogGroupManager:
         result = await manager.refresh()
 
         assert result.success
+        # Type guard: both timestamps should be set after successful load/refresh
+        assert first_refresh is not None
+        assert manager.last_refresh is not None
         assert manager.last_refresh > first_refresh
 
     def test_format_for_prompt_empty_uninitialized(self, mock_datasource):
@@ -293,6 +295,15 @@ class TestLogGroupManager:
         assert "Usage Instructions" in formatted
         assert "/refresh" in formatted
 
+        # Verify agent instructions are present
+        assert "IMPORTANT: When Users Ask to List Log Groups" in formatted
+        assert "Acknowledge warmly" in formatted
+        assert "Reference the sidebar" in formatted
+        assert "Mention /refresh" in formatted
+        assert "Offer to help" in formatted
+        assert "Example response:" in formatted
+        assert "left sidebar" in formatted
+
     @pytest.mark.asyncio
     async def test_format_for_prompt_summary(self, mock_datasource):
         """Test formatting with large list (>500 groups)."""
@@ -322,6 +333,15 @@ class TestLogGroupManager:
         assert "Sample Log Groups" in formatted
         assert "/aws/lambda/" in formatted
         assert "too large to display" in formatted
+
+        # Verify agent instructions are present
+        assert "IMPORTANT: When Users Ask to List Log Groups" in formatted
+        assert "Acknowledge warmly" in formatted
+        assert "Reference the sidebar" in formatted
+        assert "Mention /refresh" in formatted
+        assert "Offer to help" in formatted
+        assert "Example response:" in formatted
+        assert "left sidebar" in formatted
 
     def test_get_log_group_names(self, mock_datasource):
         """Test getting list of names."""

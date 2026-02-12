@@ -1,8 +1,6 @@
 """SQLite-based cache store for log data and query results."""
 
-import hashlib
 import json
-import sqlite3
 import time
 from pathlib import Path
 from typing import Any
@@ -89,19 +87,19 @@ class SQLiteStore:
             # Create indexes
             await db.execute(
                 """
-                CREATE INDEX IF NOT EXISTS idx_log_group_time 
+                CREATE INDEX IF NOT EXISTS idx_log_group_time
                 ON cache_entries(log_group, start_time, end_time)
                 """
             )
             await db.execute(
                 """
-                CREATE INDEX IF NOT EXISTS idx_expires_at 
+                CREATE INDEX IF NOT EXISTS idx_expires_at
                 ON cache_entries(expires_at)
                 """
             )
             await db.execute(
                 """
-                CREATE INDEX IF NOT EXISTS idx_last_accessed 
+                CREATE INDEX IF NOT EXISTS idx_last_accessed
                 ON cache_entries(last_accessed)
                 """
             )
@@ -158,7 +156,7 @@ class SQLiteStore:
             # Update last accessed and hit count
             await db.execute(
                 """
-                UPDATE cache_entries 
+                UPDATE cache_entries
                 SET last_accessed = ?, hit_count = hit_count + 1
                 WHERE id = ?
                 """,
@@ -207,7 +205,7 @@ class SQLiteStore:
                 """
                 INSERT OR REPLACE INTO cache_entries
                 (id, query_type, log_group, start_time, end_time, filter_pattern,
-                 payload, payload_size, log_count, created_at, expires_at, 
+                 payload, payload_size, log_count, created_at, expires_at,
                  last_accessed, hit_count)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
@@ -254,7 +252,8 @@ class SQLiteStore:
         async with aiosqlite.connect(str(self.db_path)) as db:
             cursor = await db.execute("DELETE FROM cache_entries WHERE expires_at < ?", (now,))
             await db.commit()
-            return cursor.rowcount
+            result = cursor.rowcount
+            return int(result) if result is not None else 0
 
     async def delete_by_log_group(self, log_group: str) -> int:
         """Delete all entries for a specific log group.
@@ -270,7 +269,8 @@ class SQLiteStore:
         async with aiosqlite.connect(str(self.db_path)) as db:
             cursor = await db.execute("DELETE FROM cache_entries WHERE log_group = ?", (log_group,))
             await db.commit()
-            return cursor.rowcount
+            result = cursor.rowcount
+            return int(result) if result is not None else 0
 
     async def clear(self) -> int:
         """Clear all cache entries.
@@ -283,7 +283,8 @@ class SQLiteStore:
         async with aiosqlite.connect(str(self.db_path)) as db:
             cursor = await db.execute("DELETE FROM cache_entries")
             await db.commit()
-            return cursor.rowcount
+            result = cursor.rowcount
+            return int(result) if result is not None else 0
 
     async def get_cache_size(self) -> int:
         """Get total cache size in bytes.
@@ -298,7 +299,7 @@ class SQLiteStore:
                 "SELECT COALESCE(SUM(payload_size), 0) FROM cache_entries"
             ) as cursor:
                 row = await cursor.fetchone()
-                return row[0] if row else 0
+                return int(row[0]) if row else 0
 
     async def get_entry_count(self) -> int:
         """Get total number of cache entries.
@@ -311,7 +312,7 @@ class SQLiteStore:
         async with aiosqlite.connect(str(self.db_path)) as db:
             async with db.execute("SELECT COUNT(*) FROM cache_entries") as cursor:
                 row = await cursor.fetchone()
-                return row[0] if row else 0
+                return int(row[0]) if row else 0
 
     async def get_lru_entries(self, limit: int = 100) -> list[str]:
         """Get least recently used entries.
@@ -327,8 +328,8 @@ class SQLiteStore:
         async with aiosqlite.connect(str(self.db_path)) as db:
             async with db.execute(
                 """
-                SELECT id FROM cache_entries 
-                ORDER BY last_accessed ASC 
+                SELECT id FROM cache_entries
+                ORDER BY last_accessed ASC
                 LIMIT ?
                 """,
                 (limit,),
@@ -356,7 +357,8 @@ class SQLiteStore:
                 f"DELETE FROM cache_entries WHERE id IN ({placeholders})", entry_ids
             )
             await db.commit()
-            return cursor.rowcount
+            result = cursor.rowcount
+            return int(result) if result is not None else 0
 
     async def get_statistics(self) -> dict[str, Any]:
         """Get cache statistics.

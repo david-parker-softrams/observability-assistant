@@ -30,7 +30,7 @@ class CacheManager:
         self.settings = settings
         cache_dir = Path(settings.cache_dir).expanduser()
         self.store = SQLiteStore(cache_dir)
-        self._cleanup_task: asyncio.Task | None = None
+        self._cleanup_task: asyncio.Task[None] | None = None
         self._initialized = False
 
     async def initialize(self) -> None:
