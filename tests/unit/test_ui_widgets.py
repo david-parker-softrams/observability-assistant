@@ -1,8 +1,6 @@
 """Tests for UI widgets."""
 
 import pytest
-from textual.widgets import Static
-
 from logai.ui.widgets.messages import (
     AssistantMessage,
     ErrorMessage,
@@ -11,7 +9,9 @@ from logai.ui.widgets.messages import (
     UserMessage,
 )
 from logai.ui.widgets.status_bar import StatusBar
+from logai.ui.widgets.status_footer import StatusFooter
 from logai.ui.widgets.tool_sidebar import ToolCallsSidebar
+from textual.widgets import Footer, Static
 
 
 class TestUserMessage:
@@ -117,6 +117,35 @@ class TestStatusBar:
         status_bar.update_cache_stats(10, 5)
         assert status_bar.cache_hits == 10
         assert status_bar.cache_misses == 5
+
+
+class TestStatusFooter:
+    """Tests for StatusFooter widget."""
+
+    def test_status_footer_creation(self) -> None:
+        """Test that status footer is created correctly."""
+        status_footer = StatusFooter(model="claude-3-5-sonnet")
+        assert isinstance(status_footer, Footer)
+        assert status_footer.model == "claude-3-5-sonnet"
+
+    def test_status_footer_set_status(self) -> None:
+        """Test that status can be set."""
+        status_footer = StatusFooter()
+        status_footer.set_status("Thinking...")
+        assert status_footer.status == "Thinking..."
+
+    def test_status_footer_update_cache_stats(self) -> None:
+        """Test that cache stats can be updated."""
+        status_footer = StatusFooter()
+        status_footer.update_cache_stats(10, 5)
+        assert status_footer.cache_hits == 10
+        assert status_footer.cache_misses == 5
+
+    def test_status_footer_update_context_usage(self) -> None:
+        """Test that context usage can be updated."""
+        status_footer = StatusFooter()
+        status_footer.update_context_usage(75.5)
+        assert status_footer.context_utilization == 75.5
 
 
 class TestToolCallsSidebar:

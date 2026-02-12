@@ -10,7 +10,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Footer, Header, Input
+from textual.widgets import Header, Input
 
 from logai.cache.manager import CacheManager
 from logai.config import get_settings
@@ -25,7 +25,7 @@ from logai.ui.widgets.messages import (
     SystemMessage,
     UserMessage,
 )
-from logai.ui.widgets.status_bar import StatusBar
+from logai.ui.widgets.status_footer import StatusFooter
 from logai.ui.widgets.tool_sidebar import ToolCallsSidebar
 
 if TYPE_CHECKING:
@@ -148,8 +148,7 @@ class ChatScreen(Screen[None]):
             yield self._tool_sidebar
 
         yield Container(ChatInput(), id="input-container")
-        yield StatusBar(model=self.settings.current_llm_model)
-        yield Footer()
+        yield StatusFooter(model=self.settings.current_llm_model)
 
     async def on_mount(self) -> None:
         """Set up the screen when mounted."""
@@ -235,11 +234,11 @@ class ChatScreen(Screen[None]):
             user_message: User's message
         """
         messages_container = self.query_one("#messages-container", VerticalScroll)
-        status_bar = self.query_one(StatusBar)
+        status_footer = self.query_one(StatusFooter)
 
         try:
             # Update status
-            status_bar.set_status("Thinking...")
+            status_footer.set_status("Thinking...")
 
             # Add loading indicator
             self._current_loading_indicator = LoadingIndicator()
@@ -265,13 +264,13 @@ class ChatScreen(Screen[None]):
                     await asyncio.sleep(0.01)
 
             # Update status
-            status_bar.set_status("Ready")
+            status_footer.set_status("Ready")
 
             # Update cache stats
             cache_stats = await self.cache_manager.get_statistics()
             hits = cache_stats.get("total_hits", 0)
             misses = cache_stats.get("total_misses", 0)
-            status_bar.update_cache_stats(hits, misses)
+            status_footer.update_cache_stats(hits, misses)
 
             # Update context usage
             self._update_context_status()
@@ -291,7 +290,7 @@ class ChatScreen(Screen[None]):
             messages_container.scroll_end(animate=False)
 
             # Update status
-            status_bar.set_status("Error")
+            status_footer.set_status("Error")
 
         finally:
             self._current_assistant_message = None
@@ -345,8 +344,8 @@ class ChatScreen(Screen[None]):
             # Get usage from orchestrator's budget tracker
             if hasattr(self.orchestrator, "budget_tracker"):
                 usage = self.orchestrator.budget_tracker.get_usage()
-                status_bar = self.query_one(StatusBar)
-                status_bar.update_context_usage(usage.utilization_pct)
+                status_footer = self.query_one(StatusFooter)
+                status_footer.update_context_usage(usage.utilization_pct)
 
         except Exception as e:
             logger.debug(f"Failed to update context status: {e}", exc_info=True)
