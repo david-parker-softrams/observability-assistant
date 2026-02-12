@@ -10,6 +10,9 @@ from typing import TYPE_CHECKING, Any
 
 from logai.cache.manager import CacheManager
 from logai.config.settings import LogAISettings
+from logai.core.context.budget_tracker import ContextBudgetTracker
+from logai.core.context.result_cache import ResultCacheManager
+from logai.core.context.token_counter import TokenCounter
 from logai.core.intent_detector import IntentDetector
 from logai.core.metrics import MetricsCollector, MetricsTimer
 from logai.core.sanitizer import LogSanitizer
@@ -291,6 +294,7 @@ Current time: {current_time}
         cache: CacheManager | None = None,
         metrics_collector: MetricsCollector | None = None,
         log_group_manager: "LogGroupManager | None" = None,
+        result_cache: ResultCacheManager | None = None,
     ):
         """
         Initialize LLM orchestrator.
@@ -303,6 +307,7 @@ Current time: {current_time}
             cache: Optional cache manager
             metrics_collector: Optional metrics collector for monitoring
             log_group_manager: Optional pre-loaded log group manager
+            result_cache: Optional result cache manager (creates new if None)
         """
         self.llm_provider = llm_provider
         self.tool_registry = tool_registry
@@ -318,6 +323,24 @@ Current time: {current_time}
 
         # Runtime context injections (for /refresh updates)
         self._pending_context_injection: str | None = None
+
+        # Context management components
+        self.budget_tracker = ContextBudgetTracker(
+            settings=settings,
+            model=settings.current_llm_model,
+        )
+
+        # Use provided result cache or create new one
+        self.result_cache = result_cache or ResultCacheManager(
+            cache_dir=settings.cache_dir / "results",
+            ttl_seconds=getattr(settings, "cache_ttl_seconds", 3600),
+            max_size_mb=100,
+        )
+
+        # Context notification callback for UI updates
+        self._context_notification_callback: Callable[[str, str], None] | None = None
+
+        logger.info("LLM Orchestrator initialized with context management")
 
     def _get_system_prompt(self) -> str:
         """
@@ -392,6 +415,264 @@ Use this tool to find available log groups before querying logs."""
         self._pending_context_injection = None
         return injection
 
+    def _notify_context_event(self, level: str, message: str) -> None:
+        """
+        Notify UI about context management events.
+
+        Args:
+            level: Event level ("info", "warning", "error")
+            message: Event message
+        """
+        if self._context_notification_callback:
+            try:
+                self._context_notification_callback(level, message)
+            except Exception as e:
+                logger.warning(f"Context notification error: {e}", exc_info=True)
+
+        # Also log it
+        if level == "error":
+            logger.error(f"Context: {message}")
+        elif level == "warning":
+            logger.warning(f"Context: {message}")
+        else:
+            logger.info(f"Context: {message}")
+
+    def set_context_notification_callback(
+        self, callback: Callable[[str, str], None] | None
+    ) -> None:
+        """
+        Set callback for context management notifications.
+
+        Args:
+            callback: Function to call with (level, message) or None to clear
+        """
+        self._context_notification_callback = callback
+
+    async def _process_tool_result(
+        self,
+        tool_result: dict[str, Any],
+        tool_name: str,
+    ) -> dict[str, Any]:
+        """
+        Process a tool result, caching if necessary.
+
+        This is a critical integration point for context management. When a tool
+        returns a large result, we cache it and return a summary instead.
+
+        Args:
+            tool_result: Raw tool result with tool_call_id and result
+            tool_name: Name of the tool that produced this result
+
+        Returns:
+            Processed result (possibly modified to a summary) for context
+        """
+        result_data = tool_result["result"]
+        tool_call_id = tool_result["tool_call_id"]
+
+        # Skip processing if caching is disabled
+        if not self.settings.enable_result_caching:
+            return tool_result
+
+        # Check if result should be cached based on size
+        should_cache, token_count = self.budget_tracker.should_cache_result(
+            result_data,
+            threshold=self.settings.cache_large_results_threshold,
+        )
+
+        if should_cache:
+            try:
+                # Extract query parameters for cache key (best effort)
+                query_params = {
+                    "tool": tool_name,
+                    # Add timestamp to make cache entries unique per invocation
+                    "timestamp": int(datetime.now(UTC).timestamp()),
+                }
+
+                # Cache the result and get summary
+                summary = await self.result_cache.cache_result(
+                    tool_name=tool_name,
+                    query_params=query_params,
+                    result=result_data,
+                )
+
+                # Use summary instead of full result
+                modified_result = summary.to_context_dict()
+
+                # Track the summary tokens
+                summary_tokens = TokenCounter.estimate_json_tokens(
+                    modified_result, self.settings.current_llm_model
+                )
+                self.budget_tracker.add_result_tokens(summary_tokens)
+
+                # Notify UI
+                event_count = result_data.get("count", len(result_data.get("events", [])))
+                self._notify_context_event(
+                    "info",
+                    f"Cached large result: {event_count} events, "
+                    f"{token_count} tokens → {summary_tokens} token summary",
+                )
+
+                logger.info(
+                    f"Result cached: {tool_name}, {token_count} tokens → {summary_tokens} token summary",
+                    extra={
+                        "cache_id": summary.cache_id,
+                        "original_tokens": token_count,
+                        "summary_tokens": summary_tokens,
+                        "event_count": event_count,
+                    },
+                )
+
+                # Record metric
+                self.metrics.increment(
+                    "result_cached",
+                    labels={"tool": tool_name, "reason": "size_threshold"},
+                )
+
+                return {
+                    "tool_call_id": tool_call_id,
+                    "result": modified_result,
+                }
+
+            except Exception as e:
+                # Cache failure should not break the workflow
+                logger.error(
+                    f"Failed to cache result, using full result: {e}",
+                    exc_info=True,
+                    extra={"tool_name": tool_name, "token_count": token_count},
+                )
+                self._notify_context_event(
+                    "warning", "Failed to cache large result, context may fill quickly"
+                )
+
+                # Fall through to use full result
+                self.budget_tracker.add_result_tokens(token_count)
+                return tool_result
+        else:
+            # Result fits in context, use as-is
+            self.budget_tracker.add_result_tokens(token_count)
+            return tool_result
+
+    def _should_prune_history(self) -> bool:
+        """
+        Check if history should be pruned before next LLM call.
+
+        Returns:
+            True if pruning is needed
+        """
+        if not self.settings.enable_history_pruning:
+            return False
+
+        usage = self.budget_tracker.get_usage()
+        threshold = getattr(self.settings, "context_warning_threshold_pct", 80.0)
+
+        return usage.utilization_pct >= threshold
+
+    def _prune_history_if_needed(self) -> None:
+        """
+        Prune conversation history if context is getting full.
+
+        This uses a FIFO strategy with preservation of recent messages.
+        """
+        if not self._should_prune_history():
+            return
+
+        usage = self.budget_tracker.get_usage()
+
+        # Calculate how much to free (aim for 20% reduction)
+        target_free = int(usage.total_tokens * 0.25)  # Free 25% to give breathing room
+
+        # Get indices to prune from budget tracker
+        to_prune = self.budget_tracker.get_prunable_messages(target_free)
+
+        if not to_prune:
+            logger.debug("No messages available for pruning")
+            return
+
+        # Estimate tokens in messages to be pruned (for notification)
+        estimated_tokens = 0
+        for idx in to_prune:
+            if 0 <= idx < len(self.conversation_history):
+                msg = self.conversation_history[idx]
+                # Rough estimate: 4 characters per token
+                estimated_tokens += len(str(msg)) // 4
+
+        # Remove messages from conversation history (prune in reverse order to maintain indices)
+        pruned_count = 0
+        for idx in sorted(to_prune, reverse=True):
+            if 0 <= idx < len(self.conversation_history):
+                removed = self.conversation_history.pop(idx)
+                logger.debug(f"Pruned message at index {idx}: role={removed.get('role')}")
+                pruned_count += 1
+
+        # Budget tracker will be recalculated on next _update_budget_tracker() call
+        # No need to update it here since it gets reset() anyway
+
+        # Notify UI
+        self._notify_context_event(
+            "info",
+            f"Pruned {pruned_count} old messages to maintain context "
+            f"(freed ~{estimated_tokens} tokens)",
+        )
+
+        # Log pruning stats
+        logger.info(
+            f"History pruned: {pruned_count} messages, ~{estimated_tokens} tokens freed (estimated)",
+            extra={
+                "messages_pruned": pruned_count,
+                "tokens_freed_estimate": estimated_tokens,
+                "utilization_before": usage.utilization_pct,
+                # Note: utilization_after will be accurate on next _update_budget_tracker() call
+            },
+        )
+
+        # Record metric
+        self.metrics.increment(
+            "history_pruned",
+            labels={"message_count": str(pruned_count)},
+        )
+
+    def _update_budget_tracker(self, messages: list[dict[str, Any]]) -> None:
+        """
+        Update budget tracker with current conversation state.
+
+        This should be called before each LLM invocation to ensure
+        accurate token tracking.
+
+        Args:
+            messages: Current message list being sent to LLM
+        """
+        # Reset tracker for fresh count
+        self.budget_tracker.reset()
+
+        # Track system prompt (first message is always system)
+        if messages and messages[0].get("role") == "system":
+            system_prompt = messages[0].get("content", "")
+            self.budget_tracker.set_system_prompt(system_prompt)
+
+        # Track all messages
+        for msg in messages:
+            self.budget_tracker.add_message(msg)
+
+    def _log_budget_status(self) -> None:
+        """Log current budget status for monitoring."""
+        usage = self.budget_tracker.get_usage()
+
+        logger.debug(
+            f"Context budget: {usage.utilization_pct:.1f}% "
+            f"({usage.total_tokens}/{self.budget_tracker.allocation.usable_tokens} tokens), "
+            f"system={usage.system_prompt_tokens}, "
+            f"history={usage.history_tokens}, "
+            f"results={usage.result_tokens}",
+        )
+
+        # Warn if getting full
+        if usage.utilization_pct >= 90:
+            self._notify_context_event(
+                "warning", f"Context window {usage.utilization_pct:.0f}% full (!)"
+            )
+        elif usage.utilization_pct >= 70:
+            self._notify_context_event("info", f"Context window {usage.utilization_pct:.0f}% full")
+
     async def chat(
         self,
         user_message: str,
@@ -435,10 +716,12 @@ Use this tool to find available log groups before querying logs."""
     async def _chat_complete(self, user_message: str) -> str:
         """Process message and return complete response.
 
-        Enhanced with self-direction capabilities:
+        Enhanced with self-direction capabilities and context management:
         - Detects intent without action and prompts execution
         - Automatically retries on empty results
         - Tracks retry state across the conversation turn
+        - Prunes history when context fills
+        - Caches large tool results
 
         Args:
             user_message: User's message
@@ -449,6 +732,9 @@ Use this tool to find available log groups before querying logs."""
         # Add user message to history
         self.conversation_history.append({"role": "user", "content": user_message})
 
+        # Prune history if needed (before preparing messages)
+        self._prune_history_if_needed()
+
         # Prepare messages with system prompt
         messages = [
             {"role": "system", "content": self._get_system_prompt()}
@@ -458,6 +744,10 @@ Use this tool to find available log groups before querying logs."""
         pending_injection = self._get_pending_context_injection()
         if pending_injection:
             messages.append({"role": "system", "content": pending_injection})
+
+        # Update budget tracker with current state
+        self._update_budget_tracker(messages)
+        self._log_budget_status()
 
         # Get available tools
         tools = self.tool_registry.to_function_definitions()
@@ -682,7 +972,7 @@ Use this tool to find available log groups before querying logs."""
     async def _chat_stream(self, user_message: str) -> AsyncGenerator[str, None]:
         """Process message and stream the response.
 
-        Enhanced with self-direction capabilities (same as _chat_complete).
+        Enhanced with self-direction capabilities and context management.
 
         Note: For MVP, we'll handle tool calls in non-streaming mode,
         then stream the final response. Full streaming with tool calls
@@ -697,6 +987,9 @@ Use this tool to find available log groups before querying logs."""
         # Add user message to history
         self.conversation_history.append({"role": "user", "content": user_message})
 
+        # Prune history if needed (before preparing messages)
+        self._prune_history_if_needed()
+
         # Prepare messages with system prompt
         messages = [
             {"role": "system", "content": self._get_system_prompt()}
@@ -706,6 +999,10 @@ Use this tool to find available log groups before querying logs."""
         pending_injection = self._get_pending_context_injection()
         if pending_injection:
             messages.append({"role": "system", "content": pending_injection})
+
+        # Update budget tracker with current state
+        self._update_budget_tracker(messages)
+        self._log_budget_status()
 
         # Get available tools
         tools = self.tool_registry.to_function_definitions()
@@ -939,7 +1236,7 @@ Use this tool to find available log groups before querying logs."""
             tool_calls: List of tool call requests from LLM
 
         Returns:
-            List of tool results with tool_call_id and result
+            List of tool results with tool_call_id and result (possibly cached summaries)
         """
         results = []
 
@@ -979,7 +1276,11 @@ Use this tool to find available log groups before querying logs."""
                 record.completed_at = datetime.now()
                 self._notify_tool_call(record)
 
-                results.append({"tool_call_id": tool_call_id, "result": result})
+                # Process through context manager (may cache large results)
+                tool_result = {"tool_call_id": tool_call_id, "result": result}
+                processed_result = await self._process_tool_result(tool_result, function_name)
+
+                results.append(processed_result)
 
             except json.JSONDecodeError as e:
                 # Invalid JSON arguments

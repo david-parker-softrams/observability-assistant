@@ -163,6 +163,97 @@ class LogAISettings(BaseSettings):
         le=100,
     )
 
+    # === Context Window Management ===
+    context_window_size: int | None = Field(
+        default=None,
+        description="Model-specific context window size (auto-detected if None)",
+        gt=0,
+    )
+
+    context_window_buffer: int = Field(
+        default=5000,
+        description="Safety margin for context window to prevent overflow",
+        ge=0,
+        le=50000,
+    )
+
+    max_result_tokens: int = Field(
+        default=50000,
+        description="Maximum tokens for a single tool result before caching",
+        ge=1000,
+        le=100000,
+    )
+
+    max_history_tokens: int = Field(
+        default=80000,
+        description="Maximum tokens for conversation history",
+        ge=1000,
+        le=200000,
+    )
+
+    max_system_prompt_tokens: int = Field(
+        default=10000,
+        description="Maximum tokens for system prompt",
+        ge=1000,
+        le=50000,
+    )
+
+    reserve_response_tokens: int = Field(
+        default=8000,
+        description="Tokens reserved for LLM response",
+        ge=1000,
+        le=20000,
+    )
+
+    # === Result Handling ===
+    enable_result_caching: bool = Field(
+        default=True,
+        description="Enable caching of large tool results outside context window",
+    )
+
+    enable_incremental_fetch: bool = Field(
+        default=True,
+        description="Enable incremental fetching of cached results",
+    )
+
+    cache_large_results_threshold: int = Field(
+        default=10000,
+        description="Token threshold for caching tool results",
+        ge=1000,
+        le=100000,
+    )
+
+    max_events_per_chunk: int = Field(
+        default=100,
+        description="Maximum events to return in a single cached result chunk",
+        ge=10,
+        le=500,
+    )
+
+    # === History Management ===
+    enable_history_pruning: bool = Field(
+        default=True,
+        description="Enable automatic pruning of old conversation history",
+    )
+
+    history_sliding_window_messages: int = Field(
+        default=20,
+        description="Number of recent messages to preserve when pruning history",
+        ge=4,
+        le=100,
+    )
+
+    enable_history_summarization: bool = Field(
+        default=False,
+        description="Enable summarization of pruned history (future feature)",
+    )
+
+    # === Context Allocation Strategy ===
+    context_allocation_strategy: Literal["adaptive", "history-focused", "result-focused"] = Field(
+        default="adaptive",
+        description="Strategy for allocating context budget between history and results",
+    )
+
     @field_validator("anthropic_api_key", "openai_api_key")
     @classmethod
     def validate_api_key_format(cls, v: str | None) -> str | None:
@@ -219,6 +310,7 @@ class LogAISettings(BaseSettings):
                 "boto3 will attempt to use other credential sources "
                 "(IAM role, instance profile, etc.)",
                 UserWarning,
+                stacklevel=2,
             )
 
     def ensure_cache_dir_exists(self) -> None:

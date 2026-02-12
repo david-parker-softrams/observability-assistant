@@ -22,6 +22,7 @@ class StatusBar(Static):
     cache_hits: reactive[int] = reactive(0)
     cache_misses: reactive[int] = reactive(0)
     model: reactive[str] = reactive("Unknown")
+    context_utilization: reactive[float] = reactive(0.0)
 
     def __init__(self, model: str = "Unknown") -> None:
         """
@@ -73,6 +74,15 @@ class StatusBar(Static):
         """
         self.update_display()
 
+    def watch_context_utilization(self, new_utilization: float) -> None:
+        """
+        React to context utilization changes.
+
+        Args:
+            new_utilization: New utilization percentage (0-100)
+        """
+        self.update_display()
+
     def update_display(self) -> None:
         """Update the status bar display."""
         # Calculate cache hit rate
@@ -83,8 +93,20 @@ class StatusBar(Static):
         else:
             cache_info = "Cache: 0 hits"
 
+        # Format context utilization with color coding
+        if self.context_utilization >= 86:
+            context_color = "red"
+        elif self.context_utilization >= 71:
+            context_color = "yellow"
+        else:
+            context_color = "green"
+
+        context_info = (
+            f"Context: [{context_color}]{self.context_utilization:.0f}%[/{context_color}]"
+        )
+
         # Build status line
-        status_line = f"Status: {self.status} | {cache_info} | Model: {self.model}"
+        status_line = f"Status: {self.status} | {cache_info} | {context_info} | Model: {self.model}"
         self.update(status_line)
 
     def set_status(self, status: str) -> None:
@@ -106,3 +128,12 @@ class StatusBar(Static):
         """
         self.cache_hits = hits
         self.cache_misses = misses
+
+    def update_context_usage(self, utilization_pct: float) -> None:
+        """
+        Update context usage display.
+
+        Args:
+            utilization_pct: Context utilization percentage (0-100)
+        """
+        self.context_utilization = utilization_pct

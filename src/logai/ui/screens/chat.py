@@ -2,17 +2,19 @@
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING
+import time
+from typing import TYPE_CHECKING, Literal
 
 from textual import on, work
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Container, Horizontal, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Header, Input
+from textual.widgets import Footer, Header, Input
 
 from logai.cache.manager import CacheManager
 from logai.config import get_settings
-from logai.core.orchestrator import LLMOrchestrator, ToolCallRecord, ToolCallStatus
+from logai.core.orchestrator import LLMOrchestrator, ToolCallRecord
 from logai.ui.commands import CommandHandler
 from logai.ui.widgets.input_box import ChatInput
 from logai.ui.widgets.log_groups_sidebar import LogGroupsSidebar
@@ -32,8 +34,20 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# Sidebar resize configuration
+SIDEBAR_WIDTH_STEPS: list[int] = [24, 26, 28, 30, 32, 35, 40, 45, 50, 55, 60, 65, 70]
+DEFAULT_SIDEBAR_WIDTH_INDEX: int = 2  # Index of 28 (default)
+
+
 class ChatScreen(Screen[None]):
     """Main chat screen."""
+
+    BINDINGS = [
+        Binding("f1", "shrink_left_sidebar", "◀ Logs", show=True),
+        Binding("f2", "expand_left_sidebar", "Logs ▶", show=True),
+        Binding("f3", "expand_right_sidebar", "◀ Tools", show=True),
+        Binding("f4", "shrink_right_sidebar", "Tools ▶", show=True),
+    ]
 
     DEFAULT_CSS = """
     ChatScreen {
@@ -50,7 +64,7 @@ class ChatScreen(Screen[None]):
         overflow-y: auto;
         padding: 1 2;
     }
-    
+
     #input-container {
         height: auto;
         padding: 0 2 1 2;
@@ -102,6 +116,14 @@ class ChatScreen(Screen[None]):
 
         self._recent_tool_calls: list[ToolCallRecord] = []  # Keep history for replay
 
+        # Sidebar width state (indexes into SIDEBAR_WIDTH_STEPS)
+        self._left_sidebar_width_index: int = DEFAULT_SIDEBAR_WIDTH_INDEX
+        self._right_sidebar_width_index: int = DEFAULT_SIDEBAR_WIDTH_INDEX
+
+        # Context notification throttling
+        self._last_context_update_time: float = 0.0
+        self._context_update_throttle_seconds: float = 1.0  # Max 1 update per second
+
     def compose(self) -> ComposeResult:
         """Compose the chat screen layout."""
         yield Header()
@@ -127,6 +149,7 @@ class ChatScreen(Screen[None]):
 
         yield Container(ChatInput(), id="input-container")
         yield StatusBar(model=self.settings.current_llm_model)
+        yield Footer()
 
     async def on_mount(self) -> None:
         """Set up the screen when mounted."""
@@ -135,6 +158,9 @@ class ChatScreen(Screen[None]):
 
             # Register for tool call events from orchestrator
             self.orchestrator.register_tool_listener(self._on_tool_call_event)
+
+            # Register for context management notifications
+            self.orchestrator.set_context_notification_callback(self._handle_context_notification)
 
             # Add welcome message
             messages_container = self.query_one("#messages-container", VerticalScroll)
@@ -247,6 +273,9 @@ class ChatScreen(Screen[None]):
             misses = cache_stats.get("total_misses", 0)
             status_bar.update_cache_stats(hits, misses)
 
+            # Update context usage
+            self._update_context_status()
+
             # Scroll to bottom
             messages_container.scroll_end(animate=False)
 
@@ -267,6 +296,155 @@ class ChatScreen(Screen[None]):
         finally:
             self._current_assistant_message = None
 
+    def _handle_context_notification(self, level: str, message: str) -> None:
+        """
+        Handle context management notifications from orchestrator.
+
+        Args:
+            level: Severity level ("info", "warning", "error")
+            message: Notification message
+        """
+        try:
+            # Map level to Textual severity
+            if level == "error":
+                severity = "error"
+                timeout = 10
+            elif level == "warning":
+                severity = "warning"
+                timeout = 8
+            else:
+                severity = "information"
+                timeout = 5
+
+            # Show toast notification
+            self.notify(message, severity=severity, timeout=timeout)
+
+            # Update context status bar if this is a context-related notification
+            # (This will be called after the main update, so we can skip throttling here)
+            if any(
+                keyword in message.lower() for keyword in ["cached", "pruned", "context", "token"]
+            ):
+                self._update_context_status()
+
+        except Exception as e:
+            logger.warning(f"Failed to handle context notification: {e}", exc_info=True)
+
+    def _update_context_status(self) -> None:
+        """Update context usage in status bar with throttling."""
+        try:
+            # Throttle updates to avoid UI flicker
+            current_time = time.time()
+            if (
+                current_time - self._last_context_update_time
+                < self._context_update_throttle_seconds
+            ):
+                return
+
+            self._last_context_update_time = current_time
+
+            # Get usage from orchestrator's budget tracker
+            if hasattr(self.orchestrator, "budget_tracker"):
+                usage = self.orchestrator.budget_tracker.get_usage()
+                status_bar = self.query_one(StatusBar)
+                status_bar.update_context_usage(usage.utilization_pct)
+
+        except Exception as e:
+            logger.debug(f"Failed to update context status: {e}", exc_info=True)
+
+    # Sidebar resize methods
+    def _resize_sidebar(
+        self, sidebar_id: Literal["left", "right"], direction: Literal["expand", "shrink"]
+    ) -> bool:
+        """
+        Resize a sidebar by one step in the given direction.
+
+        Args:
+            sidebar_id: Which sidebar to resize
+            direction: Direction to resize
+
+        Returns:
+            True if resize happened, False if already at limit
+        """
+        # Get current state
+        if sidebar_id == "left":
+            current_index = self._left_sidebar_width_index
+            sidebar = self._log_groups_sidebar
+        else:
+            current_index = self._right_sidebar_width_index
+            sidebar = self._tool_sidebar
+
+        # Calculate new index
+        max_index = len(SIDEBAR_WIDTH_STEPS) - 1
+        if direction == "expand":
+            new_index = min(current_index + 1, max_index)
+        else:  # shrink
+            new_index = max(current_index - 1, 0)
+
+        # Check if at limit
+        if new_index == current_index:
+            return False
+
+        # Update state
+        if sidebar_id == "left":
+            self._left_sidebar_width_index = new_index
+        else:
+            self._right_sidebar_width_index = new_index
+
+        # Apply width to widget
+        new_width = SIDEBAR_WIDTH_STEPS[new_index]
+        if sidebar:
+            sidebar.styles.width = new_width
+
+        return True
+
+    def action_shrink_left_sidebar(self) -> None:
+        """Shrink the left (log groups) sidebar."""
+        if not self._log_groups_sidebar_visible:
+            self.notify("Log groups sidebar is hidden", severity="warning")
+            return
+
+        if self._resize_sidebar("left", "shrink"):
+            width = SIDEBAR_WIDTH_STEPS[self._left_sidebar_width_index]
+            self.notify(f"Log groups: {width} columns")
+        else:
+            self.notify("Log groups sidebar at minimum width", severity="warning")
+
+    def action_expand_left_sidebar(self) -> None:
+        """Expand the left (log groups) sidebar."""
+        if not self._log_groups_sidebar_visible:
+            self.notify("Log groups sidebar is hidden", severity="warning")
+            return
+
+        if self._resize_sidebar("left", "expand"):
+            width = SIDEBAR_WIDTH_STEPS[self._left_sidebar_width_index]
+            self.notify(f"Log groups: {width} columns")
+        else:
+            self.notify("Log groups sidebar at maximum width", severity="warning")
+
+    def action_shrink_right_sidebar(self) -> None:
+        """Shrink the right (tool calls) sidebar."""
+        if not self._tool_sidebar_visible:
+            self.notify("Tool calls sidebar is hidden", severity="warning")
+            return
+
+        if self._resize_sidebar("right", "shrink"):
+            width = SIDEBAR_WIDTH_STEPS[self._right_sidebar_width_index]
+            self.notify(f"Tool calls: {width} columns")
+        else:
+            self.notify("Tool calls sidebar at minimum width", severity="warning")
+
+    def action_expand_right_sidebar(self) -> None:
+        """Expand the right (tool calls) sidebar."""
+        if not self._tool_sidebar_visible:
+            self.notify("Tool calls sidebar is hidden", severity="warning")
+            return
+
+        if self._resize_sidebar("right", "expand"):
+            width = SIDEBAR_WIDTH_STEPS[self._right_sidebar_width_index]
+            self.notify(f"Tool calls: {width} columns")
+        else:
+            self.notify("Tool calls sidebar at maximum width", severity="warning")
+
     def toggle_sidebar(self) -> None:
         """Toggle the tools sidebar visibility."""
         self._tool_sidebar_visible = not self._tool_sidebar_visible
@@ -276,6 +454,10 @@ class ChatScreen(Screen[None]):
 
             # Refresh display when showing (in case data updated while hidden)
             if self._tool_sidebar_visible:
+                # Restore saved width
+                width = SIDEBAR_WIDTH_STEPS[self._right_sidebar_width_index]
+                self._tool_sidebar.styles.width = width
+
                 # Replay recent tool calls to populate sidebar
                 for record in self._recent_tool_calls:
                     self._tool_sidebar.update_tool_call(record)
@@ -289,6 +471,10 @@ class ChatScreen(Screen[None]):
 
             # Refresh display when showing (in case data updated while hidden)
             if self._log_groups_sidebar_visible:
+                # Restore saved width
+                width = SIDEBAR_WIDTH_STEPS[self._left_sidebar_width_index]
+                self._log_groups_sidebar.styles.width = width
+
                 self._log_groups_sidebar.refresh_display()
 
     def on_tool_call(self, record: ToolCallRecord) -> None:

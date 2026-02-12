@@ -23,7 +23,7 @@ async def handle_auth_login(args: argparse.Namespace) -> int:
     auth = GitHubCopilotAuth()
     try:
         print("\n🔐 GitHub Copilot Authentication\n")
-        token = await auth.authenticate(timeout=args.timeout)
+        await auth.authenticate(timeout=args.timeout)
         print("\n✅ Authentication successful!")
         print(f"Token saved to: {auth.auth_file_path}")
         return 0
@@ -67,7 +67,7 @@ async def handle_auth_status(args: argparse.Namespace) -> int:
     try:
         status = auth.get_status()
         print("\n🔍 GitHub Copilot Authentication Status\n")
-        print(f"Provider: github-copilot")
+        print("Provider: github-copilot")
         print(f"Authenticated: {status['authenticated']}")
         if status["authenticated"]:
             print(f"Token: {status['token_prefix']}")
@@ -188,13 +188,13 @@ For more information, visit: https://github.com/logai/logai
     )
 
     # logai auth logout
-    logout_parser = auth_subparsers.add_parser("logout", help="Remove GitHub Copilot credentials")
+    auth_subparsers.add_parser("logout", help="Remove GitHub Copilot credentials")
 
     # logai auth status
-    status_parser = auth_subparsers.add_parser("status", help="Show authentication status")
+    auth_subparsers.add_parser("status", help="Show authentication status")
 
     # logai auth list
-    list_parser = auth_subparsers.add_parser("list", help="List authenticated providers")
+    auth_subparsers.add_parser("list", help="List authenticated providers")
 
     # Parse arguments
     args = parser.parse_args()
@@ -275,11 +275,24 @@ For more information, visit: https://github.com/logai/logai
             ListLogGroupsTool,
             SearchLogsTool,
         )
+        from logai.tools.fetch_cached_result import FetchCachedResultTool
 
-        # Register tools in the registry
+        # Register CloudWatch tools in the registry
         ToolRegistry.register(ListLogGroupsTool(datasource, settings, cache=cache_manager))
         ToolRegistry.register(FetchLogsTool(datasource, sanitizer, settings, cache=cache_manager))
         ToolRegistry.register(SearchLogsTool(datasource, sanitizer, settings, cache=cache_manager))
+
+        # Initialize result cache for large tool results
+        from logai.core.context.result_cache import ResultCacheManager
+
+        result_cache = ResultCacheManager(
+            cache_dir=settings.cache_dir / "results",
+            ttl_seconds=getattr(settings, "cache_ttl_seconds", 3600),
+            max_size_mb=100,
+        )
+
+        # Register context management tool
+        ToolRegistry.register(FetchCachedResultTool(result_cache))
 
         # === NEW: Pre-load log groups ===
         from logai.core.log_group_manager import LogGroupManager
@@ -306,7 +319,7 @@ For more information, visit: https://github.com/logai/logai
         # Initialize LLM provider
         llm_provider = LiteLLMProvider.from_settings(settings)
 
-        # Initialize orchestrator (modified to accept log_group_manager)
+        # Initialize orchestrator with context management
         orchestrator = LLMOrchestrator(
             llm_provider=llm_provider,
             tool_registry=ToolRegistry,  # type: ignore[arg-type]
@@ -314,6 +327,7 @@ For more information, visit: https://github.com/logai/logai
             settings=settings,
             cache=cache_manager,
             log_group_manager=log_group_manager,
+            result_cache=result_cache,
         )
 
         print("✓ All components initialized")
