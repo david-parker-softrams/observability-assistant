@@ -11,14 +11,19 @@ Query your AWS CloudWatch logs using natural language. LogAI uses Large Language
 - 🛡️ **PII Sanitization**: Automatic redaction of sensitive data (emails, IPs, API keys, etc.)
 - ⚡ **Smart Caching**: SQLite-based caching to minimize AWS API calls
 - 🎨 **Interactive TUI**: Beautiful terminal user interface built with Textual
-- 🔌 **Multiple LLM Providers**: Support for Anthropic Claude, OpenAI GPT, and Ollama (local models)
+- 🔌 **Multiple LLM Providers**: Support for Anthropic Claude, OpenAI GPT, GitHub Copilot (25+ models), and Ollama (local models)
 - 📊 **AWS CloudWatch Integration**: Seamless integration with CloudWatch Logs
+- 🛠️ **Tool Execution Sidebar**: Real-time visibility into agent tool execution (NEW)
+- 🔄 **Agent Self-Direction**: Automatic retry with time range expansion on empty results (NEW)
 
 ## 📋 Requirements
 
 - Python 3.11 or higher
 - AWS credentials with CloudWatch Logs read access
-- API key for Anthropic Claude or OpenAI GPT (or local Ollama installation)
+- One of the following:
+  - API key for Anthropic Claude or OpenAI GPT
+  - GitHub Copilot subscription (access to 25+ models)
+  - Local Ollama installation
 
 ## 🚀 Quick Start
 
@@ -45,7 +50,7 @@ cp .env.example .env
 
 2. Edit `.env` and configure your credentials:
 ```bash
-# LLM Provider (choose one)
+# LLM Provider (choose one: anthropic, openai, github-copilot, ollama)
 LOGAI_LLM_PROVIDER=anthropic
 LOGAI_ANTHROPIC_API_KEY=your-api-key-here
 
@@ -54,6 +59,33 @@ AWS_DEFAULT_REGION=us-east-1
 AWS_ACCESS_KEY_ID=your-access-key
 AWS_SECRET_ACCESS_KEY=your-secret-key
 ```
+
+### Using GitHub Copilot (25+ Models)
+
+If you have a GitHub Copilot subscription, you can access 25+ models from Claude, GPT, Gemini, and more:
+
+1. **Configure `.env`:**
+```bash
+LOGAI_LLM_PROVIDER=github-copilot
+LOGAI_GITHUB_COPILOT_MODEL=gpt-4o-mini
+# Popular options: claude-opus-4.6, gpt-4o, gpt-5.2, gemini-2.5-pro
+```
+
+2. **Authenticate:**
+```bash
+logai auth login
+```
+
+Follow the browser prompts to complete OAuth authentication. No API key needed!
+
+**Available Models:**
+- **Claude:** claude-opus-4.6, claude-sonnet-4.5, claude-haiku-4.5
+- **GPT:** gpt-5.2, gpt-5.1, gpt-5, gpt-4o, gpt-4o-mini
+- **Gemini:** gemini-3-pro-preview, gemini-2.5-pro, gemini-2.5-flash
+- **Grok:** grok-2-1212, grok-code-fast-1
+- ...and more!
+
+See [Configuration Guide](docs/user-guide/configuration.md#github-copilot-configuration) for the complete list.
 
 ### Using Ollama (Local Models)
 
@@ -256,9 +288,12 @@ Within the LogAI chat interface:
 
 - `/help` - Show available commands
 - `/clear` - Clear conversation history
+- `/tools` - Toggle tool execution sidebar (NEW)
 - `/cache status` - Show cache statistics
 - `/cache clear` - Clear cache
 - `/quit` or `/exit` - Exit application
+
+See [Runtime Commands](docs/user-guide/runtime-commands.md) for complete documentation.
 
 ## 🏗️ Architecture
 
@@ -329,8 +364,18 @@ ruff format src/logai tests/
 
 ## 📚 Documentation
 
+### User Documentation
+- **[User Guide](docs/user-guide/README.md)** - Complete end-user documentation
+  - [Getting Started](docs/user-guide/getting-started.md) - Installation and setup
+  - [CLI Reference](docs/user-guide/cli-reference.md) - Command-line options
+  - [Runtime Commands](docs/user-guide/runtime-commands.md) - Slash commands
+  - [Configuration Guide](docs/user-guide/configuration.md) - All settings
+  - [Features Overview](docs/user-guide/features.md) - What LogAI can do
+  - [Usage Examples](docs/user-guide/examples.md) - Common queries
+  - [Troubleshooting](docs/user-guide/troubleshooting.md) - Common issues
+
+### Developer Documentation
 - [Architecture Document](docs/architecture.md) - Detailed system design
-- [Configuration Guide](docs/configuration.md) - Advanced configuration options
 - [Development Guide](docs/development.md) - Contributing guidelines
 
 ## 🔒 Security & Privacy
@@ -361,10 +406,12 @@ PII sanitization is **enabled by default** but can be disabled via `LOGAI_PII_SA
 
 ### MVP (Current)
 - ✅ AWS CloudWatch Logs integration
-- ✅ Anthropic Claude & OpenAI GPT support
-- ✅ Interactive TUI chat interface
+- ✅ Anthropic Claude, OpenAI GPT, and GitHub Copilot support (25+ models)
+- ✅ Interactive TUI chat interface with tool execution sidebar
+- ✅ Agent self-direction with automatic retry
 - ✅ PII sanitization
 - ✅ SQLite caching
+- ✅ Ollama support for local models
 
 ### Post-MVP
 - ⬜ Additional data sources (Splunk, Datadog, New Relic)
