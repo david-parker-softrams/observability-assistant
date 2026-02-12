@@ -98,6 +98,12 @@ class LogAISettings(BaseSettings):
         description="Enable PII sanitization before sending logs to LLM",
     )
 
+    # === UI Settings ===
+    log_groups_sidebar_visible: bool = Field(
+        default=True,
+        description="Show log groups sidebar by default at startup",
+    )
+
     cache_dir: Path = Field(
         default_factory=lambda: Path.home() / ".logai" / "cache",
         description="Directory for cache storage",

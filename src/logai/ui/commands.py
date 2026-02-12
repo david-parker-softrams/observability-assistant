@@ -70,6 +70,10 @@ class CommandHandler:
             return self._clear_history()
         elif cmd == "/refresh":
             return await self._refresh_log_groups(parts[1] if len(parts) > 1 else "")
+        elif cmd == "/logs":
+            return self._toggle_log_groups_sidebar()
+        elif cmd == "/tools":
+            return self._toggle_tools_sidebar()
         elif cmd == "/cache":
             if len(parts) > 1:
                 subcmd = parts[1].lower()
@@ -87,8 +91,6 @@ class CommandHandler:
             return self._show_model()
         elif cmd == "/config":
             return self._show_config()
-        elif cmd == "/tools":
-            return self._toggle_tools_sidebar()
         else:
             return f"Unknown command: {cmd}\nUse /help to see available commands."
 
@@ -149,11 +151,12 @@ The previous log group list (if any) has been preserved."""
 [cyan]/help[/cyan] - Show this help message
 [cyan]/clear[/cyan] - Clear conversation history
 [cyan]/refresh[/cyan] - Refresh the log groups list from AWS
+[cyan]/logs[/cyan] - Toggle log groups sidebar (left)
+[cyan]/tools[/cyan] - Toggle tool calls sidebar (right)
 [cyan]/cache status[/cyan] - Show cache statistics
 [cyan]/cache clear[/cyan] - Clear the cache
 [cyan]/model[/cyan] - Show current LLM model
 [cyan]/config[/cyan] - Show current configuration
-[cyan]/tools[/cyan] - Toggle tool calls sidebar
 [cyan]/quit[/cyan] or [cyan]/exit[/cyan] - Exit the application (or use Ctrl+C)
 
 [bold]Usage Tips:[/bold]
@@ -229,9 +232,20 @@ Cache TTL: {self.settings.cache_ttl_seconds}s
         """Toggle the tools sidebar visibility."""
         if self.chat_screen:
             self.chat_screen.toggle_sidebar()
-            if self.chat_screen._sidebar_visible:
+            if self.chat_screen._tool_sidebar_visible:
                 return "[dim]Tool calls sidebar shown.[/dim]"
             else:
                 return "[dim]Tool calls sidebar hidden.[/dim]"
+        else:
+            return "[dim]Sidebar toggle not available.[/dim]"
+
+    def _toggle_log_groups_sidebar(self) -> str:
+        """Toggle the log groups sidebar visibility."""
+        if self.chat_screen:
+            self.chat_screen.toggle_log_groups_sidebar()
+            if self.chat_screen._log_groups_sidebar_visible:
+                return "[dim]Log groups sidebar shown.[/dim]"
+            else:
+                return "[dim]Log groups sidebar hidden.[/dim]"
         else:
             return "[dim]Sidebar toggle not available.[/dim]"

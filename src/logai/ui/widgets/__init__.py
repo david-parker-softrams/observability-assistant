@@ -1,6 +1,7 @@
 """LogAI UI widgets."""
 
 from logai.ui.widgets.input_box import ChatInput
+from logai.ui.widgets.log_groups_sidebar import LogGroupsSidebar
 from logai.ui.widgets.messages import (
     AssistantMessage,
     ChatMessage,
@@ -21,5 +22,6 @@ __all__ = [
     "LoadingIndicator",
     "ErrorMessage",
     "StatusBar",
+    "LogGroupsSidebar",
     "ToolCallsSidebar",
 ]

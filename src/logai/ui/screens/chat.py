@@ -15,6 +15,7 @@ from logai.config import get_settings
 from logai.core.orchestrator import LLMOrchestrator, ToolCallRecord, ToolCallStatus
 from logai.ui.commands import CommandHandler
 from logai.ui.widgets.input_box import ChatInput
+from logai.ui.widgets.log_groups_sidebar import LogGroupsSidebar
 from logai.ui.widgets.messages import (
     AssistantMessage,
     ErrorMessage,
@@ -54,6 +55,16 @@ class ChatScreen(Screen[None]):
         height: auto;
         padding: 0 2 1 2;
     }
+
+    /* Left sidebar positioning */
+    #log-groups-sidebar {
+        dock: left;
+    }
+
+    /* Right sidebar positioning */
+    #tools-sidebar {
+        dock: right;
+    }
     """
 
     def __init__(
@@ -81,21 +92,38 @@ class ChatScreen(Screen[None]):
         self._current_assistant_message: AssistantMessage | None = None
         self._current_loading_indicator: LoadingIndicator | None = None
 
-        # Sidebar state - open by default per user requirement
-        self._sidebar_visible = True
+        # Sidebar states - read defaults from settings
+        self._tool_sidebar_visible = True  # Right sidebar (existing)
+        self._log_groups_sidebar_visible = self.settings.log_groups_sidebar_visible  # Left sidebar
+
+        # Widget references
         self._tool_sidebar: ToolCallsSidebar | None = None
+        self._log_groups_sidebar: LogGroupsSidebar | None = None
+
         self._recent_tool_calls: list[ToolCallRecord] = []  # Keep history for replay
 
     def compose(self) -> ComposeResult:
         """Compose the chat screen layout."""
         yield Header()
 
-        # Main content area with optional sidebar
+        # Main content area with sidebars
         with Horizontal(id="main-content"):
+            # Left sidebar - log groups
+            self._log_groups_sidebar = LogGroupsSidebar(
+                log_group_manager=self.log_group_manager,
+                id="log-groups-sidebar",
+            )
+            # Set initial visibility
+            self._log_groups_sidebar.display = self._log_groups_sidebar_visible
+            yield self._log_groups_sidebar
+
+            # Center - messages
             yield VerticalScroll(id="messages-container")
-            if self._sidebar_visible:
-                self._tool_sidebar = ToolCallsSidebar(id="tools-sidebar")
-                yield self._tool_sidebar
+
+            # Right sidebar - tool calls
+            self._tool_sidebar = ToolCallsSidebar(id="tools-sidebar")
+            self._tool_sidebar.display = self._tool_sidebar_visible
+            yield self._tool_sidebar
 
         yield Container(ChatInput(), id="input-container")
         yield StatusBar(model=self.settings.current_llm_model)
@@ -241,22 +269,27 @@ class ChatScreen(Screen[None]):
 
     def toggle_sidebar(self) -> None:
         """Toggle the tools sidebar visibility."""
-        self._sidebar_visible = not self._sidebar_visible
+        self._tool_sidebar_visible = not self._tool_sidebar_visible
 
-        if self._sidebar_visible:
-            # Mount sidebar
-            main_content = self.query_one("#main-content", Horizontal)
-            self._tool_sidebar = ToolCallsSidebar(id="tools-sidebar")
-            main_content.mount(self._tool_sidebar)
+        if self._tool_sidebar:
+            self._tool_sidebar.display = self._tool_sidebar_visible
 
-            # Replay recent tool calls to populate sidebar
-            for record in self._recent_tool_calls:
-                self._tool_sidebar.update_tool_call(record)
-        else:
-            # Remove sidebar
-            if self._tool_sidebar:
-                self._tool_sidebar.remove()
-                self._tool_sidebar = None
+            # Refresh display when showing (in case data updated while hidden)
+            if self._tool_sidebar_visible:
+                # Replay recent tool calls to populate sidebar
+                for record in self._recent_tool_calls:
+                    self._tool_sidebar.update_tool_call(record)
+
+    def toggle_log_groups_sidebar(self) -> None:
+        """Toggle the log groups sidebar visibility."""
+        self._log_groups_sidebar_visible = not self._log_groups_sidebar_visible
+
+        if self._log_groups_sidebar:
+            self._log_groups_sidebar.display = self._log_groups_sidebar_visible
+
+            # Refresh display when showing (in case data updated while hidden)
+            if self._log_groups_sidebar_visible:
+                self._log_groups_sidebar.refresh_display()
 
     def on_tool_call(self, record: ToolCallRecord) -> None:
         """

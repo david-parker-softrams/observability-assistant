@@ -225,10 +225,34 @@ When LogAI starts, it automatically:
 
 LogAI opens with an interactive terminal interface featuring:
 
-1. **Chat Area** (center) - Where you ask questions and see responses
-2. **Tool Sidebar** (right) - Shows which tools the agent is using in real-time
-3. **Input Box** (bottom) - Where you type your queries
-4. **Status Bar** (very bottom) - Shows keyboard shortcuts
+1. **Log Groups Sidebar** (left) - Shows all your CloudWatch log groups for quick reference
+2. **Chat Area** (center) - Where you ask questions and see responses
+3. **Tool Sidebar** (right) - Shows which tools the agent is using in real-time
+4. **Input Box** (bottom) - Where you type your queries
+5. **Status Bar** (very bottom) - Shows keyboard shortcuts
+
+**About the Log Groups Sidebar:**
+
+The left sidebar displays all your log groups in alphabetical order. This gives you a complete overview of what's available at a glance.
+
+- **Visible by default** - Shows automatically when LogAI starts
+- **Shows count** - Title displays "LOG GROUPS (135)" with your total count
+- **Auto-updates** - Refreshes automatically when you use `/refresh` command
+- **Toggleable** - Use `/logs` command to show or hide the sidebar
+- **Smart display** - Long log group names are intelligently truncated to fit
+
+**Layout:**
+```
+┌─────────────┬────────────────────────┬──────────────┐
+│ Log Groups  │   Chat Messages        │ Tool Calls   │
+│ (left)      │   (center)             │ (right)      │
+│             │                        │              │
+│ /aws/lambda │ User: Show errors      │ ◯ pending    │
+│ /aws/ecs    │ Agent: Let me check... │ ✓ success    │
+│ /aws/api    │                        │              │
+│ ...         │                        │              │
+└─────────────┴────────────────────────┴──────────────┘
+```
 
 ### Try Your First Query
 
@@ -284,7 +308,8 @@ While LogAI is running, you can use these special commands:
 |---------|-------------|
 | `/help` | Show available commands |
 | `/refresh` | Update the list of log groups from AWS |
-| `/tools` | Toggle tool sidebar visibility |
+| `/logs` | Toggle log groups sidebar (left) |
+| `/tools` | Toggle tool sidebar (right) |
 | `/cache status` | Show cache statistics |
 | `/cache clear` | Clear the cache |
 | `/clear` | Clear conversation history |
@@ -335,7 +360,16 @@ If you have many log groups (1000s), loading them at startup may take 10-30 seco
 
 ### Tool sidebar not showing
 
-Use the `/tools` command to toggle the sidebar visibility. It's shown by default.
+Use the `/tools` command to toggle the tool sidebar visibility (right side). It's shown by default.
+
+### Log groups sidebar not showing
+
+Use the `/logs` command to toggle the log groups sidebar visibility (left side). It's shown by default.
+
+To change the default visibility, add this to your `.env` file:
+```bash
+LOGAI_LOG_GROUPS_SIDEBAR_VISIBLE=false  # Hide by default
+```
 
 For more troubleshooting help, see [Troubleshooting Guide](troubleshooting.md).
 

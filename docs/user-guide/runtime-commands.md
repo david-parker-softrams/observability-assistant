@@ -20,11 +20,12 @@ Available Commands:
 /help - Show this help message
 /clear - Clear conversation history
 /refresh - Update the list of log groups from AWS
+/logs - Toggle log groups sidebar (left)
+/tools - Toggle tool calls sidebar (right)
 /cache status - Show cache statistics
 /cache clear - Clear the cache
 /model - Show current LLM model
 /config - Show current configuration
-/tools - Toggle tool calls sidebar
 /quit or /exit - Exit the application (or use Ctrl+C)
 
 Usage Tips:
@@ -63,7 +64,8 @@ Update the list of CloudWatch log groups from AWS. LogAI automatically loads log
 **What It Does:**
 1. Fetches fresh list of all log groups from AWS CloudWatch
 2. Updates the agent's internal knowledge with the new list
-3. Replaces the old list completely
+3. Updates the log groups sidebar (if visible)
+4. Replaces the old list completely
 
 **Performance:**
 - Typically completes in 1-3 seconds for small accounts (<500 groups)
@@ -221,6 +223,62 @@ Cache TTL: 86400s
 
 ---
 
+### `/logs`
+
+Toggle the visibility of the log groups sidebar. The sidebar displays all your CloudWatch log groups in alphabetical order on the left side of the interface.
+
+**Usage:**
+```
+/logs
+```
+
+**Example Output:**
+```
+Log groups sidebar hidden.
+```
+
+Or:
+```
+Log groups sidebar shown.
+```
+
+**About the Log Groups Sidebar:**
+
+When visible (default), the sidebar displays:
+- Complete list of all CloudWatch log groups
+- Count in title (e.g., "LOG GROUPS (135)")
+- Alphabetically sorted names
+- Smart truncation for long names
+- Automatically updates when `/refresh` is used
+
+**When to Use:**
+- You want more screen space for the chat
+- Quick reference to see what log groups are available
+- Verify a specific log group exists
+- See the total count of your log groups
+
+**Tip:** The sidebar is shown by default. Toggle it off if you prefer a simpler interface or have a narrow terminal.
+
+**Layout with Both Sidebars:**
+```
+┌─────────────┬────────────────────────┬──────────────┐
+│ Log Groups  │   Chat Messages        │ Tool Calls   │
+│ (left)      │   (center)             │ (right)      │
+└─────────────┴────────────────────────┴──────────────┘
+```
+
+**Default Visibility:**
+
+To change whether the sidebar is visible at startup, edit your `.env` file:
+```bash
+LOGAI_LOG_GROUPS_SIDEBAR_VISIBLE=true   # Show by default
+LOGAI_LOG_GROUPS_SIDEBAR_VISIBLE=false  # Hide by default
+```
+
+The `/logs` command toggles the sidebar during your session, regardless of the configuration setting.
+
+---
+
 ### `/tools`
 
 Toggle the visibility of the tool calls sidebar. The sidebar shows real-time information about which tools the agent is using and what results it receives.
@@ -242,7 +300,7 @@ Tool calls sidebar shown.
 
 **About the Tool Sidebar:**
 
-When visible (default), the sidebar displays:
+When visible (default), the right sidebar displays:
 - Tool names (e.g., `list_log_groups`, `fetch_logs`)
 - Status indicators (◯ pending → ⏳ running → ✓ success / ✗ error)
 - Parameters passed to each tool
@@ -255,7 +313,7 @@ When visible (default), the sidebar displays:
 - Debugging unexpected behavior
 - Understanding which tools are being called
 
-**Tip:** The sidebar is shown by default. Toggle it off if you prefer a simpler interface.
+**Tip:** The right sidebar is shown by default. Toggle it off if you prefer a simpler interface.
 
 ---
 
@@ -399,10 +457,14 @@ If hit rate is low, consider increasing cache size or TTL in your configuration.
 ### Managing Screen Space
 
 ```
-/tools                  → Hide sidebar for more room
+/logs                   → Hide left sidebar for more room
+/tools                  → Hide right sidebar for more room
 [Ask your questions]
+/logs                   → Show sidebar to see log groups
 /tools                  → Show sidebar to see tool details
 ```
+
+**Tip:** You can hide both sidebars for maximum chat space, or show both for full visibility into what's available and what the agent is doing.
 
 ### Before Ending Session
 
@@ -425,7 +487,8 @@ Understanding the difference between commands and natural language:
 | `clear the cache` | Query | AI agent | Will explain caching, doesn't clear it |
 | `/refresh` | Command | LogAI directly | Update log groups list |
 | `refresh my understanding` | Query | AI agent | Will re-explain something |
-| `/tools` | Command | LogAI directly | Toggle sidebar |
+| `/logs` | Command | LogAI directly | Toggle log groups sidebar |
+| `/tools` | Command | LogAI directly | Toggle tool sidebar |
 | `what tools are available?` | Query | AI agent | Explains available tools |
 
 **Rule of Thumb:** If you want to control LogAI itself, use a `/command`. If you want to work with logs, use natural language.

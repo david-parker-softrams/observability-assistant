@@ -309,6 +309,44 @@ LogAI checks for AWS credentials in this order:
 
 ## Application Settings
 
+### UI Settings
+
+#### Log Groups Sidebar Visibility
+
+**Variable:** `LOGAI_LOG_GROUPS_SIDEBAR_VISIBLE`  
+**Required:** No  
+**Default:** `true`  
+**Type:** Boolean (`true` or `false`)
+
+```bash
+LOGAI_LOG_GROUPS_SIDEBAR_VISIBLE=true
+```
+
+**Purpose:** Controls whether the log groups sidebar is visible by default when LogAI starts.
+
+**When Enabled (Default):**
+- Left sidebar shows all log groups at startup
+- Provides quick reference to available log groups
+- Shows count in title: "LOG GROUPS (135)"
+- Automatically updates when `/refresh` is used
+
+**When Disabled:**
+- Sidebar hidden at startup
+- More screen space for chat and tool sidebar
+- Can still be toggled on with `/logs` command
+- Setting persists across restarts
+
+**Use Cases:**
+- **Enable (Default):** When you want to see all available log groups at a glance
+- **Disable:** When you prefer a cleaner interface or have a small terminal window
+
+**Toggle During Session:**
+```
+/logs                   → Show/hide sidebar (doesn't change config)
+```
+
+---
+
 ### PII Sanitization
 
 **Variable:** `LOGAI_PII_SANITIZATION_ENABLED`  
@@ -708,6 +746,9 @@ LOGAI_PII_SANITIZATION_ENABLED=true
 LOGAI_CACHE_DIR=~/.logai/cache
 LOGAI_CACHE_MAX_SIZE_MB=1000
 LOGAI_CACHE_TTL_SECONDS=86400
+
+# === UI Settings ===
+LOGAI_LOG_GROUPS_SIDEBAR_VISIBLE=true
 
 # === Agent Behavior ===
 LOGAI_MAX_TOOL_ITERATIONS=15

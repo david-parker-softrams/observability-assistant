@@ -57,6 +57,9 @@ class LogGroupManagerResult:
 # Type alias for progress callback
 ProgressCallback = Callable[[int, str], None]  # (count, message)
 
+# Type alias for update callbacks (UI notifications)
+UpdateCallback = Callable[[], None]  # No parameters - sidebar fetches data itself
+
 
 class LogGroupManager:
     """
@@ -89,6 +92,8 @@ class LogGroupManager:
         self._state = LogGroupManagerState.UNINITIALIZED
         self._last_refresh: datetime | None = None
         self._last_error: str | None = None
+        # Update callbacks for sidebar notifications
+        self._update_callbacks: list[UpdateCallback] = []
 
     @property
     def state(self) -> LogGroupManagerState:
@@ -114,6 +119,42 @@ class LogGroupManager:
     def is_ready(self) -> bool:
         """Check if log groups are loaded and ready."""
         return self._state == LogGroupManagerState.READY
+
+    def register_update_callback(self, callback: UpdateCallback) -> None:
+        """
+        Register a callback to be notified when log groups are updated.
+
+        Args:
+            callback: Function to call after successful refresh.
+                     Takes no parameters - use get_log_group_names() to fetch data.
+        """
+        if callback not in self._update_callbacks:
+            self._update_callbacks.append(callback)
+
+    def unregister_update_callback(self, callback: UpdateCallback) -> None:
+        """
+        Unregister an update callback.
+
+        Args:
+            callback: Function to remove from notifications
+        """
+        if callback in self._update_callbacks:
+            self._update_callbacks.remove(callback)
+
+    def _notify_update(self) -> None:
+        """
+        Notify all registered callbacks that log groups have been updated.
+
+        Called after successful load_all() or refresh().
+        """
+        for callback in self._update_callbacks:
+            try:
+                callback()
+            except Exception as e:
+                # Log but don't fail - UI callback errors shouldn't break manager
+                import logging
+
+                logging.getLogger(__name__).warning(f"Update callback error: {e}", exc_info=True)
 
     async def load_all(
         self,
@@ -169,6 +210,9 @@ class LogGroupManager:
 
             if progress_callback:
                 progress_callback(len(all_groups), "Log group discovery complete")
+
+            # Notify sidebar callbacks
+            self._notify_update()
 
             return LogGroupManagerResult(
                 success=True,

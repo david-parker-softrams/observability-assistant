@@ -122,6 +122,149 @@ If loading fails at startup:
 
 ---
 
+### Log Groups Sidebar
+
+**NEW FEATURE** - A dedicated left sidebar that displays all your CloudWatch log groups for quick reference and easy navigation.
+
+#### What It Is
+
+The log groups sidebar appears on the left side of the LogAI interface and shows a complete, alphabetically sorted list of all your CloudWatch log groups.
+
+#### Visual Layout
+
+```
+┌─────────────┬────────────────────────┬──────────────┐
+│ LOG GROUPS  │   Chat Messages        │ Tool Calls   │
+│   (135)     │   (center)             │ (right)      │
+│             │                        │              │
+│ /aws/lambda │ User: Show errors      │ ◯ list_...   │
+│ /aws/ecs/   │ Agent: Checking logs.. │ ✓ search_... │
+│ /aws/api/   │                        │              │
+│ /custom/app │                        │              │
+│ ...         │                        │              │
+└─────────────┴────────────────────────┴──────────────┘
+```
+
+#### Key Features
+
+**Always Up-to-Date:**
+- Shows all log groups loaded at startup
+- Automatically refreshes when you use `/refresh` command
+- Count updates in title: "LOG GROUPS (135)" → "LOG GROUPS (142)"
+
+**Smart Display:**
+- Alphabetically sorted for easy scanning
+- Long names intelligently truncated to fit
+- Preserves important prefix and suffix parts
+- Example: `/aws/lambda/very-long-name-production` → `/aws/lamb...n-production`
+
+**Toggleable:**
+- Visible by default at startup
+- Use `/logs` command to show or hide
+- State remembered during your session
+- Configure default visibility in `.env` file
+
+**Efficient:**
+- Handles 1000s of log groups smoothly
+- Fast scrolling with keyboard or mouse
+- No performance impact on chat or tools
+
+#### How to Use
+
+**Toggle Visibility:**
+```
+/logs                   → Hide or show sidebar
+```
+
+**Configure Default State:**
+
+Edit your `.env` file:
+```bash
+# Show sidebar by default (default)
+LOGAI_LOG_GROUPS_SIDEBAR_VISIBLE=true
+
+# Hide sidebar by default
+LOGAI_LOG_GROUPS_SIDEBAR_VISIBLE=false
+```
+
+**Update Log Groups:**
+```
+/refresh                → Sidebar updates automatically
+```
+
+#### Benefits
+
+**Quick Reference:**
+- See all available log groups at a glance
+- No need to ask "what log groups do I have?"
+- Verify a log group exists before querying
+- Understand the structure of your log groups
+
+**Better Workflow:**
+- Copy log group names for precise queries
+- See the total count of your log groups
+- Track when new log groups are added
+- More context while investigating issues
+
+**Screen Space Management:**
+- Works alongside tool sidebar (both can be visible)
+- Can hide either or both sidebars as needed
+- Chat area automatically adjusts to available space
+- Flexible layout for different terminal sizes
+
+#### Working with the Tool Sidebar
+
+LogAI supports having both sidebars visible simultaneously:
+
+**Both Sidebars Visible (Default):**
+- Left sidebar: Shows available log groups
+- Right sidebar: Shows tool execution details
+- Center: Chat conversation
+
+**Flexible Combinations:**
+```
+/logs                   → Toggle left sidebar (log groups)
+/tools                  → Toggle right sidebar (tool calls)
+```
+
+You can show/hide any combination:
+- Both visible (full visibility)
+- Only log groups (focus on what's available)
+- Only tool calls (focus on agent actions)
+- Neither (maximum chat space)
+
+#### Use Cases
+
+**Exploring Available Logs:**
+```
+User: [Looks at sidebar] I see there's a /aws/ecs/api log group
+User: Show me errors from /aws/ecs/api in the last hour
+```
+
+**Verifying Log Groups:**
+```
+User: [Checks sidebar] The new service log group appeared after /refresh
+User: Great! Now analyze /aws/lambda/new-service
+```
+
+**Tracking Growth:**
+```
+Before deployment: LOG GROUPS (135)
+[Deploy new services]
+/refresh
+After deployment: LOG GROUPS (142)
+[7 new log groups visible in sidebar]
+```
+
+#### Performance Notes
+
+- **100 log groups:** Instant display
+- **500 log groups:** Smooth scrolling
+- **1000+ log groups:** Still responsive, efficient rendering
+- **Updates:** Happen in <100ms when using `/refresh`
+
+---
+
 ### Intelligent Tool Execution
 
 LogAI uses three specialized tools to fetch and analyze your logs. The AI agent automatically selects the right tools for your query.
@@ -520,6 +663,7 @@ Agent: [Refines time range, keeps context]
 LogAI uses Textual to provide a rich terminal interface.
 
 **Layout:**
+- **Log Groups Sidebar** (left) - List of all CloudWatch log groups
 - **Chat Area** (center) - Conversation with the agent
 - **Tool Sidebar** (right) - Tool execution details
 - **Input Box** (bottom) - Type queries here
@@ -528,6 +672,7 @@ LogAI uses Textual to provide a rich terminal interface.
 **Features:**
 - Rich text formatting (bold, colors, code blocks)
 - Scrollable chat history
+- Collapsible sidebars (left and right)
 - Expandable tool results
 - Keyboard navigation
 - Mouse support (click, scroll)
@@ -550,7 +695,9 @@ Special commands for controlling LogAI:
 | Command | Purpose |
 |---------|---------|
 | `/help` | Show available commands |
-| `/tools` | Toggle tool sidebar |
+| `/logs` | Toggle log groups sidebar (left) |
+| `/tools` | Toggle tool sidebar (right) |
+| `/refresh` | Update log groups list |
 | `/cache status` | View cache stats |
 | `/cache clear` | Clear cache |
 | `/model` | Show current LLM model |

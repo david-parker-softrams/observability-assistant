@@ -730,27 +730,38 @@ rm -rf ~/.logai/cache/*
 
 **Problem:**
 
-Tool sidebar is missing or invisible.
+Tool sidebar or log groups sidebar is missing or invisible.
 
 **Solutions:**
 
-**1. Toggle sidebar:**
+**1. Toggle sidebars:**
 ```
-/tools
+/logs                   → Toggle log groups sidebar (left)
+/tools                  → Toggle tool sidebar (right)
 ```
 
 **2. Expand terminal width:**
 
-The sidebar requires at least 80 columns total width.
+Both sidebars require sufficient terminal width.
 
 Check terminal size:
 ```bash
-tput cols  # Should be 80+
+tput cols  # Should be 80+ for basic layout, 110+ for both sidebars
 ```
 
 Resize terminal or use fullscreen.
 
-**3. Check for UI errors:**
+**3. Check default visibility:**
+
+For log groups sidebar, verify your `.env` setting:
+```bash
+# In .env
+LOGAI_LOG_GROUPS_SIDEBAR_VISIBLE=true
+```
+
+If set to `false`, the sidebar is hidden at startup but can still be toggled with `/logs`.
+
+**4. Check for UI errors:**
 
 Run with debug logging:
 ```bash
@@ -759,6 +770,140 @@ logai
 ```
 
 Check for UI-related errors in output.
+
+---
+
+### Log Groups Sidebar Not Updating
+
+**Problem:**
+
+Log groups sidebar shows old data after you've created or deleted log groups in AWS.
+
+**Cause:**
+
+The sidebar displays the log groups loaded at startup or from the last `/refresh` command. It doesn't automatically detect changes in AWS.
+
+**Solution:**
+
+Use the `/refresh` command to update the list:
+```
+/refresh
+```
+
+**Example:**
+```
+[Check sidebar: LOG GROUPS (135)]
+[Create new log group in AWS Console]
+[Check sidebar: Still shows 135]
+/refresh
+[Sidebar updates: LOG GROUPS (136)]
+```
+
+**Automatic Updates:**
+
+The sidebar automatically updates when:
+- LogAI starts (loads all log groups)
+- You run `/refresh` command
+- Log group manager refreshes its data
+
+The sidebar does NOT update when:
+- You create/delete log groups in AWS (need manual `/refresh`)
+- Agent discovers log groups via tools (pre-loaded list is separate)
+
+---
+
+### Log Groups Sidebar Shows Wrong Count
+
+**Problem:**
+
+The sidebar title shows a count that doesn't match what you expect.
+
+**Causes & Solutions:**
+
+**1. Stale Data**
+
+You made changes in AWS but haven't refreshed:
+```
+/refresh                → Update the list
+```
+
+**2. Different Region**
+
+You're connected to a different region than expected:
+```
+/config                 → Check current region
+```
+
+If wrong region:
+```bash
+# Exit LogAI (Ctrl+C)
+logai --aws-region us-west-2    → Connect to correct region
+```
+
+**3. Permission Issues**
+
+Your AWS credentials may not have access to all log groups. The count shows only what you can see.
+
+Test permissions:
+```bash
+aws logs describe-log-groups --profile my-profile --region us-east-1
+```
+
+**4. Filter Applied**
+
+The agent doesn't apply filters to the sidebar - it shows ALL log groups. If you see fewer than expected, check your AWS permissions.
+
+---
+
+### Log Groups Sidebar Shows Truncated Names
+
+**Problem:**
+
+Log group names are shortened with "..." in the middle, making them hard to identify.
+
+**Cause:**
+
+Long log group names are automatically truncated to fit the sidebar width (28 columns).
+
+**Example:**
+```
+Original: /aws/lambda/very-long-function-name-production
+Sidebar:  /aws/lamb...n-production
+```
+
+**Solutions:**
+
+**1. This is expected behavior**
+
+The truncation preserves important parts:
+- **Prefix** (e.g., `/aws/lambda/`) - Shows service type
+- **Suffix** (e.g., `-production`) - Shows environment
+
+You can still identify log groups and use them in queries.
+
+**2. Use exact names from agent**
+
+Ask the agent to list log groups:
+```
+List all my log groups
+```
+
+The agent's response will show full, untruncated names.
+
+**3. Use prefix filtering**
+
+Ask about groups you know:
+```
+Show me all Lambda log groups
+```
+
+The agent will find them regardless of truncation in the sidebar.
+
+**4. Copy from agent responses**
+
+When the agent lists log groups or uses them in tool calls, the tool sidebar (right) shows full names. You can reference these full names in your queries.
+
+**Note:** The truncation is purely visual in the sidebar. It doesn't affect the agent's ability to find or use log groups.
 
 ---
 
