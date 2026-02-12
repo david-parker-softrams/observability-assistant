@@ -36,6 +36,92 @@ Compare error rates between service-a and service-b
 
 ---
 
+### Pre-loaded Log Group Context
+
+**NEW FEATURE** - LogAI automatically loads all your CloudWatch log groups at startup and provides them to the AI agent.
+
+#### What It Does
+
+When LogAI starts, it:
+1. Connects to AWS CloudWatch
+2. Fetches ALL your log groups (handles thousands seamlessly)
+3. Provides the complete list to the AI agent
+4. Shows progress during loading
+
+#### Why It Matters
+
+**Before this feature:**
+- Agent had to call `list_log_groups` tool every time you asked about logs
+- Slower first response in conversations
+- More AWS API calls
+
+**With pre-loaded context:**
+- Agent already knows your log groups from the start
+- Faster queries - no lookup needed
+- Agent can make better suggestions based on what you have
+
+#### User Experience
+
+**At Startup:**
+```
+LogAI v0.1.0
+...
+⏳ Loading log groups from AWS... (52 found)
+✓ Found 135 log groups (1234ms)
+✓ All components initialized
+```
+
+**During Use:**
+```
+You: What log groups do I have for Lambda?
+
+Agent: You have 12 Lambda log groups:
+- /aws/lambda/api-handler
+- /aws/lambda/auth-service
+...
+```
+
+The agent answers immediately from the pre-loaded list - no API call needed!
+
+#### Benefits
+
+- **Faster Queries** - Agent doesn't need to look up log groups
+- **Better Context** - Agent knows what's available and can suggest relevant groups
+- **Fewer API Calls** - Reduces AWS CloudWatch API usage
+- **Smart Suggestions** - Agent can recommend similar log groups when exact match isn't found
+
+#### Updating the List
+
+If you create new log groups during your session:
+
+```
+/refresh                → Updates the list from AWS
+```
+
+The agent will then know about the newly created log groups.
+
+#### Performance
+
+- **Small accounts (<500 groups):** Loads in 1-3 seconds
+- **Large accounts (1000s of groups):** May take 10-30 seconds
+- Progress updates shown in real-time
+- Happens once at startup
+
+#### Graceful Fallback
+
+If loading fails at startup:
+- LogAI continues to work
+- Agent can still discover log groups using the `list_log_groups` tool
+- Error message explains what happened
+
+**Example:**
+```
+⚠ Failed to load log groups: Access denied
+  Agent will discover log groups via tools
+```
+
+---
+
 ### Intelligent Tool Execution
 
 LogAI uses three specialized tools to fetch and analyze your logs. The AI agent automatically selects the right tools for your query.

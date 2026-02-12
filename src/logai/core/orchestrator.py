@@ -6,7 +6,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, TYPE_CHECKING
 
 from logai.cache.manager import CacheManager
 from logai.config.settings import LogAISettings
@@ -15,6 +15,9 @@ from logai.core.metrics import MetricsCollector, MetricsTimer
 from logai.core.sanitizer import LogSanitizer
 from logai.core.tools.registry import ToolRegistry
 from logai.providers.llm.base import BaseLLMProvider, LLMProviderError
+
+if TYPE_CHECKING:
+    from logai.core.log_group_manager import LogGroupManager
 
 # Set up logger for retry behavior monitoring
 logger = logging.getLogger(__name__)
@@ -221,6 +224,8 @@ You have access to tools to fetch and analyze logs from AWS CloudWatch. Use thes
 - Correlate events across services
 - Provide actionable insights
 
+{log_groups_context}
+
 ## Guidelines
 
 ### Tool Usage
@@ -275,7 +280,6 @@ Before giving up on a search:
 
 ## Context
 Current time: {current_time}
-Available log groups will be discovered via tools.
 """
 
     def __init__(
@@ -286,6 +290,7 @@ Available log groups will be discovered via tools.
         settings: LogAISettings,
         cache: CacheManager | None = None,
         metrics_collector: MetricsCollector | None = None,
+        log_group_manager: "LogGroupManager | None" = None,
     ):
         """
         Initialize LLM orchestrator.
@@ -297,6 +302,7 @@ Available log groups will be discovered via tools.
             settings: Application settings
             cache: Optional cache manager
             metrics_collector: Optional metrics collector for monitoring
+            log_group_manager: Optional pre-loaded log group manager
         """
         self.llm_provider = llm_provider
         self.tool_registry = tool_registry
@@ -305,20 +311,35 @@ Available log groups will be discovered via tools.
         self.cache = cache
         self.conversation_history: list[dict[str, Any]] = []
         self.metrics = metrics_collector or MetricsCollector()
+        self.log_group_manager = log_group_manager
 
         # Tool call listeners for sidebar integration
         self.tool_call_listeners: list[Callable[[Any], None]] = []
+
+        # Runtime context injections (for /refresh updates)
+        self._pending_context_injection: str | None = None
 
     def _get_system_prompt(self) -> str:
         """
         Get the system prompt with current context.
 
         Returns:
-            Formatted system prompt
+            Formatted system prompt including log group context
         """
         now = datetime.now(timezone.utc)
+
+        # Get log groups context from manager if available
+        if self.log_group_manager and self.log_group_manager.is_ready:
+            log_groups_context = self.log_group_manager.format_for_prompt()
+        else:
+            log_groups_context = """## Log Groups
+
+Log groups will be discovered via the `list_log_groups` tool.
+Use this tool to find available log groups before querying logs."""
+
         return self.SYSTEM_PROMPT.format(
             current_time=now.strftime("%Y-%m-%d %H:%M:%S UTC"),
+            log_groups_context=log_groups_context,
         )
 
     def register_tool_listener(self, callback: Callable[[Any], None]) -> None:
@@ -352,6 +373,24 @@ Available log groups will be discovered via tools.
                 listener(record)
             except Exception as e:
                 logger.warning(f"Tool listener error: {e}", exc_info=True)
+
+    def inject_context_update(self, context_message: str) -> None:
+        """
+        Inject a context update to be included in the next LLM call.
+
+        This is used to update the agent's knowledge mid-conversation,
+        such as after a /refresh command updates the log group list.
+
+        Args:
+            context_message: Message to inject as system context
+        """
+        self._pending_context_injection = context_message
+
+    def _get_pending_context_injection(self) -> str | None:
+        """Get and clear any pending context injection."""
+        injection = self._pending_context_injection
+        self._pending_context_injection = None
+        return injection
 
     async def chat(
         self,
@@ -414,6 +453,11 @@ Available log groups will be discovered via tools.
         messages = [
             {"role": "system", "content": self._get_system_prompt()}
         ] + self.conversation_history
+
+        # Check for pending context injection
+        pending_injection = self._get_pending_context_injection()
+        if pending_injection:
+            messages.append({"role": "system", "content": pending_injection})
 
         # Get available tools
         tools = self.tool_registry.to_function_definitions()
@@ -650,6 +694,11 @@ Available log groups will be discovered via tools.
         messages = [
             {"role": "system", "content": self._get_system_prompt()}
         ] + self.conversation_history
+
+        # Check for pending context injection
+        pending_injection = self._get_pending_context_injection()
+        if pending_injection:
+            messages.append({"role": "system", "content": pending_injection})
 
         # Get available tools
         tools = self.tool_registry.to_function_definitions()

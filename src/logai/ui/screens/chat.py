@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from typing import TYPE_CHECKING
 
 from textual import on, work
 from textual.app import ComposeResult
@@ -23,6 +24,9 @@ from logai.ui.widgets.messages import (
 )
 from logai.ui.widgets.status_bar import StatusBar
 from logai.ui.widgets.tool_sidebar import ToolCallsSidebar
+
+if TYPE_CHECKING:
+    from logai.core.log_group_manager import LogGroupManager
 
 logger = logging.getLogger(__name__)
 
@@ -52,19 +56,28 @@ class ChatScreen(Screen[None]):
     }
     """
 
-    def __init__(self, orchestrator: LLMOrchestrator, cache_manager: CacheManager) -> None:
+    def __init__(
+        self,
+        orchestrator: LLMOrchestrator,
+        cache_manager: CacheManager,
+        log_group_manager: "LogGroupManager | None" = None,
+    ) -> None:
         """
         Initialize chat screen.
 
         Args:
             orchestrator: LLM orchestrator instance
             cache_manager: Cache manager instance
+            log_group_manager: Optional log group manager instance
         """
         super().__init__()
         self.orchestrator = orchestrator
         self.cache_manager = cache_manager
+        self.log_group_manager = log_group_manager
         self.settings = get_settings()
-        self.command_handler = CommandHandler(orchestrator, cache_manager, self.settings, self)
+        self.command_handler = CommandHandler(
+            orchestrator, cache_manager, self.settings, self, log_group_manager
+        )
         self._current_assistant_message: AssistantMessage | None = None
         self._current_loading_indicator: LoadingIndicator | None = None
 

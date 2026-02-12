@@ -19,6 +19,7 @@ Available Commands:
 
 /help - Show this help message
 /clear - Clear conversation history
+/refresh - Update the list of log groups from AWS
 /cache status - Show cache statistics
 /cache clear - Clear the cache
 /model - Show current LLM model
@@ -29,9 +30,47 @@ Available Commands:
 Usage Tips:
 - Ask questions in natural language about your CloudWatch logs
 - The assistant will use tools to fetch and analyze logs for you
+- Log groups are pre-loaded at startup - use /refresh to update
 - Responses are streamed in real-time
 - PII sanitization is enabled by default
 ```
+
+---
+
+### `/refresh`
+
+Update the list of CloudWatch log groups from AWS. LogAI automatically loads log groups at startup, but use this command when you need to refresh the list during your session.
+
+**Usage:**
+```
+/refresh
+```
+
+**Example Output:**
+```
+⏳ Refreshing log groups from AWS... (52 found)
+✓ Updated: Found 135 log groups (+12 new)
+✓ Agent context updated
+```
+
+**When to Use:**
+- After creating new log groups in AWS Console or via IaC tools
+- After switching AWS profiles or regions (restart LogAI instead)
+- When you suspect the list is outdated
+- After deploying new services that create log groups
+- When troubleshooting and a log group you expect isn't visible
+
+**What It Does:**
+1. Fetches fresh list of all log groups from AWS CloudWatch
+2. Updates the agent's internal knowledge with the new list
+3. Replaces the old list completely
+
+**Performance:**
+- Typically completes in 1-3 seconds for small accounts (<500 groups)
+- May take 10-30 seconds for large accounts (1000s of groups)
+- Shows progress updates as it loads
+
+**Note:** LogAI automatically loads log groups at startup, so you typically only need to refresh if you've made changes in AWS during your session.
 
 ---
 
@@ -139,6 +178,7 @@ LLM Configuration:
 Provider: anthropic
 Model: claude-3-5-sonnet-20241022
 Streaming: Enabled
+Max Tool Iterations: 10
 ```
 
 **When to Use:**
@@ -165,6 +205,8 @@ Current Configuration:
 LLM Provider: anthropic
 LLM Model: claude-3-5-sonnet-20241022
 AWS Region: us-east-1
+AWS Profile: production
+Log Groups Loaded: 135
 PII Sanitization: Enabled
 Cache Directory: /Users/yourname/.logai/cache
 Cache Max Size: 500 MB
@@ -326,7 +368,15 @@ In addition to slash commands, LogAI supports these keyboard shortcuts:
 
 ```
 /clear                  → Clear previous conversation
+/refresh                → Get latest log groups (if needed)
 List all log groups     → Start fresh query
+```
+
+### After Deploying New Services
+
+```
+/refresh                → Load newly created log groups
+Show me the new log groups → Verify they appear
 ```
 
 ### Checking Performance
@@ -373,6 +423,8 @@ Understanding the difference between commands and natural language:
 | `help me find errors` | Query | AI agent | Search for errors in logs |
 | `/clear` | Command | LogAI directly | Clear conversation |
 | `clear the cache` | Query | AI agent | Will explain caching, doesn't clear it |
+| `/refresh` | Command | LogAI directly | Update log groups list |
+| `refresh my understanding` | Query | AI agent | Will re-explain something |
 | `/tools` | Command | LogAI directly | Toggle sidebar |
 | `what tools are available?` | Query | AI agent | Explains available tools |
 

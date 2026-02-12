@@ -20,10 +20,17 @@ Show me all Lambda function log groups
 What log groups start with /aws/ecs/?
 ```
 
+**What the Agent Does:**
+- Answers immediately from the pre-loaded list (no API call needed)
+- Filters and formats based on your query
+- Can group by service type or prefix
+
 **Use Cases:**
 - Finding available logs
 - Discovering service names
 - Understanding log structure
+
+**Note:** The agent already knows your log groups from startup. Use `/refresh` if you've created new ones during your session.
 
 ---
 
@@ -601,22 +608,35 @@ If nothing found, agent will automatically:
 
 ## Understanding Agent Behavior
 
-### When Agent Uses list_log_groups
+### How Pre-loaded Log Groups Work
 
-**Triggers:**
-- You ask about "all" or "my" log groups
-- You reference a service without specifying exact log group
-- Agent needs to discover available logs
+**At Startup:**
+LogAI loads all your log groups and provides them to the agent. The agent has this information from the first query.
 
 **Example:**
 ```
-User: "Show me Lambda errors"
+User: "What log groups do I have?"
+
+Agent: [Answers immediately from pre-loaded list]
+"You have 135 log groups across Lambda, ECS, API Gateway..."
+```
+
+No `list_log_groups` tool call needed!
+
+### When Agent Uses list_log_groups
+
+The agent rarely needs this tool now since log groups are pre-loaded. It may still use it when:
+- User explicitly requests "a fresh lookup"
+- User asks to "refresh the list" (though `/refresh` is better)
+- Debugging specific listing issues
+
+**Example (explicit refresh request):**
+```
+User: "Do a fresh lookup of log groups"
 
 Agent:
-1. Calls list_log_groups with prefix="/aws/lambda/"
-2. Finds 10 Lambda log groups
-3. Searches each for errors
-4. Presents aggregated results
+1. Calls list_log_groups to get fresh data
+2. Presents updated results
 ```
 
 ---
@@ -633,9 +653,18 @@ Agent:
 User: "Show me latest logs from /aws/lambda/api"
 
 Agent:
-1. Calls fetch_logs with log_group="/aws/lambda/api"
-2. Retrieves last hour of logs
-3. Presents formatted results
+1. Knows "/aws/lambda/api" exists (from pre-loaded list)
+2. Calls fetch_logs with log_group="/aws/lambda/api"
+3. Retrieves last hour of logs
+4. Presents formatted results
+```
+
+**Benefit of Pre-loading:**
+If you mistype the log group name, the agent can suggest corrections based on the pre-loaded list:
+```
+User: "Show me logs from /aws/lambda/api-handlr"
+
+Agent: "I don't see that exact log group. Did you mean /aws/lambda/api-handler?"
 ```
 
 ---
@@ -652,11 +681,15 @@ Agent:
 User: "Find timeout errors in production"
 
 Agent:
-1. Calls search_logs with filter_pattern="timeout"
-2. Searches production log groups
-3. Returns matching events
-4. If empty, auto-retries with broader search
+1. Identifies production log groups from pre-loaded list
+2. Calls search_logs with filter_pattern="timeout"
+3. Searches those log groups
+4. Returns matching events
+5. If empty, auto-retries with broader search
 ```
+
+**Benefit of Pre-loading:**
+The agent can intelligently select which log groups to search based on your query and the pre-loaded list.
 
 ---
 

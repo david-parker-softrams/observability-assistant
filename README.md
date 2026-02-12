@@ -7,14 +7,15 @@ Query your AWS CloudWatch logs using natural language. LogAI uses Large Language
 ## ✨ Features
 
 - 🤖 **Natural Language Queries**: Ask questions about your logs in plain English
+- 🚀 **Pre-loaded Log Group Context**: Automatically loads all log groups at startup for faster queries
 - 🔍 **Intelligent Log Analysis**: LLM-powered pattern recognition and root cause analysis
 - 🛡️ **PII Sanitization**: Automatic redaction of sensitive data (emails, IPs, API keys, etc.)
 - ⚡ **Smart Caching**: SQLite-based caching to minimize AWS API calls
 - 🎨 **Interactive TUI**: Beautiful terminal user interface built with Textual
 - 🔌 **Multiple LLM Providers**: Support for Anthropic Claude, OpenAI GPT, GitHub Copilot (25+ models), and Ollama (local models)
 - 📊 **AWS CloudWatch Integration**: Seamless integration with CloudWatch Logs
-- 🛠️ **Tool Execution Sidebar**: Real-time visibility into agent tool execution (NEW)
-- 🔄 **Agent Self-Direction**: Automatic retry with time range expansion on empty results (NEW)
+- 🛠️ **Tool Execution Sidebar**: Real-time visibility into agent tool execution
+- 🔄 **Agent Self-Direction**: Automatic retry with time range expansion on empty results
 
 ## 📋 Requirements
 
@@ -134,6 +135,21 @@ Or run as a Python module:
 ```bash
 python -m logai
 ```
+
+**What happens at startup:**
+```
+LogAI v0.1.0
+✓ LLM Provider: anthropic
+✓ LLM Model: claude-3-5-sonnet-20241022
+✓ AWS Region: us-east-1
+⏳ Loading log groups from AWS... (52 found)
+✓ Found 135 log groups (1234ms)
+✓ All components initialized
+
+Starting TUI...
+```
+
+LogAI automatically loads all your log groups at startup, making your first query faster and giving the agent full context about your AWS environment.
 
 ## 🔧 Command-Line Arguments
 
@@ -287,8 +303,9 @@ logai
 Within the LogAI chat interface:
 
 - `/help` - Show available commands
+- `/refresh` - Update the list of log groups from AWS
 - `/clear` - Clear conversation history
-- `/tools` - Toggle tool execution sidebar (NEW)
+- `/tools` - Toggle tool execution sidebar
 - `/cache status` - Show cache statistics
 - `/cache clear` - Clear cache
 - `/quit` or `/exit` - Exit application
@@ -406,6 +423,7 @@ PII sanitization is **enabled by default** but can be disabled via `LOGAI_PII_SA
 
 ### MVP (Current)
 - ✅ AWS CloudWatch Logs integration
+- ✅ Pre-loaded log group context for faster queries
 - ✅ Anthropic Claude, OpenAI GPT, and GitHub Copilot support (25+ models)
 - ✅ Interactive TUI chat interface with tool execution sidebar
 - ✅ Agent self-direction with automatic retry

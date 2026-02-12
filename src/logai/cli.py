@@ -281,23 +281,46 @@ For more information, visit: https://github.com/logai/logai
         ToolRegistry.register(FetchLogsTool(datasource, sanitizer, settings, cache=cache_manager))
         ToolRegistry.register(SearchLogsTool(datasource, sanitizer, settings, cache=cache_manager))
 
+        # === NEW: Pre-load log groups ===
+        from logai.core.log_group_manager import LogGroupManager
+
+        log_group_manager = LogGroupManager(datasource)
+
+        # Define progress callback for CLI output
+        def show_progress(count: int, message: str) -> None:
+            # Use carriage return to update in place
+            print(f"\r  {message}", end="", flush=True)
+
+        print("  Loading log groups from AWS...", end="", flush=True)
+
+        # Run async load synchronously
+        result = asyncio.run(log_group_manager.load_all(progress_callback=show_progress))
+
+        if result.success:
+            print(f"\r✓ Found {result.count} log groups ({result.duration_ms}ms)          ")
+        else:
+            print(f"\r⚠ Failed to load log groups: {result.error_message}          ")
+            print("  Agent will discover log groups via tools")
+        # === END NEW ===
+
         # Initialize LLM provider
         llm_provider = LiteLLMProvider.from_settings(settings)
 
-        # Initialize orchestrator
+        # Initialize orchestrator (modified to accept log_group_manager)
         orchestrator = LLMOrchestrator(
             llm_provider=llm_provider,
             tool_registry=ToolRegistry,  # type: ignore[arg-type]
             sanitizer=sanitizer,
             settings=settings,
             cache=cache_manager,
+            log_group_manager=log_group_manager,
         )
 
         print("✓ All components initialized")
         print("\nStarting TUI...\n")
 
-        # Start TUI
-        app = LogAIApp(orchestrator, cache_manager)
+        # Start TUI (modified to accept log_group_manager)
+        app = LogAIApp(orchestrator, cache_manager, log_group_manager)
         app.run()
 
         return 0

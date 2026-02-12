@@ -2,6 +2,7 @@
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from textual.app import App
 from textual.binding import Binding
@@ -9,6 +10,9 @@ from textual.binding import Binding
 from logai.cache.manager import CacheManager
 from logai.core.orchestrator import LLMOrchestrator
 from logai.ui.screens.chat import ChatScreen
+
+if TYPE_CHECKING:
+    from logai.core.log_group_manager import LogGroupManager
 
 logger = logging.getLogger(__name__)
 
@@ -24,13 +28,19 @@ class LogAIApp(App[None]):
         Binding("ctrl+q", "quit", "Quit"),
     ]
 
-    def __init__(self, orchestrator: LLMOrchestrator, cache_manager: CacheManager) -> None:
+    def __init__(
+        self,
+        orchestrator: LLMOrchestrator,
+        cache_manager: CacheManager,
+        log_group_manager: "LogGroupManager | None" = None,
+    ) -> None:
         """
         Initialize LogAI application.
 
         Args:
             orchestrator: LLM orchestrator instance
             cache_manager: Cache manager instance
+            log_group_manager: Optional log group manager instance
 
         Raises:
             FileNotFoundError: If CSS file does not exist
@@ -38,6 +48,7 @@ class LogAIApp(App[None]):
         super().__init__()
         self.orchestrator = orchestrator
         self.cache_manager = cache_manager
+        self.log_group_manager = log_group_manager
 
         # Validate CSS file exists after initialization
         try:
@@ -56,7 +67,11 @@ class LogAIApp(App[None]):
     async def on_mount(self) -> None:
         """Mount the chat screen when app starts."""
         await self.push_screen(
-            ChatScreen(orchestrator=self.orchestrator, cache_manager=self.cache_manager)
+            ChatScreen(
+                orchestrator=self.orchestrator,
+                cache_manager=self.cache_manager,
+                log_group_manager=self.log_group_manager,
+            )
         )
 
     async def action_quit(self) -> None:

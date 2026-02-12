@@ -320,6 +320,151 @@ logai                    # Run LogAI
 
 ## Runtime Issues
 
+### Startup Is Slow
+
+**Problem:**
+
+LogAI takes a long time to start, showing "Loading log groups..." for extended period.
+
+**Causes & Solutions:**
+
+**1. Large Number of Log Groups**
+
+If you have 1000s of log groups, loading takes longer:
+- **Normal:** 1-3 seconds for <500 groups
+- **Normal:** 10-30 seconds for 1000-5000 groups
+- **Shows progress:** "Loading... (234 found)"
+
+This is expected and only happens once at startup. It significantly improves performance for all subsequent queries.
+
+**Solution:** No action needed - this is working as designed. LogAI shows progress updates.
+
+**2. Slow AWS API**
+
+AWS CloudWatch API may be slow to respond:
+
+```bash
+# Test AWS API speed
+time aws logs describe-log-groups --region us-east-1 --max-items 50
+```
+
+If this is slow (>5 seconds), the issue is with AWS, not LogAI.
+
+**Solution:** Try a different region or wait for AWS to recover.
+
+**3. Network Issues**
+
+Check your internet connection to AWS:
+
+```bash
+ping cloudwatch.us-east-1.amazonaws.com
+```
+
+**Solution:** Fix network connectivity.
+
+---
+
+### "Error Loading Log Groups at Startup"
+
+**Problem:**
+
+```
+⚠ Failed to load log groups: [error details]
+  Agent will discover log groups via tools
+```
+
+**Good News:** LogAI continues to work! The agent can still discover log groups dynamically.
+
+**Common Causes:**
+
+**1. AWS Permission Issues**
+
+```
+⚠ Failed to load log groups: Access denied
+```
+
+**Solution:** Verify your IAM permissions include `logs:DescribeLogGroups`:
+
+```bash
+aws logs describe-log-groups --profile my-profile --region us-east-1
+```
+
+**2. Wrong Region**
+
+```
+⚠ Failed to load log groups: No log groups found
+```
+
+Your logs may be in a different region.
+
+**Solution:**
+```bash
+# Try different regions
+logai --aws-region us-west-2
+logai --aws-region eu-west-1
+```
+
+**3. AWS API Timeout**
+
+```
+⚠ Failed to load log groups: Request timed out
+```
+
+**Solution:** Restart LogAI to retry. If persistent, check AWS service health.
+
+**4. Network Issues**
+
+```
+⚠ Failed to load log groups: Connection refused
+```
+
+**Solution:** Check internet connection and AWS connectivity.
+
+**Recovery:**
+Even if startup loading fails, you can use `/refresh` later to retry once issues are fixed:
+
+```
+/refresh
+```
+
+---
+
+### New Log Groups Not Appearing
+
+**Problem:**
+
+You created a new log group in AWS Console, but the agent doesn't see it.
+
+**Cause:**
+
+LogAI loads log groups at startup. New groups created during your session aren't automatically detected.
+
+**Solution:**
+
+Use the `/refresh` command to update the list:
+
+```
+/refresh
+```
+
+**Example:**
+```
+You: Show me logs from /aws/lambda/new-function
+
+Agent: I don't see that log group in my list. 
+       You may need to refresh the list.
+
+You: /refresh
+
+System: ✓ Updated: Found 136 log groups (+1 new)
+
+You: Now show me logs from /aws/lambda/new-function
+
+Agent: [Shows logs successfully]
+```
+
+---
+
 ### "No log groups found"
 
 **Problem:**
@@ -368,6 +513,59 @@ for region in us-east-1 us-west-2 eu-west-1; do
   echo "Region: $region"
   aws logs describe-log-groups --region $region --max-items 5
 done
+```
+
+**4. Need to Refresh**
+
+If you recently fixed permissions or changed regions:
+```
+/refresh
+```
+
+This reloads the log group list with your current credentials.
+
+---
+
+### Agent Says "Log Group Doesn't Exist" But It Does
+
+**Problem:**
+
+You know a log group exists, but the agent says it can't find it.
+
+**Causes:**
+
+**1. Typo in Name**
+
+Log group names are case-sensitive and must match exactly.
+
+**Solution:**
+```
+List all my log groups
+```
+
+Find the exact name, then use it:
+```
+Show me logs from /aws/lambda/exact-name-here
+```
+
+**2. Stale List**
+
+Log group was created after LogAI started.
+
+**Solution:**
+```
+/refresh
+```
+
+**3. Different Region**
+
+Log group exists in a different region than you're connected to.
+
+**Solution:**
+```
+/config                          → Check current region
+[Exit LogAI]
+logai --aws-region us-west-2     → Connect to correct region
 ```
 
 ---
@@ -852,6 +1050,13 @@ logai
 ```
 
 Check logs for details about why no results were found.
+
+**6. Refresh log groups:**
+
+If you suspect the log group list is stale:
+```
+/refresh
+```
 
 ---
 

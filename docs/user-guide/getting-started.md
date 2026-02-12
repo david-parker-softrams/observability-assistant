@@ -194,10 +194,32 @@ LogAI v0.1.0
 ✓ Cache Directory: /Users/yourname/.logai/cache
 
 Initializing components...
+⏳ Loading log groups from AWS... (52 found)
+✓ Found 135 log groups (1234ms)
 ✓ All components initialized
 
 Starting TUI...
 ```
+
+### What Happens During Startup
+
+When LogAI starts, it automatically:
+
+1. **Loads Your Log Groups** - Fetches all CloudWatch log groups from your AWS account
+2. **Shows Progress** - Displays "Loading log groups..." with a running count
+3. **Provides Context to Agent** - Makes the complete list available to the AI assistant
+
+**Why this is helpful:**
+- **Faster queries** - The agent already knows your log groups, no need to look them up
+- **Better suggestions** - Agent can recommend relevant log groups
+- **Reduced API calls** - Fewer requests to AWS CloudWatch
+
+**What you'll see:**
+- Progress indicator: `⏳ Loading log groups from AWS... (52 found)`
+- Success message: `✓ Found 135 log groups (1234ms)`
+- If loading fails: `⚠ Failed to load log groups: [error details]` (app continues, agent can still discover log groups)
+
+**Note:** If you have many log groups (1000+), this may take a few seconds. LogAI shows progress updates in real-time.
 
 ### Understanding the Interface
 
@@ -261,6 +283,7 @@ While LogAI is running, you can use these special commands:
 | Command | Description |
 |---------|-------------|
 | `/help` | Show available commands |
+| `/refresh` | Update the list of log groups from AWS |
 | `/tools` | Toggle tool sidebar visibility |
 | `/cache status` | Show cache statistics |
 | `/cache clear` | Clear the cache |
@@ -301,6 +324,14 @@ Configure your AWS credentials in `.env` or use the `--aws-profile` argument to 
 Your AWS credentials may not have the correct permissions, or you're connected to the wrong region. Check:
 - Your AWS region setting matches where your log groups are located
 - Your IAM user/role has `logs:DescribeLogGroups` permission
+- Try using `/refresh` to reload the list after fixing credentials
+
+### Startup is slow
+
+If you have many log groups (1000s), loading them at startup may take 10-30 seconds. This is normal:
+- LogAI shows progress: "Loading... (234 found)"
+- This happens once at startup
+- Improves performance for all subsequent queries
 
 ### Tool sidebar not showing
 
