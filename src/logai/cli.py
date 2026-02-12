@@ -1,6 +1,7 @@
 """Command-line interface for LogAI."""
 
 import argparse
+import asyncio
 import sys
 from pathlib import Path
 
@@ -13,6 +14,95 @@ from logai.core.tools.registry import ToolRegistry
 from logai.providers.datasources.cloudwatch import CloudWatchDataSource
 from logai.providers.llm.litellm_provider import LiteLLMProvider
 from logai.ui.app import LogAIApp
+
+
+async def handle_auth_login(args: argparse.Namespace) -> int:
+    """Handle 'logai auth login' command."""
+    from logai.auth import GitHubCopilotAuth
+
+    auth = GitHubCopilotAuth()
+    try:
+        print("\n🔐 GitHub Copilot Authentication\n")
+        token = await auth.authenticate(timeout=args.timeout)
+        print("\n✅ Authentication successful!")
+        print(f"Token saved to: {auth.auth_file_path}")
+        return 0
+    except KeyboardInterrupt:
+        print("\n\n⚠️  Authentication cancelled by user", file=sys.stderr)
+        return 130  # Standard exit code for SIGINT (128 + 2)
+    except Exception as e:
+        print(f"\n❌ Authentication failed: {e}", file=sys.stderr)
+        return 1
+    finally:
+        await auth.close()
+
+
+async def handle_auth_logout(args: argparse.Namespace) -> int:
+    """Handle 'logai auth logout' command."""
+    from logai.auth import GitHubCopilotAuth
+
+    auth = GitHubCopilotAuth()
+    try:
+        if auth.logout():
+            print("✅ Logged out successfully")
+            return 0
+        else:
+            print("ℹ️  No credentials found")
+            return 0
+    except KeyboardInterrupt:
+        print("\n\n⚠️  Logout cancelled by user", file=sys.stderr)
+        return 130  # Standard exit code for SIGINT (128 + 2)
+    except Exception as e:
+        print(f"\n❌ Logout failed: {e}", file=sys.stderr)
+        return 1
+    finally:
+        await auth.close()
+
+
+async def handle_auth_status(args: argparse.Namespace) -> int:
+    """Handle 'logai auth status' command."""
+    from logai.auth import GitHubCopilotAuth
+
+    auth = GitHubCopilotAuth()
+    try:
+        status = auth.get_status()
+        print("\n🔍 GitHub Copilot Authentication Status\n")
+        print(f"Provider: github-copilot")
+        print(f"Authenticated: {status['authenticated']}")
+        if status["authenticated"]:
+            print(f"Token: {status['token_prefix']}")
+            print(f"Token file: {status['auth_file']}")
+        else:
+            print("\nRun 'logai auth login' to authenticate")
+        return 0
+    except KeyboardInterrupt:
+        print("\n\n⚠️  Status check cancelled by user", file=sys.stderr)
+        return 130  # Standard exit code for SIGINT (128 + 2)
+    except Exception as e:
+        print(f"\n❌ Status check failed: {e}", file=sys.stderr)
+        return 1
+    finally:
+        await auth.close()
+
+
+async def handle_auth_list(args: argparse.Namespace) -> int:
+    """Handle 'logai auth list' command."""
+    from logai.auth import TokenStorage
+
+    storage = TokenStorage()
+
+    print("\n📋 Authenticated Providers\n")
+
+    # Check GitHub Copilot
+    token_data = storage.load_token()
+    if token_data:
+        print("✓ github-copilot")
+    else:
+        print("✗ github-copilot (not authenticated)")
+
+    # Future: Check other providers here
+
+    return 0
 
 
 def main() -> int:
@@ -28,6 +118,12 @@ Examples:
   logai --aws-profile prod --aws-region us-west-2  # Use profile and region
   logai --version                            # Show version information
   logai --help                               # Show this help message
+
+  # Authentication commands
+  logai auth login                           # Authenticate with GitHub Copilot
+  logai auth status                          # Check authentication status
+  logai auth logout                          # Remove stored credentials
+  logai auth list                            # List authenticated providers
 
 Environment Variables:
   LOGAI_LLM_PROVIDER              # LLM provider: anthropic (default) or openai
@@ -75,8 +171,51 @@ For more information, visit: https://github.com/logai/logai
         metavar="REGION",
     )
 
+    # Add subparsers for commands
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+
+    # Auth subcommand group
+    auth_parser = subparsers.add_parser("auth", help="Manage authentication")
+    auth_subparsers = auth_parser.add_subparsers(dest="auth_command", help="Auth commands")
+
+    # logai auth login
+    login_parser = auth_subparsers.add_parser("login", help="Authenticate with GitHub Copilot")
+    login_parser.add_argument(
+        "--timeout",
+        type=int,
+        default=900,
+        help="Authentication timeout in seconds (default: 900)",
+    )
+
+    # logai auth logout
+    logout_parser = auth_subparsers.add_parser("logout", help="Remove GitHub Copilot credentials")
+
+    # logai auth status
+    status_parser = auth_subparsers.add_parser("status", help="Show authentication status")
+
+    # logai auth list
+    list_parser = auth_subparsers.add_parser("list", help="List authenticated providers")
+
     # Parse arguments
     args = parser.parse_args()
+
+    # Handle auth commands
+    if args.command == "auth":
+        if args.auth_command == "login":
+            return asyncio.run(handle_auth_login(args))
+        elif args.auth_command == "logout":
+            return asyncio.run(handle_auth_logout(args))
+        elif args.auth_command == "status":
+            return asyncio.run(handle_auth_status(args))
+        elif args.auth_command == "list":
+            return asyncio.run(handle_auth_list(args))
+        elif args.auth_command is None:
+            auth_parser.print_help()
+            return 1
+        else:
+            print(f"❌ Unknown auth command: {args.auth_command}", file=sys.stderr)
+            auth_parser.print_help()
+            return 1
 
     # Load and validate configuration
     try:

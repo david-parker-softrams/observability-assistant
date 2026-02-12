@@ -22,6 +22,11 @@ def mock_settings():
     settings.current_llm_api_key = "test-key"
     settings.current_llm_model = "claude-3-5-sonnet-20241022"
     settings.pii_sanitization_enabled = True
+    # Add self-direction settings for new features
+    settings.max_retry_attempts = 3
+    settings.intent_detection_enabled = True
+    settings.auto_retry_enabled = True
+    settings.time_expansion_factor = 4.0
     return settings
 
 

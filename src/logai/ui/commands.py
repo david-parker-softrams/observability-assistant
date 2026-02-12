@@ -1,8 +1,13 @@
 """Command handler for special slash commands."""
 
+from typing import TYPE_CHECKING
+
 from logai.cache.manager import CacheManager
 from logai.config.settings import LogAISettings
 from logai.core.orchestrator import LLMOrchestrator
+
+if TYPE_CHECKING:
+    from logai.ui.screens.chat import ChatScreen
 
 
 class CommandHandler:
@@ -13,6 +18,7 @@ class CommandHandler:
         orchestrator: LLMOrchestrator,
         cache_manager: CacheManager,
         settings: LogAISettings,
+        chat_screen: "ChatScreen | None" = None,
     ) -> None:
         """
         Initialize command handler.
@@ -21,10 +27,12 @@ class CommandHandler:
             orchestrator: LLM orchestrator instance
             cache_manager: Cache manager instance
             settings: Application settings
+            chat_screen: Optional reference to chat screen for UI commands
         """
         self.orchestrator = orchestrator
         self.cache_manager = cache_manager
         self.settings = settings
+        self.chat_screen = chat_screen
 
     def is_command(self, message: str) -> bool:
         """
@@ -73,6 +81,8 @@ class CommandHandler:
             return self._show_model()
         elif cmd == "/config":
             return self._show_config()
+        elif cmd == "/tools":
+            return self._toggle_tools_sidebar()
         else:
             return f"Unknown command: {cmd}\nUse /help to see available commands."
 
@@ -86,6 +96,7 @@ class CommandHandler:
 [cyan]/cache clear[/cyan] - Clear the cache
 [cyan]/model[/cyan] - Show current LLM model
 [cyan]/config[/cyan] - Show current configuration
+[cyan]/tools[/cyan] - Toggle tool calls sidebar
 [cyan]/quit[/cyan] or [cyan]/exit[/cyan] - Exit the application (or use Ctrl+C)
 
 [bold]Usage Tips:[/bold]
@@ -155,3 +166,14 @@ Cache Directory: {self.settings.cache_dir}
 Cache Max Size: {self.settings.cache_max_size_mb} MB
 Cache TTL: {self.settings.cache_ttl_seconds}s
 """
+
+    def _toggle_tools_sidebar(self) -> str:
+        """Toggle the tools sidebar visibility."""
+        if self.chat_screen:
+            self.chat_screen.toggle_sidebar()
+            if self.chat_screen._sidebar_visible:
+                return "[dim]Tool calls sidebar shown.[/dim]"
+            else:
+                return "[dim]Tool calls sidebar hidden.[/dim]"
+        else:
+            return "[dim]Sidebar toggle not available.[/dim]"

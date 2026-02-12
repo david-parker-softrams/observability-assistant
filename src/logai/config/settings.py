@@ -20,7 +20,7 @@ class LogAISettings(BaseSettings):
     )
 
     # === LLM Provider Configuration ===
-    llm_provider: Literal["anthropic", "openai", "ollama"] = Field(
+    llm_provider: Literal["anthropic", "openai", "ollama", "github-copilot"] = Field(
         default="anthropic",
         description="LLM provider to use",
     )
@@ -54,6 +54,17 @@ class LogAISettings(BaseSettings):
     ollama_model: str = Field(
         default="llama3.1:8b",
         description="Ollama model to use (must support function calling)",
+    )
+
+    # === GitHub Copilot Configuration ===
+    github_copilot_model: str = Field(
+        default="claude-opus-4.5",
+        description="GitHub Copilot model to use",
+    )
+
+    github_copilot_api_base: str = Field(
+        default="https://api.githubcopilot.com/chat/completions",
+        description="GitHub Copilot API endpoint URL",
     )
 
     # === AWS Configuration ===
@@ -116,6 +127,36 @@ class LogAISettings(BaseSettings):
         description="Optional log file path",
     )
 
+    # === Agent Self-Direction Settings ===
+    max_retry_attempts: int = Field(
+        default=3,
+        ge=1,
+        le=5,
+        description="Maximum number of retry attempts for empty results",
+    )
+
+    intent_detection_enabled: bool = Field(
+        default=True,
+        description="Enable detection of stated intent without action",
+    )
+
+    auto_retry_enabled: bool = Field(
+        default=True,
+        description="Enable automatic retry on empty results",
+    )
+
+    time_expansion_factor: float = Field(
+        default=4.0,
+        description="Factor by which to expand time range on retry (e.g., 1h -> 4h)",
+    )
+
+    max_tool_iterations: int = Field(
+        default=10,
+        description="Maximum number of tool calls allowed in a single conversation turn. Prevents infinite loops.",
+        ge=1,
+        le=100,
+    )
+
     @field_validator("anthropic_api_key", "openai_api_key")
     @classmethod
     def validate_api_key_format(cls, v: str | None) -> str | None:
@@ -148,6 +189,10 @@ class LogAISettings(BaseSettings):
             if not self.ollama_base_url:
                 raise ValueError("LOGAI_OLLAMA_BASE_URL is required when using Ollama provider")
             # No API key validation needed for local Ollama
+        elif self.llm_provider == "github-copilot":
+            # GitHub Copilot doesn't need API key - uses token from auth system
+            # Token is retrieved via get_github_copilot_token() in the provider
+            pass  # No validation needed here
         else:
             raise ValueError(f"Unsupported LLM provider: {self.llm_provider}")
 
@@ -183,6 +228,8 @@ class LogAISettings(BaseSettings):
             return self.openai_api_key or ""
         elif self.llm_provider == "ollama":
             return ""  # Ollama doesn't need API key
+        elif self.llm_provider == "github-copilot":
+            return ""  # GitHub Copilot uses OAuth token, not API key
         raise ValueError(f"Unknown LLM provider: {self.llm_provider}")
 
     @property
@@ -194,6 +241,8 @@ class LogAISettings(BaseSettings):
             return self.openai_model
         elif self.llm_provider == "ollama":
             return self.ollama_model
+        elif self.llm_provider == "github-copilot":
+            return self.github_copilot_model
         raise ValueError(f"Unknown LLM provider: {self.llm_provider}")
 
 

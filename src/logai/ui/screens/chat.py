@@ -5,13 +5,13 @@ import logging
 
 from textual import on, work
 from textual.app import ComposeResult
-from textual.containers import Container, VerticalScroll
+from textual.containers import Container, Horizontal, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Header, Input
 
 from logai.cache.manager import CacheManager
 from logai.config import get_settings
-from logai.core.orchestrator import LLMOrchestrator
+from logai.core.orchestrator import LLMOrchestrator, ToolCallRecord, ToolCallStatus
 from logai.ui.commands import CommandHandler
 from logai.ui.widgets.input_box import ChatInput
 from logai.ui.widgets.messages import (
@@ -22,6 +22,7 @@ from logai.ui.widgets.messages import (
     UserMessage,
 )
 from logai.ui.widgets.status_bar import StatusBar
+from logai.ui.widgets.tool_sidebar import ToolCallsSidebar
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +35,13 @@ class ChatScreen(Screen[None]):
         layout: vertical;
     }
 
-    #messages-container {
+    #main-content {
         height: 1fr;
+        width: 100%;
+    }
+
+    #messages-container {
+        width: 1fr;
         overflow-y: auto;
         padding: 1 2;
     }
@@ -58,14 +64,26 @@ class ChatScreen(Screen[None]):
         self.orchestrator = orchestrator
         self.cache_manager = cache_manager
         self.settings = get_settings()
-        self.command_handler = CommandHandler(orchestrator, cache_manager, self.settings)
+        self.command_handler = CommandHandler(orchestrator, cache_manager, self.settings, self)
         self._current_assistant_message: AssistantMessage | None = None
         self._current_loading_indicator: LoadingIndicator | None = None
+
+        # Sidebar state - open by default per user requirement
+        self._sidebar_visible = True
+        self._tool_sidebar: ToolCallsSidebar | None = None
+        self._recent_tool_calls: list[ToolCallRecord] = []  # Keep history for replay
 
     def compose(self) -> ComposeResult:
         """Compose the chat screen layout."""
         yield Header()
-        yield VerticalScroll(id="messages-container")
+
+        # Main content area with optional sidebar
+        with Horizontal(id="main-content"):
+            yield VerticalScroll(id="messages-container")
+            if self._sidebar_visible:
+                self._tool_sidebar = ToolCallsSidebar(id="tools-sidebar")
+                yield self._tool_sidebar
+
         yield Container(ChatInput(), id="input-container")
         yield StatusBar(model=self.settings.current_llm_model)
 
@@ -73,6 +91,9 @@ class ChatScreen(Screen[None]):
         """Set up the screen when mounted."""
         try:
             logger.info("Mounting ChatScreen")
+
+            # Register for tool call events from orchestrator
+            self.orchestrator.register_tool_listener(self._on_tool_call_event)
 
             # Add welcome message
             messages_container = self.query_one("#messages-container", VerticalScroll)
@@ -204,3 +225,63 @@ class ChatScreen(Screen[None]):
 
         finally:
             self._current_assistant_message = None
+
+    def toggle_sidebar(self) -> None:
+        """Toggle the tools sidebar visibility."""
+        self._sidebar_visible = not self._sidebar_visible
+
+        if self._sidebar_visible:
+            # Mount sidebar
+            main_content = self.query_one("#main-content", Horizontal)
+            self._tool_sidebar = ToolCallsSidebar(id="tools-sidebar")
+            main_content.mount(self._tool_sidebar)
+
+            # Replay recent tool calls to populate sidebar
+            for record in self._recent_tool_calls:
+                self._tool_sidebar.update_tool_call(record)
+        else:
+            # Remove sidebar
+            if self._tool_sidebar:
+                self._tool_sidebar.remove()
+                self._tool_sidebar = None
+
+    def on_tool_call(self, record: ToolCallRecord) -> None:
+        """
+        Handle tool call events from orchestrator.
+
+        Args:
+            record: Tool call record to display
+        """
+        # Keep in recent history for replay
+        # Remove oldest if at capacity
+        MAX_RECENT_CALLS = 20
+        if len(self._recent_tool_calls) >= MAX_RECENT_CALLS:
+            self._recent_tool_calls.pop(0)
+
+        # Update or add to history
+        existing = next((r for r in self._recent_tool_calls if r.id == record.id), None)
+        if existing:
+            idx = self._recent_tool_calls.index(existing)
+            self._recent_tool_calls[idx] = record
+        else:
+            self._recent_tool_calls.append(record)
+
+        # Update sidebar if visible
+        if self._tool_sidebar:
+            self._tool_sidebar.update_tool_call(record)
+
+    def _on_tool_call_event(self, record: ToolCallRecord) -> None:
+        """
+        Handler for tool call events from orchestrator.
+
+        Since the orchestrator runs in the same async event loop as the UI,
+        we can call on_tool_call() directly without thread marshalling.
+
+        Args:
+            record: Tool call record from orchestrator
+        """
+        try:
+            # Orchestrator runs in same event loop, so we can call directly
+            self.on_tool_call(record)
+        except Exception as e:
+            logger.warning(f"Failed to update tool sidebar: {e}", exc_info=True)

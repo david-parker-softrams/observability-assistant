@@ -11,6 +11,7 @@ from logai.ui.widgets.messages import (
     UserMessage,
 )
 from logai.ui.widgets.status_bar import StatusBar
+from logai.ui.widgets.tool_sidebar import ToolCallsSidebar
 
 
 class TestUserMessage:
@@ -116,3 +117,68 @@ class TestStatusBar:
         status_bar.update_cache_stats(10, 5)
         assert status_bar.cache_hits == 10
         assert status_bar.cache_misses == 5
+
+
+class TestToolCallsSidebar:
+    """Tests for ToolCallsSidebar widget."""
+
+    def test_sidebar_creation(self) -> None:
+        """Test that tool sidebar is created correctly."""
+        sidebar = ToolCallsSidebar()
+        assert isinstance(sidebar, Static)
+        assert sidebar._history == []
+
+    def test_format_log_groups(self) -> None:
+        """Test log groups result formatting."""
+        sidebar = ToolCallsSidebar()
+        result = {
+            "log_groups": [
+                {"name": "/aws/lambda/function-1"},
+                {"name": "/aws/lambda/function-2"},
+                {"name": "/aws/ecs/service"},
+            ]
+        }
+        formatted = sidebar._format_result(result)
+        assert "Found 3 log groups:" in formatted
+        assert "•" in formatted  # Bullet points
+        assert "/aws/lambda" in formatted
+
+    def test_format_log_events(self) -> None:
+        """Test log events result formatting."""
+        sidebar = ToolCallsSidebar()
+        result = {
+            "events": [
+                {
+                    "timestamp": 1707649815000,
+                    "message": "ERROR Something went wrong",
+                },
+                {
+                    "timestamp": 1707649820000,
+                    "message": "INFO Request completed",
+                },
+            ]
+        }
+        formatted = sidebar._format_result(result)
+        assert "Found 2 events:" in formatted
+        assert "[" in formatted  # Timestamp brackets
+        assert "ERROR" in formatted or "went wrong" in formatted
+
+    def test_format_truncation(self) -> None:
+        """Test that large results are truncated."""
+        sidebar = ToolCallsSidebar()
+        result = {"log_groups": [{"name": f"/aws/lambda/function-{i}"} for i in range(20)]}
+        formatted = sidebar._format_result(result)
+        assert "Found 20 log groups:" in formatted
+        assert "+10 more" in formatted  # Shows truncation
+
+    def test_format_empty_results(self) -> None:
+        """Test formatting of empty results."""
+        sidebar = ToolCallsSidebar()
+
+        result = {"log_groups": []}
+        formatted = sidebar._format_result(result)
+        assert "No log groups found" in formatted
+
+        result = {"events": []}
+        formatted = sidebar._format_result(result)
+        assert "No events found" in formatted

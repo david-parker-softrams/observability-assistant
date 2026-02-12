@@ -1,20 +1,205 @@
 """LLM Orchestrator - coordinates LLM interactions with tool execution."""
 
+import asyncio
 import json
+import logging
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, AsyncGenerator
 
 from logai.cache.manager import CacheManager
 from logai.config.settings import LogAISettings
+from logai.core.intent_detector import IntentDetector
+from logai.core.metrics import MetricsCollector, MetricsTimer
 from logai.core.sanitizer import LogSanitizer
 from logai.core.tools.registry import ToolRegistry
 from logai.providers.llm.base import BaseLLMProvider, LLMProviderError
+
+# Set up logger for retry behavior monitoring
+logger = logging.getLogger(__name__)
 
 
 class OrchestratorError(Exception):
     """Raised when orchestrator encounters an error."""
 
     pass
+
+
+class ToolCallStatus:
+    """Status constants for tool call execution."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCESS = "success"
+    ERROR = "error"
+
+
+@dataclass
+class ToolCallRecord:
+    """
+    Represents a single tool call for tracking and display.
+
+    Attributes:
+        id: Unique identifier (matches tool_call_id from LLM)
+        name: Tool name (e.g., "list_log_groups", "query_logs")
+        arguments: Parameters passed to the tool
+        result: Return value from tool execution
+        status: Current execution status
+        started_at: When execution started
+        completed_at: When execution completed (None if still running)
+        error_message: Error details if status is ERROR
+    """
+
+    id: str
+    name: str
+    arguments: dict[str, Any]
+    result: dict[str, Any] | None = None
+    status: str = ToolCallStatus.PENDING
+    started_at: datetime = field(default_factory=datetime.now)
+    completed_at: datetime | None = None
+    error_message: str | None = None
+
+    @property
+    def duration_ms(self) -> int | None:
+        """Calculate execution duration in milliseconds."""
+        if self.completed_at and self.started_at:
+            delta = self.completed_at - self.started_at
+            return int(delta.total_seconds() * 1000)
+        return None
+
+    @property
+    def is_complete(self) -> bool:
+        """Check if tool call has finished (success or error)."""
+        return self.status in (ToolCallStatus.SUCCESS, ToolCallStatus.ERROR)
+
+
+@dataclass
+class RetryState:
+    """Tracks retry attempts within a conversation turn.
+
+    This class maintains state about retry attempts to prevent infinite loops
+    and track what strategies have already been tried.
+
+    Attributes:
+        attempts: Number of retry attempts made
+        empty_result_count: Count of empty results encountered
+        strategies_tried: List of strategies that have been attempted
+        last_tool_name: Name of the last tool that was called
+        last_tool_args: Arguments passed to the last tool call
+    """
+
+    attempts: int = 0
+    empty_result_count: int = 0
+    strategies_tried: list[str] = field(default_factory=list)
+    last_tool_name: str | None = None
+    last_tool_args: dict[str, Any] | None = None
+
+    def should_retry(self, max_attempts: int) -> bool:
+        """Determine if we should attempt a retry.
+
+        Args:
+            max_attempts: Maximum number of attempts allowed
+
+        Returns:
+            True if we haven't exceeded the retry limit
+        """
+        return self.attempts < max_attempts
+
+    def record_attempt(self, tool_name: str, args: dict[str, Any], strategy: str) -> None:
+        """Record a retry attempt.
+
+        Args:
+            tool_name: Name of the tool being retried
+            args: Arguments for the tool call
+            strategy: The retry strategy being used
+        """
+        self.attempts += 1
+        self.last_tool_name = tool_name
+        self.last_tool_args = args
+        self.strategies_tried.append(strategy)
+
+    def record_empty_result(self) -> None:
+        """Record an empty result occurrence."""
+        self.empty_result_count += 1
+
+    def reset(self) -> None:
+        """Reset state for new conversation turn."""
+        self.attempts = 0
+        self.empty_result_count = 0
+        self.strategies_tried.clear()
+        self.last_tool_name = None
+        self.last_tool_args = None
+
+
+class RetryPromptGenerator:
+    """Generates guidance prompts for retry attempts.
+
+    This class provides context-aware prompts to guide the agent when
+    retries are needed, helping it understand what went wrong and what
+    alternative approaches to try.
+    """
+
+    # Retry prompts for different scenarios
+    RETRY_PROMPTS = {
+        "empty_logs": """The previous search returned no results. Before giving up, please try one of these approaches:
+
+1. **Expand Time Range**: If you searched for 1 hour, try 6 hours or 24 hours
+2. **Broaden Filter**: Remove or simplify the filter pattern
+3. **Different Log Group**: Try a related log group if available
+
+Execute one of these alternatives now. Do not ask the user - try an alternative first.""",
+        "log_group_not_found": """The specified log group was not found. Please:
+
+1. Use list_log_groups to find available log groups
+2. Look for similar names or common prefixes
+3. Try the closest match
+
+Execute a search now. Do not ask the user until you've tried to find alternatives.""",
+        "intent_without_action": """You stated an intention but did not execute it. Please immediately call the appropriate tool to carry out your stated action. Do not describe what you will do - do it now.""",
+        "partial_results": """The results may be incomplete. Consider:
+
+1. Checking if there are more logs in a broader time range
+2. Looking at related log groups for additional context
+3. Searching for correlated events
+
+If relevant, expand your search. Otherwise, proceed with your analysis.""",
+    }
+
+    @classmethod
+    def generate_retry_prompt(
+        cls,
+        reason: str,
+        retry_state: RetryState,
+        context: dict[str, Any] | None = None,
+    ) -> str:
+        """Generate an appropriate retry prompt.
+
+        Args:
+            reason: The reason for retry (key into RETRY_PROMPTS)
+            retry_state: Current retry state
+            context: Additional context (e.g., last tool args)
+
+        Returns:
+            Formatted retry prompt with context
+        """
+        base_prompt = cls.RETRY_PROMPTS.get(reason, cls.RETRY_PROMPTS["empty_logs"])
+
+        # Add context about previous attempts
+        if retry_state.attempts > 0:
+            attempt_info = f"\n\nThis is retry attempt {retry_state.attempts + 1}. "
+            attempt_info += f"Strategies already tried: {', '.join(retry_state.strategies_tried)}."
+            base_prompt += attempt_info
+
+        # Add specific suggestions based on last tool call
+        if context and retry_state.last_tool_args:
+            if "start_time" in retry_state.last_tool_args:
+                base_prompt += f"\n\nPrevious time range started at: {retry_state.last_tool_args['start_time']}"
+            if "filter_pattern" in retry_state.last_tool_args:
+                filter_val = retry_state.last_tool_args.get("filter_pattern", "none")
+                base_prompt += f"\nPrevious filter: {filter_val}"
+
+        return base_prompt
 
 
 class LLMOrchestrator:
@@ -26,9 +211,7 @@ class LLMOrchestrator:
     and external systems.
     """
 
-    MAX_TOOL_ITERATIONS = 10  # Prevent infinite loops
-
-    # System prompt template
+    # System prompt template with self-direction instructions
     SYSTEM_PROMPT = """You are an expert observability assistant helping DevOps engineers and SREs analyze logs and troubleshoot issues.
 
 ## Your Capabilities
@@ -58,6 +241,38 @@ You have access to tools to fetch and analyze logs from AWS CloudWatch. Use thes
 2. If no logs found, suggest adjusting time range or filters
 3. Explain any limitations clearly
 
+## Self-Direction & Persistence
+
+### Automatic Retry Behavior
+When you encounter empty results or no matches, YOU MUST automatically try alternative approaches before responding to the user:
+
+1. **Empty Log Results**
+   - FIRST: Expand the time range (e.g., 1h -> 6h -> 24h -> 7d)
+   - SECOND: Broaden or remove the filter pattern
+   - THIRD: Try a different log group if available
+   - ONLY after trying 2-3 alternatives, report findings to the user
+
+2. **Log Group Not Found**
+   - FIRST: List available log groups to find similar names
+   - SECOND: Try common prefixes (/aws/lambda/, /ecs/, /aws/apigateway/)
+   - THIRD: Ask user for clarification only if no similar groups found
+
+3. **Partial Results**
+   - If results seem incomplete, try a broader search
+   - If results are truncated, inform user and offer to narrow the search
+
+### Action, Don't Just Describe
+- NEVER say "I'll search for..." without immediately calling a tool
+- NEVER say "Let me check..." without immediately making the check
+- If you state an intention, execute it in the same response with a tool call
+- Complete the investigation before providing your analysis
+
+### Minimum Effort Principle
+Before giving up on a search:
+- You MUST have tried at least 2 different approaches
+- You MUST have used at least 2 different parameter combinations
+- You SHOULD expand time ranges before concluding "no logs found"
+
 ## Context
 Current time: {current_time}
 Available log groups will be discovered via tools.
@@ -70,6 +285,7 @@ Available log groups will be discovered via tools.
         sanitizer: LogSanitizer,
         settings: LogAISettings,
         cache: CacheManager | None = None,
+        metrics_collector: MetricsCollector | None = None,
     ):
         """
         Initialize LLM orchestrator.
@@ -80,6 +296,7 @@ Available log groups will be discovered via tools.
             sanitizer: PII sanitizer instance
             settings: Application settings
             cache: Optional cache manager
+            metrics_collector: Optional metrics collector for monitoring
         """
         self.llm_provider = llm_provider
         self.tool_registry = tool_registry
@@ -87,6 +304,10 @@ Available log groups will be discovered via tools.
         self.settings = settings
         self.cache = cache
         self.conversation_history: list[dict[str, Any]] = []
+        self.metrics = metrics_collector or MetricsCollector()
+
+        # Tool call listeners for sidebar integration
+        self.tool_call_listeners: list[Callable[[Any], None]] = []
 
     def _get_system_prompt(self) -> str:
         """
@@ -99,6 +320,38 @@ Available log groups will be discovered via tools.
         return self.SYSTEM_PROMPT.format(
             current_time=now.strftime("%Y-%m-%d %H:%M:%S UTC"),
         )
+
+    def register_tool_listener(self, callback: Callable[[Any], None]) -> None:
+        """
+        Register a callback to receive tool call events.
+
+        Args:
+            callback: Function to call when a tool call event occurs
+        """
+        self.tool_call_listeners.append(callback)
+
+    def unregister_tool_listener(self, callback: Callable[[Any], None]) -> None:
+        """
+        Unregister a tool call callback.
+
+        Args:
+            callback: Function to remove from listeners
+        """
+        if callback in self.tool_call_listeners:
+            self.tool_call_listeners.remove(callback)
+
+    def _notify_tool_call(self, record: Any) -> None:
+        """
+        Notify all listeners of a tool call event.
+
+        Args:
+            record: Tool call record to send to listeners
+        """
+        for listener in self.tool_call_listeners:
+            try:
+                listener(record)
+            except Exception as e:
+                logger.warning(f"Tool listener error: {e}", exc_info=True)
 
     async def chat(
         self,
@@ -141,8 +394,12 @@ Available log groups will be discovered via tools.
             yield token
 
     async def _chat_complete(self, user_message: str) -> str:
-        """
-        Process message and return complete response.
+        """Process message and return complete response.
+
+        Enhanced with self-direction capabilities:
+        - Detects intent without action and prompts execution
+        - Automatically retries on empty results
+        - Tracks retry state across the conversation turn
 
         Args:
             user_message: User's message
@@ -161,9 +418,13 @@ Available log groups will be discovered via tools.
         # Get available tools
         tools = self.tool_registry.to_function_definitions()
 
+        # Initialize retry state for this turn
+        retry_state = RetryState()
+
         # Execute conversation loop with tool calling
         iteration = 0
-        while iteration < self.MAX_TOOL_ITERATIONS:
+        max_iterations = self.settings.max_tool_iterations
+        while iteration < max_iterations:
             iteration += 1
 
             try:
@@ -176,6 +437,18 @@ Available log groups will be discovered via tools.
                 if response.has_tool_calls():
                     # Execute tool calls
                     tool_results = await self._execute_tool_calls(response.tool_calls)
+
+                    # Track tool calls for retry logic
+                    for tool_call in response.tool_calls:
+                        func_info = tool_call.get("function", {})
+                        retry_state.last_tool_name = func_info.get("name")
+                        try:
+                            args_str = func_info.get("arguments", "{}")
+                            retry_state.last_tool_args = (
+                                json.loads(args_str) if isinstance(args_str, str) else args_str
+                            )
+                        except json.JSONDecodeError:
+                            retry_state.last_tool_args = {}
 
                     # Add assistant message with tool calls to history
                     assistant_message: dict[str, Any] = {
@@ -196,10 +469,132 @@ Available log groups will be discovered via tools.
                         self.conversation_history.append(tool_message)
                         messages.append(tool_message)
 
+                    # Analyze results for retry logic
+                    should_retry, retry_reason = self._analyze_tool_results(
+                        tool_results, retry_state
+                    )
+
+                    if should_retry and retry_state.should_retry(self.settings.max_retry_attempts):
+                        # Record retry metrics
+                        self.metrics.increment("retry_attempts", labels={"reason": retry_reason})
+
+                        # Apply exponential backoff before retry
+                        backoff_delay = self._calculate_backoff_delay(retry_state.attempts)
+                        logger.info(
+                            "Applying exponential backoff before retry",
+                            extra={"delay_seconds": backoff_delay, "attempt": retry_state.attempts},
+                        )
+
+                        # Measure time spent in retry logic
+                        with MetricsTimer(
+                            self.metrics,
+                            "retry_backoff_seconds",
+                            labels={"attempt": str(retry_state.attempts)},
+                        ):
+                            await asyncio.sleep(backoff_delay)
+
+                        # Inject retry guidance as system message
+                        retry_prompt = RetryPromptGenerator.generate_retry_prompt(
+                            retry_reason, retry_state
+                        )
+                        retry_message = {"role": "system", "content": retry_prompt}
+                        messages.append(retry_message)
+                        retry_state.record_attempt(
+                            retry_state.last_tool_name or "unknown",
+                            retry_state.last_tool_args or {},
+                            retry_reason,
+                        )
+                        logger.info(
+                            "Injecting retry prompt",
+                            extra={
+                                "reason": retry_reason,
+                                "attempt": retry_state.attempts,
+                                "strategies_tried": retry_state.strategies_tried,
+                            },
+                        )
+
+                        # Record successful retry metric
+                        self.metrics.increment(
+                            "retry_prompt_injected", labels={"reason": retry_reason}
+                        )
+
+                    else:
+                        # Retry not triggered or max attempts reached
+                        if should_retry:
+                            # Max attempts reached - record failure
+                            self.metrics.increment(
+                                "retry_max_attempts_reached", labels={"reason": retry_reason}
+                            )
+
                     # Continue loop - LLM will process tool results
                     continue
 
-                # No tool calls - we have the final response
+                # No tool calls - check for intent without action
+                if self.settings.intent_detection_enabled and response.content:
+                    detected_intent = IntentDetector.detect_intent(response.content)
+
+                    if detected_intent and detected_intent.confidence >= 0.8:
+                        # Record intent detection hit
+                        self.metrics.increment(
+                            "intent_detection_hits",
+                            labels={
+                                "intent_type": detected_intent.intent_type.value,
+                                "confidence_bucket": self._confidence_bucket(
+                                    detected_intent.confidence
+                                ),
+                            },
+                        )
+
+                        # Agent stated intent but didn't act - prompt to act
+                        if retry_state.should_retry(self.settings.max_retry_attempts):
+                            self.metrics.increment(
+                                "retry_attempts", labels={"reason": "intent_without_action"}
+                            )
+
+                            nudge_message = {
+                                "role": "system",
+                                "content": RetryPromptGenerator.generate_retry_prompt(
+                                    "intent_without_action", retry_state
+                                ),
+                            }
+                            messages.append(nudge_message)
+                            retry_state.record_attempt(
+                                "intent_detection", {}, "intent_without_action"
+                            )
+                            logger.info(
+                                "Detected intent without action, nudging agent",
+                                extra={
+                                    "intent_type": detected_intent.intent_type.value,
+                                    "confidence": detected_intent.confidence,
+                                    "attempt": retry_state.attempts,
+                                },
+                            )
+                            continue
+
+                    # Check for premature giving up
+                    if IntentDetector.detect_premature_giving_up(response.content):
+                        if retry_state.empty_result_count > 0 and retry_state.should_retry(
+                            self.settings.max_retry_attempts
+                        ):
+                            # Agent giving up after empty results - encourage retry
+                            nudge_message = {
+                                "role": "system",
+                                "content": RetryPromptGenerator.generate_retry_prompt(
+                                    "empty_logs", retry_state
+                                ),
+                            }
+                            messages.append(nudge_message)
+                            retry_state.record_attempt("giving_up_prevention", {}, "premature_exit")
+                            logger.info(
+                                "Detected premature giving up, encouraging retry",
+                                extra={
+                                    "empty_result_count": retry_state.empty_result_count,
+                                    "attempt": retry_state.attempts,
+                                },
+                            )
+                            continue
+
+                # No tool calls and no retry needed - we have the final response
                 if response.content:
                     self.conversation_history.append(
                         {"role": "assistant", "content": response.content}
@@ -214,16 +609,29 @@ Available log groups will be discovered via tools.
             except LLMProviderError as e:
                 raise OrchestratorError(f"LLM provider error: {str(e)}") from e
             except Exception as e:
+                # Log the error for self-direction features but don't fail the request
+                logger.warning(
+                    "Error in self-direction logic, continuing without retry",
+                    extra={"error": str(e)},
+                    exc_info=True,
+                )
+                # If we have content, return it; otherwise raise
+                if hasattr(response, "content") and response.content:
+                    self.conversation_history.append(
+                        {"role": "assistant", "content": response.content}
+                    )
+                    return response.content
                 raise OrchestratorError(f"Unexpected error during orchestration: {str(e)}") from e
 
         # Hit max iterations - likely infinite loop
-        error_msg = f"Maximum tool iterations ({self.MAX_TOOL_ITERATIONS}) exceeded. The conversation may be stuck in a loop."
+        error_msg = f"Maximum tool iterations ({max_iterations}) exceeded. The conversation may be stuck in a loop."
         self.conversation_history.append({"role": "assistant", "content": error_msg})
         return error_msg
 
     async def _chat_stream(self, user_message: str) -> AsyncGenerator[str, None]:
-        """
-        Process message and stream the response.
+        """Process message and stream the response.
+
+        Enhanced with self-direction capabilities (same as _chat_complete).
 
         Note: For MVP, we'll handle tool calls in non-streaming mode,
         then stream the final response. Full streaming with tool calls
@@ -246,9 +654,13 @@ Available log groups will be discovered via tools.
         # Get available tools
         tools = self.tool_registry.to_function_definitions()
 
+        # Initialize retry state for this turn
+        retry_state = RetryState()
+
         # Execute conversation loop with tool calling (non-streaming)
         iteration = 0
-        while iteration < self.MAX_TOOL_ITERATIONS:
+        max_iterations = self.settings.max_tool_iterations
+        while iteration < max_iterations:
             iteration += 1
 
             try:
@@ -261,6 +673,18 @@ Available log groups will be discovered via tools.
                 if response.has_tool_calls():
                     # Execute tool calls
                     tool_results = await self._execute_tool_calls(response.tool_calls)
+
+                    # Track tool calls for retry logic
+                    for tool_call in response.tool_calls:
+                        func_info = tool_call.get("function", {})
+                        retry_state.last_tool_name = func_info.get("name")
+                        try:
+                            args_str = func_info.get("arguments", "{}")
+                            retry_state.last_tool_args = (
+                                json.loads(args_str) if isinstance(args_str, str) else args_str
+                            )
+                        except json.JSONDecodeError:
+                            retry_state.last_tool_args = {}
 
                     # Add assistant message with tool calls to history
                     assistant_message: dict[str, Any] = {
@@ -281,10 +705,132 @@ Available log groups will be discovered via tools.
                         self.conversation_history.append(tool_message)
                         messages.append(tool_message)
 
+                    # Analyze results for retry logic
+                    should_retry, retry_reason = self._analyze_tool_results(
+                        tool_results, retry_state
+                    )
+
+                    if should_retry and retry_state.should_retry(self.settings.max_retry_attempts):
+                        # Record retry metrics
+                        self.metrics.increment("retry_attempts", labels={"reason": retry_reason})
+
+                        # Apply exponential backoff before retry
+                        backoff_delay = self._calculate_backoff_delay(retry_state.attempts)
+                        logger.info(
+                            "Applying exponential backoff before retry (streaming)",
+                            extra={"delay_seconds": backoff_delay, "attempt": retry_state.attempts},
+                        )
+
+                        # Measure time spent in retry logic
+                        with MetricsTimer(
+                            self.metrics,
+                            "retry_backoff_seconds",
+                            labels={"attempt": str(retry_state.attempts)},
+                        ):
+                            await asyncio.sleep(backoff_delay)
+
+                        # Inject retry guidance as system message
+                        retry_prompt = RetryPromptGenerator.generate_retry_prompt(
+                            retry_reason, retry_state
+                        )
+                        retry_message = {"role": "system", "content": retry_prompt}
+                        messages.append(retry_message)
+                        retry_state.record_attempt(
+                            retry_state.last_tool_name or "unknown",
+                            retry_state.last_tool_args or {},
+                            retry_reason,
+                        )
+                        logger.info(
+                            "Injecting retry prompt (streaming)",
+                            extra={
+                                "reason": retry_reason,
+                                "attempt": retry_state.attempts,
+                                "strategies_tried": retry_state.strategies_tried,
+                            },
+                        )
+
+                        # Record successful retry metric
+                        self.metrics.increment(
+                            "retry_prompt_injected", labels={"reason": retry_reason}
+                        )
+
+                    else:
+                        # Retry not triggered or max attempts reached
+                        if should_retry:
+                            # Max attempts reached - record failure
+                            self.metrics.increment(
+                                "retry_max_attempts_reached", labels={"reason": retry_reason}
+                            )
+
                     # Continue loop - LLM will process tool results
                     continue
 
-                # No tool calls - stream the final response
+                # No tool calls - check for intent without action
+                if self.settings.intent_detection_enabled and response.content:
+                    detected_intent = IntentDetector.detect_intent(response.content)
+
+                    if detected_intent and detected_intent.confidence >= 0.8:
+                        # Record intent detection hit
+                        self.metrics.increment(
+                            "intent_detection_hits",
+                            labels={
+                                "intent_type": detected_intent.intent_type.value,
+                                "confidence_bucket": self._confidence_bucket(
+                                    detected_intent.confidence
+                                ),
+                            },
+                        )
+
+                        # Agent stated intent but didn't act - prompt to act
+                        if retry_state.should_retry(self.settings.max_retry_attempts):
+                            self.metrics.increment(
+                                "retry_attempts", labels={"reason": "intent_without_action"}
+                            )
+
+                            nudge_message = {
+                                "role": "system",
+                                "content": RetryPromptGenerator.generate_retry_prompt(
+                                    "intent_without_action", retry_state
+                                ),
+                            }
+                            messages.append(nudge_message)
+                            retry_state.record_attempt(
+                                "intent_detection", {}, "intent_without_action"
+                            )
+                            logger.info(
+                                "Detected intent without action, nudging agent (streaming)",
+                                extra={
+                                    "intent_type": detected_intent.intent_type.value,
+                                    "confidence": detected_intent.confidence,
+                                    "attempt": retry_state.attempts,
+                                },
+                            )
+                            continue
+
+                    # Check for premature giving up
+                    if IntentDetector.detect_premature_giving_up(response.content):
+                        if retry_state.empty_result_count > 0 and retry_state.should_retry(
+                            self.settings.max_retry_attempts
+                        ):
+                            # Agent giving up after empty results - encourage retry
+                            nudge_message = {
+                                "role": "system",
+                                "content": RetryPromptGenerator.generate_retry_prompt(
+                                    "empty_logs", retry_state
+                                ),
+                            }
+                            messages.append(nudge_message)
+                            retry_state.record_attempt("giving_up_prevention", {}, "premature_exit")
+                            logger.info(
+                                "Detected premature giving up, encouraging retry (streaming)",
+                                extra={
+                                    "empty_result_count": retry_state.empty_result_count,
+                                    "attempt": retry_state.attempts,
+                                },
+                            )
+                            continue
+
+                # No tool calls and no retry needed - stream the final response
                 if response.content:
                     self.conversation_history.append(
                         {"role": "assistant", "content": response.content}
@@ -307,12 +853,18 @@ Available log groups will be discovered via tools.
                 yield error_msg
                 return
             except Exception as e:
+                # Log the error for self-direction features but don't fail the request
+                logger.warning(
+                    "Error in self-direction logic (streaming), continuing",
+                    extra={"error": str(e)},
+                    exc_info=True,
+                )
                 error_msg = f"Unexpected error: {str(e)}"
                 yield error_msg
                 return
 
         # Hit max iterations
-        error_msg = f"Maximum tool iterations ({self.MAX_TOOL_ITERATIONS}) exceeded."
+        error_msg = f"Maximum tool iterations ({max_iterations}) exceeded."
         self.conversation_history.append({"role": "assistant", "content": error_msg})
         yield error_msg
 
@@ -341,35 +893,177 @@ Available log groups will be discovered via tools.
                 else:
                     function_args = function_args_str
 
+                # Create record and notify PENDING
+                record = ToolCallRecord(
+                    id=tool_call_id,
+                    name=function_name,
+                    arguments=function_args,
+                    status=ToolCallStatus.PENDING,
+                )
+                self._notify_tool_call(record)
+
+                # Update to RUNNING
+                record.status = ToolCallStatus.RUNNING
+                self._notify_tool_call(record)
+
                 # Execute tool
                 result = await self.tool_registry.execute(function_name, **function_args)
+
+                # Update to SUCCESS
+                record.status = ToolCallStatus.SUCCESS
+                record.result = result
+                record.completed_at = datetime.now()
+                self._notify_tool_call(record)
 
                 results.append({"tool_call_id": tool_call_id, "result": result})
 
             except json.JSONDecodeError as e:
                 # Invalid JSON arguments
+                error_result = {
+                    "success": False,
+                    "error": f"Failed to parse tool arguments: {str(e)}",
+                }
                 results.append(
                     {
                         "tool_call_id": tool_call_id,
-                        "result": {
-                            "success": False,
-                            "error": f"Failed to parse tool arguments: {str(e)}",
-                        },
-                    }
-                )
-            except Exception as e:
-                # Tool execution failed
-                results.append(
-                    {
-                        "tool_call_id": tool_call_id,
-                        "result": {
-                            "success": False,
-                            "error": f"Tool execution failed: {str(e)}",
-                        },
+                        "result": error_result,
                     }
                 )
 
+                # Notify ERROR status
+                record = ToolCallRecord(
+                    id=tool_call_id,
+                    name=function_name or "unknown",
+                    arguments={},
+                    status=ToolCallStatus.ERROR,
+                    error_message=str(e),
+                    completed_at=datetime.now(),
+                )
+                self._notify_tool_call(record)
+
+            except Exception as e:
+                # Tool execution failed
+                error_result = {
+                    "success": False,
+                    "error": f"Tool execution failed: {str(e)}",
+                }
+                results.append(
+                    {
+                        "tool_call_id": tool_call_id,
+                        "result": error_result,
+                    }
+                )
+
+                # Notify ERROR status
+                if "record" in locals():
+                    record.status = ToolCallStatus.ERROR
+                    record.error_message = str(e)
+                    record.completed_at = datetime.now()
+                    self._notify_tool_call(record)
+
         return results
+
+    def _analyze_tool_results(
+        self,
+        tool_results: list[dict[str, Any]],
+        retry_state: RetryState,
+    ) -> tuple[bool, str]:
+        """Analyze tool results to determine if retry is needed.
+
+        This method examines the results from tool execution to identify
+        scenarios where automatic retry would be beneficial, such as empty
+        results or error conditions.
+
+        Args:
+            tool_results: Results from tool execution
+            retry_state: Current retry state
+
+        Returns:
+            Tuple of (should_retry, reason) where reason is the retry scenario
+        """
+        if not self.settings.auto_retry_enabled:
+            return False, ""
+
+        for result in tool_results:
+            result_data = result.get("result", {})
+
+            # Check for error results
+            if result_data.get("success") is False:
+                error = result_data.get("error", "")
+
+                # Log group not found - should retry with list
+                if "not found" in error.lower() or "does not exist" in error.lower():
+                    logger.info(
+                        "Detected log group not found error, suggesting retry",
+                        extra={"error": error, "attempts": retry_state.attempts},
+                    )
+                    return True, "log_group_not_found"
+
+            # Check for empty results
+            if result_data.get("success") is True:
+                # Check various empty indicators
+                count = result_data.get("count", -1)
+                events = result_data.get("events", None)
+                log_groups = result_data.get("log_groups", None)
+
+                is_empty = False
+
+                if count == 0:
+                    is_empty = True
+                elif events is not None and len(events) == 0:
+                    is_empty = True
+                elif log_groups is not None and len(log_groups) == 0:
+                    is_empty = True
+
+                if is_empty:
+                    retry_state.record_empty_result()
+                    logger.info(
+                        "Detected empty results, suggesting retry",
+                        extra={
+                            "empty_result_count": retry_state.empty_result_count,
+                            "attempts": retry_state.attempts,
+                        },
+                    )
+                    return True, "empty_logs"
+
+        return False, ""
+
+    def _calculate_backoff_delay(self, attempt_count: int) -> float:
+        """Calculate exponential backoff delay for retry attempts.
+
+        Uses progressive delays to prevent hammering the LLM API and give
+        transient issues time to resolve.
+
+        Args:
+            attempt_count: Current retry attempt number (0-based)
+
+        Returns:
+            Delay in seconds (0.5s → 1s → 2s → 4s...)
+        """
+        # Base delays for first few attempts
+        base_delays = [0.5, 1.0, 2.0]
+
+        if attempt_count < len(base_delays):
+            return base_delays[attempt_count]
+
+        # For attempts beyond the base delays, use exponential growth
+        return base_delays[-1] * (2 ** (attempt_count - len(base_delays) + 1))
+
+    def _confidence_bucket(self, confidence: float) -> str:
+        """Convert confidence score to a bucket label for metrics.
+
+        Args:
+            confidence: Confidence score (0.0 to 1.0)
+
+        Returns:
+            Bucket label: "high" (>0.9), "medium" (0.7-0.9), or "low" (<0.7)
+        """
+        if confidence >= 0.9:
+            return "high"
+        elif confidence >= 0.7:
+            return "medium"
+        else:
+            return "low"
 
     def clear_history(self) -> None:
         """Clear conversation history."""

@@ -212,6 +212,7 @@ Once LogAI is running, try these example queries:
 | `LOGAI_PII_SANITIZATION_ENABLED` | Enable PII redaction | `true` | No |
 | `LOGAI_CACHE_DIR` | Cache directory path | `~/.logai/cache` | No |
 | `LOGAI_CACHE_MAX_SIZE_MB` | Max cache size (MB) | `500` | No |
+| `LOGAI_MAX_TOOL_ITERATIONS` | Max tool calls per conversation turn | `10` | No |
 | `AWS_DEFAULT_REGION` | AWS region (overridden by `--aws-region`) | - | Yes |
 | `AWS_ACCESS_KEY_ID` | AWS access key | - | Yes* |
 | `AWS_SECRET_ACCESS_KEY` | AWS secret key | - | Yes* |
@@ -220,6 +221,34 @@ Once LogAI is running, try these example queries:
 \* Either provide `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` or `AWS_PROFILE`
 
 **Note:** AWS-related environment variables can be overridden using command-line arguments. See [Command-Line Arguments](#-command-line-arguments) for details.
+
+#### Agent Behavior Settings
+
+**`LOGAI_MAX_TOOL_ITERATIONS`** - Controls the maximum number of tool calls allowed in a single conversation turn. This prevents infinite loops if the agent gets stuck.
+
+- **Default:** `10` (suitable for most queries)
+- **Range:** `1-100`
+- **When to increase:**
+  - Complex investigations requiring many tool calls
+  - Multi-step analysis workflows
+  - Debugging sessions with many retries
+- **When to decrease:**
+  - Cost control (fewer LLM API calls)
+  - Faster failure detection
+  - Testing scenarios
+
+**Example:**
+```bash
+# Allow more iterations for complex investigations
+export LOGAI_MAX_TOOL_ITERATIONS=25
+logai
+
+# Strict limit for cost control
+export LOGAI_MAX_TOOL_ITERATIONS=5
+logai
+```
+
+**Performance note:** Higher values allow more thorough investigations but may increase API costs and response times.
 
 ### Special Commands
 

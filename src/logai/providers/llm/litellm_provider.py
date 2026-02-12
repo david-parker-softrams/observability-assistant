@@ -78,15 +78,15 @@ class LiteLLMProvider(BaseLLMProvider):
         # Ollama doesn't need API key to be set
 
     @classmethod
-    def from_settings(cls, settings: LogAISettings) -> "LiteLLMProvider":
+    def from_settings(cls, settings: LogAISettings):
         """
-        Create LiteLLM provider from settings.
+        Create LLM provider from settings.
 
         Args:
             settings: Application settings
 
         Returns:
-            Configured LiteLLMProvider instance
+            Configured provider instance (LiteLLMProvider or GitHubCopilotProvider)
         """
         if settings.llm_provider == "anthropic":
             return cls(
@@ -106,6 +106,14 @@ class LiteLLMProvider(BaseLLMProvider):
                 api_key="",  # Ollama doesn't need API key
                 model=settings.ollama_model,
                 api_base=settings.ollama_base_url,
+            )
+        elif settings.llm_provider == "github-copilot":
+            # Import here to avoid circular dependency
+            from .github_copilot_provider import GitHubCopilotProvider
+
+            return GitHubCopilotProvider(
+                model=settings.github_copilot_model,
+                api_base=settings.github_copilot_api_base,
             )
         else:
             raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")

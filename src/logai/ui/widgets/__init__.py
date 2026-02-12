@@ -10,6 +10,7 @@ from logai.ui.widgets.messages import (
     UserMessage,
 )
 from logai.ui.widgets.status_bar import StatusBar
+from logai.ui.widgets.tool_sidebar import ToolCallsSidebar
 
 __all__ = [
     "ChatInput",
@@ -20,4 +21,5 @@ __all__ = [
     "LoadingIndicator",
     "ErrorMessage",
     "StatusBar",
+    "ToolCallsSidebar",
 ]
