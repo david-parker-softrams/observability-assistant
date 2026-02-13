@@ -25,7 +25,6 @@ class LogAIApp(App[None]):
 
     BINDINGS = [
         Binding("ctrl+c", "quit", "Quit", priority=True),
-        Binding("ctrl+q", "quit", "Quit"),
     ]
 
     def __init__(
@@ -52,7 +51,7 @@ class LogAIApp(App[None]):
 
         # Validate CSS file exists after initialization
         try:
-            if isinstance(self.CSS_PATH, (str, Path)):
+            if isinstance(self.CSS_PATH, str | Path):
                 css_path = Path(str(self.CSS_PATH))
                 if not css_path.exists():
                     error_msg = f"CSS file not found at: {css_path}"
