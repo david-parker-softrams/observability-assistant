@@ -439,16 +439,27 @@ Use this tool to find available log groups before querying logs."""
 
             return f"""SYSTEM INSTRUCTION: The previous tool call returned a large result that was automatically cached.
 
-Cache ID: {guidance["cache_id"]}
-Total Events: {guidance["total_events"]}
+CACHED RESULT INFORMATION:
+- Cache ID: {guidance["cache_id"]}
+- Total events cached: {guidance["total_events"]}
 
 You MUST now fetch chunks to show the user actual log events:
-1. Immediately call: fetch_cached_result_chunk(cache_id="{guidance["cache_id"]}", offset=0, limit={self.settings.initial_chunk_size})
-2. Analyze the results and determine if they answer the user's question
-3. If needed, fetch more chunks with increased offset: fetch_cached_result_chunk(cache_id="{guidance["cache_id"]}", offset={self.settings.initial_chunk_size}, limit={self.settings.initial_chunk_size})
-4. Provide a comprehensive response to the user with actual log events
 
-DO NOT just acknowledge the cache - the user expects to see log events. Execute the fetch immediately.
+STEP 1: Fetch first chunk
+Call fetch_cached_result_chunk with these parameters:
+- cache_id: {guidance["cache_id"]} (use this exact value)
+- offset: 0
+- limit: {self.settings.initial_chunk_size}
+
+STEP 2: Analyze and fetch more if needed
+If you need more events, call again with:
+- cache_id: {guidance["cache_id"]} (same value)
+- offset: {self.settings.initial_chunk_size}
+- limit: {self.settings.initial_chunk_size}
+
+IMPORTANT: Always use the exact cache_id value shown above.
+
+DO NOT just acknowledge the cache - fetch and show the user actual events.
 """
 
         # Fall back to regular context injection (e.g., /refresh updates)

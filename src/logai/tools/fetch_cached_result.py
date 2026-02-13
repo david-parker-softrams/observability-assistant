@@ -1,6 +1,7 @@
 """Tool for fetching chunks of cached large results."""
 
 import logging
+import re
 from typing import Any
 
 from logai.core.context.result_cache import ResultCacheManager
@@ -51,6 +52,9 @@ class FetchCachedResultTool(BaseTool):
                 "cache_id": {
                     "type": "string",
                     "description": "The cache ID from the cached result summary (e.g., 'result_abc123')",
+                    "minLength": 23,
+                    "maxLength": 23,
+                    "pattern": "^result_[0-9a-f]{16}$",
                 },
                 "offset": {
                     "type": "integer",
@@ -104,6 +108,17 @@ class FetchCachedResultTool(BaseTool):
                 message="cache_id parameter is required",
                 tool_name=self.name,
                 details={"provided_params": list(kwargs.keys())},
+            )
+
+        # Validate cache_id format to catch truncation bugs
+        if not re.match(r"^result_[0-9a-f]{16}$", cache_id):
+            logger.error(
+                f"Cache ID validation failed: {cache_id}",
+                extra={"expected_format": "result_[0-9a-f]{16}"},
+            )
+            raise ToolExecutionError(
+                message=f"Invalid cache_id format: {cache_id}. Expected: result_XXXXXXXXXXXXXXXX (23 total chars)",
+                tool_name=self.name,
             )
 
         offset = kwargs.get("offset", 0)
