@@ -10,7 +10,8 @@ from logai.ui.widgets.messages import (
 )
 from logai.ui.widgets.status_footer import StatusFooter
 from logai.ui.widgets.tool_sidebar import ToolCallsSidebar
-from textual.widgets import Footer, Static
+from textual.widget import Widget
+from textual.widgets import Static
 
 
 class TestUserMessage:
@@ -101,7 +102,7 @@ class TestStatusFooter:
     def test_status_footer_creation(self) -> None:
         """Test that status footer is created correctly."""
         status_footer = StatusFooter(model="claude-3-5-sonnet")
-        assert isinstance(status_footer, Footer)
+        assert isinstance(status_footer, Widget)
         assert status_footer.model == "claude-3-5-sonnet"
 
     def test_status_footer_set_status(self) -> None:

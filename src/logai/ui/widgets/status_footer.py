@@ -5,12 +5,19 @@ import time
 from rich.spinner import Spinner
 from rich.text import Text
 from textual.reactive import reactive
-from textual.renderables.blank import Blank
-from textual.widgets import Footer
+from textual.widget import Widget
 
 
-class StatusFooter(Footer):
+class StatusFooter(Widget):
     """Footer showing keyboard shortcuts (left) and status info (right)."""
+
+    DEFAULT_CSS = """
+    StatusFooter {
+        dock: bottom;
+        height: 1;
+        background: $panel;
+    }
+    """
 
     # Reactive attributes for dynamic status updates
     status: reactive[str] = reactive("Ready")
@@ -96,10 +103,18 @@ class StatusFooter(Footer):
 
     def render(self) -> Text:
         """Render the footer with shortcuts on left, status center, and info on right."""
-        # Get the base footer rendering (keyboard shortcuts)
-        base_render = super().render()
+        # Get terminal width to calculate spacing
+        width = self.size.width
 
-        # Build status message for left/center (Phase 1 + Phase 2 with spinner)
+        # Handle extremely narrow terminals gracefully
+        if width < 10:
+            return Text(self.status or "Ready", style="dim")
+
+        # Build keyboard shortcuts text manually
+        # Footer uses compose() with child widgets, but we need everything in one Text for our layout
+        shortcuts_text = self._render_shortcuts()
+
+        # Build status message for center (Phase 1 + Phase 2 with spinner)
         # Display agent activity status prominently
         status_display = Text()
         if self.status and self.status != "Ready":
@@ -108,12 +123,18 @@ class StatusFooter(Footer):
             current_time = time.time()
             spinner_text = self._spinner.render(time=current_time)
             # Extract just the spinner character (first character of rendered output)
-            spinner_str = str(spinner_text).strip() if spinner_text else "⠋"
+            # Spinner.render() returns a Text object, use .plain to get text without style markup
+            if isinstance(spinner_text, Text):
+                spinner_str = spinner_text.plain[0] if spinner_text.plain else "⠋"
+            else:
+                # Fallback: convert to string and take first character
+                spinner_str_full = str(spinner_text).strip()
+                spinner_str = spinner_str_full[0] if spinner_str_full else "⠋"
             status_display.append(f"{spinner_str} ", style="yellow")
             status_display.append(self.status, style="bold yellow")
         elif self.status:
             # Idle status - show dimmed
-            status_display.append(self.status, style="dim italic")
+            status_display.append(self.status, style="dim")
 
         # Build context info for right side
         # Calculate cache hit rate
@@ -141,47 +162,43 @@ class StatusFooter(Footer):
         context_text.append(" | ", style="dim")
         context_text.append(self.model, style="dim")
 
-        # Get terminal width to calculate spacing
-        width = self.size.width
-
-        # Handle different render types from parent Footer
-        # Footer returns Blank when there are no bindings to show
-        # Footer returns Text when there are keyboard shortcuts
-        if isinstance(base_render, Blank):
-            # No shortcuts to show
-            shortcuts_width = 0
-            shortcuts_text = None
-        elif isinstance(base_render, Text):
-            # base_render is a Text object with keyboard shortcuts
-            shortcuts_width = len(base_render.plain)
-            shortcuts_text = base_render
-        else:
-            # Fallback for unknown types - assume no shortcuts
-            shortcuts_width = 0
-            shortcuts_text = None
-
+        # Calculate widths
+        shortcuts_width = len(shortcuts_text.plain) if shortcuts_text else 0
         status_width = len(status_display.plain)
         context_width = len(context_text.plain)
 
         # Calculate layout: [shortcuts] [status] [padding] [context]
         # Minimum spacing between sections
         min_spacing = 2
-        total_content_width = shortcuts_width + status_width + context_width + (min_spacing * 2)
+
+        # Calculate required space
+        sections_with_content = sum(
+            [
+                1 if shortcuts_width > 0 else 0,
+                1 if status_width > 0 else 0,
+                1,  # context always shown
+            ]
+        )
+        required_spacing = max(0, sections_with_content - 1) * min_spacing
+        total_content_width = shortcuts_width + status_width + context_width + required_spacing
 
         if total_content_width <= width:
             # Enough space for everything
-            padding_needed = width - shortcuts_width - status_width - context_width - min_spacing
-
             result = Text()
-            if shortcuts_text:
+
+            # Add shortcuts
+            if shortcuts_text and shortcuts_width > 0:
                 result.append_text(shortcuts_text)
 
             # Add status with spacing
             if status_width > 0:
-                result.append("  ")  # Min spacing
+                if shortcuts_width > 0:
+                    result.append("  ")  # Spacing after shortcuts
                 result.append_text(status_display)
 
             # Add padding before context info
+            used_width = len(result.plain)
+            padding_needed = width - used_width - context_width
             if padding_needed > 0:
                 result.append(" " * padding_needed)
 
@@ -189,25 +206,96 @@ class StatusFooter(Footer):
             result.append_text(context_text)
             return result
         else:
-            # Limited space - prioritize status over context info
-            if not shortcuts_text:
+            # Limited space - prioritize: shortcuts > status > context
+            if shortcuts_width == 0:
                 # No shortcuts - show status if present, otherwise context
-                if status_width > 0:
+                if status_width > 0 and status_width <= width:
                     return status_display
                 else:
                     return context_text
             else:
-                # Have shortcuts - try to fit status, fallback to shortcuts only
-                available = width - shortcuts_width - min_spacing
-                if status_width > 0 and status_width <= available:
+                # Have shortcuts (shortcuts_text is not None if shortcuts_width > 0)
+                available_after_shortcuts = width - shortcuts_width - min_spacing
+
+                if status_width > 0 and status_width <= available_after_shortcuts:
+                    # Can fit shortcuts + status
                     result = Text()
-                    result.append_text(shortcuts_text)
+                    if shortcuts_text:  # Type guard for mypy
+                        result.append_text(shortcuts_text)
                     result.append("  ")
                     result.append_text(status_display)
+
+                    # Try to fit context too if there's space
+                    available_after_status = width - len(result.plain) - min_spacing
+                    if context_width <= available_after_status:
+                        result.append("  ")
+                        result.append_text(context_text)
+
                     return result
                 else:
-                    # Just show shortcuts
-                    return shortcuts_text
+                    # Only room for shortcuts, maybe context
+                    available_after_shortcuts = width - shortcuts_width - min_spacing
+                    if context_width <= available_after_shortcuts:
+                        result = Text()
+                        if shortcuts_text:  # Type guard for mypy
+                            result.append_text(shortcuts_text)
+                        # Add padding
+                        padding = width - shortcuts_width - context_width
+                        if padding > 0:
+                            result.append(" " * padding)
+                        result.append_text(context_text)
+                        return result
+                    else:
+                        # Just show shortcuts
+                        if shortcuts_text:  # Type guard for mypy
+                            return shortcuts_text
+                        else:
+                            # Shouldn't reach here, but return context as fallback
+                            return context_text
+
+    def _render_shortcuts(self) -> Text | None:
+        """
+        Render keyboard shortcuts into a Text object.
+
+        Returns:
+            Text object with keyboard shortcuts, or None if no shortcuts available
+        """
+        try:
+            # Get active bindings from screen (same as Footer does)
+            active_bindings = self.screen.active_bindings
+            bindings = [
+                (binding, enabled)
+                for (_, binding, enabled, _) in active_bindings.values()
+                if binding.show
+            ]
+
+            if not bindings:
+                return None
+
+            # Build shortcuts text
+            shortcuts = Text()
+            for i, (binding, enabled) in enumerate(bindings):
+                if i > 0:
+                    shortcuts.append(" ")
+
+                # Get key display (same as Footer does)
+                key_display = self.app.get_key_display(binding)
+
+                # Format: KEY Description
+                # Use styles similar to Footer
+                if enabled:
+                    shortcuts.append(key_display, style="bold cyan")
+                    shortcuts.append(" ")
+                    shortcuts.append(binding.description, style="white")
+                else:
+                    shortcuts.append(key_display, style="dim")
+                    shortcuts.append(" ")
+                    shortcuts.append(binding.description, style="dim")
+
+            return shortcuts
+        except Exception:
+            # If anything goes wrong getting bindings, return None
+            return None
 
     def set_status(self, status: str) -> None:
         """
