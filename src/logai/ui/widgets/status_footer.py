@@ -4,8 +4,12 @@ import time
 
 from rich.spinner import Spinner
 from rich.text import Text
+from textual.app import ComposeResult
+from textual.containers import Horizontal
 from textual.reactive import reactive
 from textual.widget import Widget
+from textual.widgets import Static
+from textual.widgets._footer import FooterKey
 
 
 class StatusFooter(Widget):
@@ -14,6 +18,18 @@ class StatusFooter(Widget):
     DEFAULT_CSS = """
     StatusFooter {
         dock: bottom;
+        height: 1;
+        background: $panel;
+        layout: horizontal;
+    }
+
+    StatusFooter > Horizontal {
+        width: auto;
+        height: 1;
+    }
+
+    StatusFooter > Static {
+        width: 1fr;
         height: 1;
         background: $panel;
     }
@@ -39,6 +55,36 @@ class StatusFooter(Widget):
         self._spinner = Spinner("dots2", style="yellow")
         self._spinner_timer_active = False
 
+    def compose(self) -> ComposeResult:
+        """Create the footer structure with FooterKey widgets and status display."""
+        # Create a horizontal container for shortcuts
+        with Horizontal():
+            # Get active bindings and create FooterKey widgets
+            try:
+                active_bindings = self.screen.active_bindings
+                bindings = [
+                    (binding, enabled)
+                    for (_, binding, enabled, _) in active_bindings.values()
+                    if binding.show
+                ]
+
+                for binding, enabled in bindings:
+                    key_display = self.app.get_key_display(binding)
+                    yield FooterKey(
+                        key=binding.key,
+                        key_display=key_display,
+                        description=binding.description,
+                        action=binding.action,
+                        disabled=not enabled,
+                    )
+            except Exception:
+                # If we can't get bindings during compose, that's okay
+                # They might not be available yet
+                pass
+
+        # Create Static widget for status and context info
+        yield Static(self._render_status_context(), id="status-context")
+
     def on_mount(self) -> None:
         """Start spinner timer when widget is mounted."""
         # Only set interval when mounted (event loop is running)
@@ -46,11 +92,60 @@ class StatusFooter(Widget):
             self.set_interval(0.1, self._update_spinner)  # Update spinner every 100ms
             self._spinner_timer_active = True
 
+        # Update shortcuts after mount when bindings are available
+        self._update_shortcuts()
+
+    def on_unmount(self) -> None:
+        """Cleanup timer when widget is unmounted."""
+        # Textual automatically cancels timers set via set_interval,
+        # but we reset our flag for proper state management
+        self._spinner_timer_active = False
+
     def _update_spinner(self) -> None:
         """Update spinner animation (Phase 2)."""
         # Only refresh if status is active (not Ready or empty)
         if self.status and self.status != "Ready":
-            self.refresh()
+            # Update the status display Static widget
+            self._update_status_display()
+
+    def _update_status_display(self) -> None:
+        """Update the status/context display Static widget."""
+        try:
+            static = self.query_one("#status-context", Static)
+            static.update(self._render_status_context())
+        except Exception:
+            # Widget might not be mounted yet
+            pass
+
+    def _update_shortcuts(self) -> None:
+        """Update the shortcuts display when bindings change."""
+        try:
+            # Remove existing shortcuts
+            shortcuts_container = self.query_one(Horizontal)
+            shortcuts_container.remove_children()
+
+            # Add new shortcuts
+            active_bindings = self.screen.active_bindings
+            bindings = [
+                (binding, enabled)
+                for (_, binding, enabled, _) in active_bindings.values()
+                if binding.show
+            ]
+
+            for binding, enabled in bindings:
+                key_display = self.app.get_key_display(binding)
+                shortcuts_container.mount(
+                    FooterKey(
+                        key=binding.key,
+                        key_display=key_display,
+                        description=binding.description,
+                        action=binding.action,
+                        disabled=not enabled,
+                    )
+                )
+        except Exception:
+            # If we can't update shortcuts, that's okay
+            pass
 
     def _is_status_active(self) -> bool:
         """Check if status indicates active work (Phase 2)."""
@@ -63,7 +158,7 @@ class StatusFooter(Widget):
         Args:
             new_status: New status value
         """
-        self.refresh()
+        self._update_status_display()
 
     def watch_cache_hits(self, new_hits: int) -> None:
         """
@@ -72,7 +167,7 @@ class StatusFooter(Widget):
         Args:
             new_hits: New cache hits value
         """
-        self.refresh()
+        self._update_status_display()
 
     def watch_cache_misses(self, new_misses: int) -> None:
         """
@@ -81,7 +176,7 @@ class StatusFooter(Widget):
         Args:
             new_misses: New cache misses value
         """
-        self.refresh()
+        self._update_status_display()
 
     def watch_model(self, new_model: str) -> None:
         """
@@ -90,7 +185,7 @@ class StatusFooter(Widget):
         Args:
             new_model: New model value
         """
-        self.refresh()
+        self._update_status_display()
 
     def watch_context_utilization(self, new_utilization: float) -> None:
         """
@@ -99,35 +194,20 @@ class StatusFooter(Widget):
         Args:
             new_utilization: New utilization percentage (0-100)
         """
-        self.refresh()
+        self._update_status_display()
 
-    def render(self) -> Text:
-        """Render the footer with shortcuts on left, status center, and info on right."""
-        # Get terminal width to calculate spacing
-        width = self.size.width
-
-        # Handle extremely narrow terminals gracefully
-        if width < 10:
-            return Text(self.status or "Ready", style="dim")
-
-        # Build keyboard shortcuts text manually
-        # Footer uses compose() with child widgets, but we need everything in one Text for our layout
-        shortcuts_text = self._render_shortcuts()
-
-        # Build status message for center (Phase 1 + Phase 2 with spinner)
-        # Display agent activity status prominently
+    def _render_status_context(self) -> Text:
+        """Render the status and context information for the Static widget."""
+        # Build status message (Phase 1 + Phase 2 with spinner)
         status_display = Text()
         if self.status and self.status != "Ready":
             # Active status - show with spinner animation (Phase 2)
-            # Use current time for spinner animation
             current_time = time.time()
             spinner_text = self._spinner.render(time=current_time)
-            # Extract just the spinner character (first character of rendered output)
-            # Spinner.render() returns a Text object, use .plain to get text without style markup
+            # Extract just the spinner character
             if isinstance(spinner_text, Text):
                 spinner_str = spinner_text.plain[0] if spinner_text.plain else "⠋"
             else:
-                # Fallback: convert to string and take first character
                 spinner_str_full = str(spinner_text).strip()
                 spinner_str = spinner_str_full[0] if spinner_str_full else "⠋"
             status_display.append(f"{spinner_str} ", style="yellow")
@@ -162,140 +242,14 @@ class StatusFooter(Widget):
         context_text.append(" | ", style="dim")
         context_text.append(self.model, style="dim")
 
-        # Calculate widths
-        shortcuts_width = len(shortcuts_text.plain) if shortcuts_text else 0
-        status_width = len(status_display.plain)
-        context_width = len(context_text.plain)
+        # Combine status and context with proper spacing
+        result = Text()
+        if len(status_display.plain) > 0:
+            result.append_text(status_display)
+            result.append("  ")
+        result.append_text(context_text)
 
-        # Calculate layout: [shortcuts] [status] [padding] [context]
-        # Minimum spacing between sections
-        min_spacing = 2
-
-        # Calculate required space
-        sections_with_content = sum(
-            [
-                1 if shortcuts_width > 0 else 0,
-                1 if status_width > 0 else 0,
-                1,  # context always shown
-            ]
-        )
-        required_spacing = max(0, sections_with_content - 1) * min_spacing
-        total_content_width = shortcuts_width + status_width + context_width + required_spacing
-
-        if total_content_width <= width:
-            # Enough space for everything
-            result = Text()
-
-            # Add shortcuts
-            if shortcuts_text and shortcuts_width > 0:
-                result.append_text(shortcuts_text)
-
-            # Add status with spacing
-            if status_width > 0:
-                if shortcuts_width > 0:
-                    result.append("  ")  # Spacing after shortcuts
-                result.append_text(status_display)
-
-            # Add padding before context info
-            used_width = len(result.plain)
-            padding_needed = width - used_width - context_width
-            if padding_needed > 0:
-                result.append(" " * padding_needed)
-
-            # Add context info
-            result.append_text(context_text)
-            return result
-        else:
-            # Limited space - prioritize: shortcuts > status > context
-            if shortcuts_width == 0:
-                # No shortcuts - show status if present, otherwise context
-                if status_width > 0 and status_width <= width:
-                    return status_display
-                else:
-                    return context_text
-            else:
-                # Have shortcuts (shortcuts_text is not None if shortcuts_width > 0)
-                available_after_shortcuts = width - shortcuts_width - min_spacing
-
-                if status_width > 0 and status_width <= available_after_shortcuts:
-                    # Can fit shortcuts + status
-                    result = Text()
-                    if shortcuts_text:  # Type guard for mypy
-                        result.append_text(shortcuts_text)
-                    result.append("  ")
-                    result.append_text(status_display)
-
-                    # Try to fit context too if there's space
-                    available_after_status = width - len(result.plain) - min_spacing
-                    if context_width <= available_after_status:
-                        result.append("  ")
-                        result.append_text(context_text)
-
-                    return result
-                else:
-                    # Only room for shortcuts, maybe context
-                    available_after_shortcuts = width - shortcuts_width - min_spacing
-                    if context_width <= available_after_shortcuts:
-                        result = Text()
-                        if shortcuts_text:  # Type guard for mypy
-                            result.append_text(shortcuts_text)
-                        # Add padding
-                        padding = width - shortcuts_width - context_width
-                        if padding > 0:
-                            result.append(" " * padding)
-                        result.append_text(context_text)
-                        return result
-                    else:
-                        # Just show shortcuts
-                        if shortcuts_text:  # Type guard for mypy
-                            return shortcuts_text
-                        else:
-                            # Shouldn't reach here, but return context as fallback
-                            return context_text
-
-    def _render_shortcuts(self) -> Text | None:
-        """
-        Render keyboard shortcuts into a Text object.
-
-        Returns:
-            Text object with keyboard shortcuts, or None if no shortcuts available
-        """
-        try:
-            # Get active bindings from screen (same as Footer does)
-            active_bindings = self.screen.active_bindings
-            bindings = [
-                (binding, enabled)
-                for (_, binding, enabled, _) in active_bindings.values()
-                if binding.show
-            ]
-
-            if not bindings:
-                return None
-
-            # Build shortcuts text
-            shortcuts = Text()
-            for i, (binding, enabled) in enumerate(bindings):
-                if i > 0:
-                    shortcuts.append(" ")
-
-                # Get key display (same as Footer does)
-                key_display = self.app.get_key_display(binding)
-
-                # Format: KEY Description
-                # Use styles similar to Footer
-                if enabled:
-                    shortcuts.append(key_display, style="bold cyan")
-                    shortcuts.append(" ")
-                    shortcuts.append(binding.description, style="white")
-                else:
-                    shortcuts.append(key_display, style="dim")
-                    shortcuts.append(" ")
-                    shortcuts.append(binding.description, style="dim")
-
-            return shortcuts
-        except Exception:
-            # If anything goes wrong getting bindings, return None
-            return None
+        return result
 
     def set_status(self, status: str) -> None:
         """
