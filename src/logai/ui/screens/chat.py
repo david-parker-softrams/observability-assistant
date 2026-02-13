@@ -417,8 +417,8 @@ class ChatScreen(Screen[None]):
             return
 
         if self._resize_sidebar("left", "shrink"):
-            width = SIDEBAR_WIDTH_STEPS[self._left_sidebar_width_index]
-            self.notify(f"Log groups: {width} columns")
+            # Resize successful - no notification needed
+            pass
         else:
             self.notify("Log groups sidebar at minimum width", severity="warning")
 
@@ -429,8 +429,8 @@ class ChatScreen(Screen[None]):
             return
 
         if self._resize_sidebar("left", "expand"):
-            width = SIDEBAR_WIDTH_STEPS[self._left_sidebar_width_index]
-            self.notify(f"Log groups: {width} columns")
+            # Resize successful - no notification needed
+            pass
         else:
             self.notify("Log groups sidebar at maximum width", severity="warning")
 
@@ -441,8 +441,8 @@ class ChatScreen(Screen[None]):
             return
 
         if self._resize_sidebar("right", "shrink"):
-            width = SIDEBAR_WIDTH_STEPS[self._right_sidebar_width_index]
-            self.notify(f"Tool calls: {width} columns")
+            # Resize successful - no notification needed
+            pass
         else:
             self.notify("Tool calls sidebar at minimum width", severity="warning")
 
@@ -453,8 +453,8 @@ class ChatScreen(Screen[None]):
             return
 
         if self._resize_sidebar("right", "expand"):
-            width = SIDEBAR_WIDTH_STEPS[self._right_sidebar_width_index]
-            self.notify(f"Tool calls: {width} columns")
+            # Resize successful - no notification needed
+            pass
         else:
             self.notify("Tool calls sidebar at maximum width", severity="warning")
 
