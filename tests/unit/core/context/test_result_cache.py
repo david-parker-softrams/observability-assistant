@@ -539,3 +539,136 @@ class TestResultCacheManager:
         elapsed_ms = (time.time() - start) * 1000
 
         assert elapsed_ms < 100, f"Chunk retrieval took {elapsed_ms:.2f}ms (target: <100ms)"
+
+
+@pytest.mark.asyncio
+async def test_corrupted_cache_data_auto_cleanup(cache_manager: ResultCacheManager) -> None:
+    """Test that corrupted JSON in cache is detected and cleaned up."""
+    # Manually insert corrupted JSON into database
+    import aiosqlite
+
+    cache_id = "corrupted_test"
+    async with aiosqlite.connect(str(cache_manager.db_path)) as db:
+        await db.execute(
+            """INSERT INTO cached_results
+            (cache_id, tool_name, query_params, result_data, event_count, data_size_bytes,
+             created_at, expires_at, last_accessed, access_count)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                cache_id,
+                "query_cloudwatch",
+                "{}",
+                "{invalid json this is corrupted}",  # Corrupted JSON
+                100,
+                1000,
+                int(time.time()),
+                int(time.time()) + 3600,
+                int(time.time()),
+                0,
+            ),
+        )
+        await db.commit()
+
+    # Try to fetch - should return error and auto-delete
+    result = await cache_manager.fetch_chunk(cache_id)
+
+    assert result["success"] is False
+    assert "corrupted" in result["error"].lower()
+    assert "hint" in result
+    assert "action_required" in result
+
+    # Verify the corrupted entry was deleted
+    async with aiosqlite.connect(str(cache_manager.db_path)) as db:
+        async with db.execute(
+            "SELECT COUNT(*) FROM cached_results WHERE cache_id = ?", (cache_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            count = row[0] if row else 0
+
+    assert count == 0, "Corrupted entry should be deleted"
+
+
+@pytest.mark.asyncio
+async def test_validate_and_clean_cache(cache_manager: ResultCacheManager) -> None:
+    """Test validation method finds and cleans corrupted entries."""
+    import aiosqlite
+
+    # Insert one good entry and one corrupted entry
+    async with aiosqlite.connect(str(cache_manager.db_path)) as db:
+        # Good entry
+        await db.execute(
+            """INSERT INTO cached_results
+            (cache_id, tool_name, query_params, result_data, event_count, data_size_bytes,
+             created_at, expires_at, last_accessed, access_count)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "good_cache",
+                "query_cloudwatch",
+                "{}",
+                '{"events": [], "count": 0}',  # Valid JSON
+                0,
+                100,
+                int(time.time()),
+                int(time.time()) + 3600,
+                int(time.time()),
+                0,
+            ),
+        )
+
+        # Corrupted entry
+        await db.execute(
+            """INSERT INTO cached_results
+            (cache_id, tool_name, query_params, result_data, event_count, data_size_bytes,
+             created_at, expires_at, last_accessed, access_count)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "bad_cache",
+                "query_cloudwatch",
+                "{}",
+                "{this is not valid json}",  # Corrupted
+                100,
+                1000,
+                int(time.time()),
+                int(time.time()) + 3600,
+                int(time.time()),
+                0,
+            ),
+        )
+        await db.commit()
+
+    # Run validation
+    result = await cache_manager.validate_and_clean_cache()
+
+    assert result["total_entries"] == 2
+    assert result["corrupted_count"] == 1
+    assert "bad_cache" in result["corrupted_ids"]
+    assert result["corruption_rate"] == 0.5
+
+    # Verify only good entry remains
+    async with aiosqlite.connect(str(cache_manager.db_path)) as db:
+        async with db.execute("SELECT cache_id FROM cached_results") as cursor:
+            remaining = [row[0] async for row in cursor]
+
+    assert remaining == ["good_cache"]
+
+
+@pytest.mark.asyncio
+async def test_cache_result_validation_prevents_bad_data(cache_manager: ResultCacheManager) -> None:
+    """Test that trying to cache invalid data raises an error."""
+
+    # Create an object that can't be serialized to JSON
+    class UnserializableObject:
+        pass
+
+    bad_result = {
+        "events": [],
+        "count": 1,
+        "bad_object": UnserializableObject(),  # Can't serialize this
+    }
+
+    with pytest.raises(ValueError, match="Cannot cache result"):
+        await cache_manager.cache_result(
+            tool_name="query_cloudwatch",
+            query_params={},
+            result=bad_result,
+        )

@@ -145,6 +145,14 @@ class ResultCacheManager:
         self._initialized = True
         logger.debug(f"ResultCacheManager initialized at {self.db_path}")
 
+        # Validate and clean corrupted cache entries on startup
+        validation_result = await self.validate_and_clean_cache()
+        if validation_result["corrupted_count"] > 0:
+            logger.warning(
+                f"Startup cache validation: Cleaned {validation_result['corrupted_count']} "
+                f"corrupted entries ({validation_result['corruption_rate']:.1%} of total)"
+            )
+
     def _generate_cache_id(self, tool_name: str, query_params: dict[str, Any]) -> str:
         """
         Generate a unique cache ID for a result.
@@ -295,8 +303,15 @@ class ResultCacheManager:
         time_range = self._extract_time_range(events)
         sample_events = self._sample_events(events)
 
-        # Serialize result
-        result_json = json.dumps(result)
+        # Serialize result with validation
+        try:
+            result_json = json.dumps(result)
+            # Validate by parsing it back to ensure it's valid JSON
+            json.loads(result_json)
+        except (TypeError, ValueError, json.JSONDecodeError) as e:
+            logger.error(f"Failed to serialize result for caching: {e}")
+            raise ValueError(f"Cannot cache result: invalid JSON structure - {str(e)}") from e
+
         data_size = len(result_json.encode("utf-8"))
 
         now = int(time.time())
@@ -304,26 +319,31 @@ class ResultCacheManager:
 
         # Store in database
         async with aiosqlite.connect(str(self.db_path)) as db:
-            await db.execute(
-                """
-                INSERT OR REPLACE INTO cached_results
-                (cache_id, tool_name, query_params, result_data, event_count,
-                 data_size_bytes, created_at, expires_at, last_accessed, access_count)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
-            """,
-                (
-                    cache_id,
-                    tool_name,
-                    json.dumps(query_params),
-                    result_json,
-                    len(events),
-                    data_size,
-                    now,
-                    expires_at,
-                    now,
-                ),
-            )
-            await db.commit()
+            try:
+                await db.execute(
+                    """
+                    INSERT OR REPLACE INTO cached_results
+                    (cache_id, tool_name, query_params, result_data, event_count,
+                     data_size_bytes, created_at, expires_at, last_accessed, access_count)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                """,
+                    (
+                        cache_id,
+                        tool_name,
+                        json.dumps(query_params),
+                        result_json,
+                        len(events),
+                        data_size,
+                        now,
+                        expires_at,
+                        now,
+                    ),
+                )
+                await db.commit()
+            except Exception as e:
+                await db.rollback()
+                logger.error(f"Failed to cache result {cache_id}: {e}")
+                raise
 
         logger.info(f"Cached result {cache_id}: {len(events)} events, {data_size} bytes")
 
@@ -401,7 +421,24 @@ class ResultCacheManager:
                     "hint": "Re-run the original query to get fresh results.",
                 }
 
-            # Update access stats
+            # Parse result BEFORE committing the access stats update
+            # This allows us to detect corruption and delete in the SAME transaction
+            try:
+                result = json.loads(result_data)
+            except json.JSONDecodeError as e:
+                logger.error(f"Cache {cache_id} contains corrupted JSON: {e}")
+                # Delete in the SAME transaction context (still inside async with db:)
+                await db.execute("DELETE FROM cached_results WHERE cache_id = ?", (cache_id,))
+                await db.commit()
+                return {
+                    "success": False,
+                    "error": "Cached result is corrupted and has been removed",
+                    "hint": "The cached data was invalid. Please re-run the original query to get fresh results.",
+                    "action_required": "Re-execute the original CloudWatch query",
+                    "cache_id": cache_id,
+                }
+
+            # Only update access stats if parsing succeeded
             await db.execute(
                 """
                 UPDATE cached_results
@@ -411,15 +448,6 @@ class ResultCacheManager:
                 (int(time.time()), cache_id),
             )
             await db.commit()
-
-        # Parse result
-        try:
-            result = json.loads(result_data)
-        except json.JSONDecodeError:
-            return {
-                "success": False,
-                "error": "Failed to parse cached result",
-            }
 
         # Extract events
         events = result.get("events", result.get("logs", []))
@@ -527,6 +555,46 @@ class ResultCacheManager:
                 )
                 await db.commit()
                 logger.info(f"Evicted {len(to_delete)} cached results to enforce size limit")
+
+    async def validate_and_clean_cache(self) -> dict[str, Any]:
+        """
+        Validate all cached results and auto-delete corrupted entries.
+
+        Returns:
+            Dictionary with validation results and cleanup stats
+        """
+        await self.initialize()
+
+        corrupted = []
+        total = 0
+
+        async with aiosqlite.connect(str(self.db_path)) as db:
+            # Get all cache entries
+            async with db.execute("SELECT cache_id, result_data FROM cached_results") as cursor:
+                async for row in cursor:
+                    total += 1
+                    cache_id, result_data = row
+                    try:
+                        json.loads(result_data)
+                    except json.JSONDecodeError:
+                        corrupted.append(cache_id)
+                        logger.warning(f"Found corrupted cache entry: {cache_id}")
+
+            # Delete corrupted entries
+            if corrupted:
+                for cache_id in corrupted:
+                    await db.execute("DELETE FROM cached_results WHERE cache_id = ?", (cache_id,))
+                await db.commit()
+                logger.info(
+                    f"Cleaned {len(corrupted)} corrupted cache entries out of {total} total"
+                )
+
+        return {
+            "total_entries": total,
+            "corrupted_count": len(corrupted),
+            "corrupted_ids": corrupted,
+            "corruption_rate": len(corrupted) / total if total > 0 else 0,
+        }
 
     async def get_statistics(self) -> dict[str, Any]:
         """
