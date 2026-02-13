@@ -29,6 +29,10 @@ class StatusFooter(Widget):
         padding-right: 2;
     }
 
+    StatusFooter FooterKey {
+        margin-right: 1;
+    }
+
     StatusFooter > Static {
         width: 1fr;
         height: 1;
