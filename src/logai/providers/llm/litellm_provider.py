@@ -1,6 +1,7 @@
 """LiteLLM provider implementation for unified LLM access."""
 
 import asyncio
+import logging
 from collections.abc import AsyncGenerator
 from typing import Any, NoReturn
 
@@ -16,6 +17,17 @@ from .base import (
     LLMResponse,
     RateLimitError,
 )
+
+# Suppress LiteLLM console logging - ensure logs only go to file
+# This prevents debug logs from appearing in the TUI
+# LiteLLM creates multiple loggers, all with default stderr handlers
+for logger_name in ["LiteLLM", "LiteLLM Router", "LiteLLM Proxy"]:
+    logger = logging.getLogger(logger_name)
+    logger.handlers.clear()  # Remove default stderr handler
+    logger.propagate = True  # Keep propagation for file logging
+
+# Use LiteLLM's built-in suppression for extra safety
+litellm.suppress_debug_info = True
 
 # Register Ollama models that support function calling
 # Based on LiteLLM documentation: https://docs.litellm.ai/docs/providers/ollama
