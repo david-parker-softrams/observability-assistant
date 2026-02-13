@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import logging
 import sys
 from pathlib import Path
 
@@ -14,6 +15,50 @@ from logai.core.tools.registry import ToolRegistry
 from logai.providers.datasources.cloudwatch import CloudWatchDataSource
 from logai.providers.llm.litellm_provider import LiteLLMProvider
 from logai.ui.app import LogAIApp
+
+
+def setup_logging(debug: bool = False, log_file: str | None = None) -> None:
+    """
+    Configure application logging.
+
+    Args:
+        debug: Enable DEBUG level logging (default: INFO)
+        log_file: Path to log file (default: ~/.logai/logs/logai.log)
+    """
+    level = logging.DEBUG if debug else logging.INFO
+    handlers: list[logging.Handler] = []
+
+    # Try to set up file logging
+    try:
+        if log_file is None:
+            log_dir = Path.home() / ".logai" / "logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            log_file = str(log_dir / "logai.log")
+        else:
+            log_path = Path(log_file)
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            log_file = str(log_path)
+
+        handlers.append(logging.FileHandler(log_file))
+    except (PermissionError, OSError) as e:
+        print(f"⚠️  Warning: Could not create log file: {e}", file=sys.stderr)
+        print("   Logging to console only", file=sys.stderr)
+        log_file = None  # Mark that file logging failed
+
+    # Always add console handler
+    handlers.append(logging.StreamHandler())
+
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        handlers=handlers,
+    )
+
+    logger = logging.getLogger(__name__)
+    if log_file:
+        logger.info(f"Logging initialized: level={logging.getLevelName(level)}, file={log_file}")
+    else:
+        logger.info(f"Logging initialized: level={logging.getLevelName(level)}, console only")
 
 
 async def handle_auth_login(args: argparse.Namespace) -> int:
@@ -171,6 +216,19 @@ For more information, visit: https://github.com/logai/logai
         metavar="REGION",
     )
 
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug logging (default: INFO level)",
+    )
+
+    parser.add_argument(
+        "--log-file",
+        type=str,
+        default=None,
+        help="Path to log file (default: ~/.logai/logs/logai.log)",
+    )
+
     # Add subparsers for commands
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
@@ -198,6 +256,9 @@ For more information, visit: https://github.com/logai/logai
 
     # Parse arguments
     args = parser.parse_args()
+
+    # Setup logging FIRST (before any other operations)
+    setup_logging(debug=args.debug, log_file=args.log_file)
 
     # Handle auth commands
     if args.command == "auth":
