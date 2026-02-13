@@ -26,12 +26,14 @@ class StatusFooter(Widget):
     StatusFooter > Horizontal {
         width: auto;
         height: 1;
+        padding-right: 2;
     }
 
     StatusFooter > Static {
         width: 1fr;
         height: 1;
         background: $panel;
+        padding-left: 2;
     }
     """
 
