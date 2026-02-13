@@ -142,16 +142,34 @@ class ResultCacheManager:
 
             await db.commit()
 
+            # Validate and clean corrupted cache entries on startup (BEFORE setting flag)
+            # Inline validation to avoid recursive initialize() call
+            corrupted = []
+            total = 0
+            async with db.execute("SELECT cache_id, result_data FROM cached_results") as cursor:
+                async for row in cursor:
+                    total += 1
+                    cache_id, result_data = row
+                    try:
+                        json.loads(result_data)
+                    except json.JSONDecodeError:
+                        corrupted.append(cache_id)
+                        logger.warning(f"Found corrupted cache entry: {cache_id}")
+
+            # Delete corrupted entries
+            if corrupted:
+                for cache_id in corrupted:
+                    await db.execute("DELETE FROM cached_results WHERE cache_id = ?", (cache_id,))
+                await db.commit()
+                corruption_rate = len(corrupted) / total if total > 0 else 0
+                logger.warning(
+                    f"Startup cache validation: Cleaned {len(corrupted)} "
+                    f"corrupted entries ({corruption_rate:.1%} of total)"
+                )
+
+        # Set flag LAST (after all initialization work is complete)
         self._initialized = True
         logger.debug(f"ResultCacheManager initialized at {self.db_path}")
-
-        # Validate and clean corrupted cache entries on startup
-        validation_result = await self.validate_and_clean_cache()
-        if validation_result["corrupted_count"] > 0:
-            logger.warning(
-                f"Startup cache validation: Cleaned {validation_result['corrupted_count']} "
-                f"corrupted entries ({validation_result['corruption_rate']:.1%} of total)"
-            )
 
     def _generate_cache_id(self, tool_name: str, query_params: dict[str, Any]) -> str:
         """
