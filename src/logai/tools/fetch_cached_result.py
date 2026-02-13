@@ -1,9 +1,12 @@
 """Tool for fetching chunks of cached large results."""
 
+import logging
 from typing import Any
 
 from logai.core.context.result_cache import ResultCacheManager
 from logai.core.tools.base import BaseTool, ToolExecutionError
+
+logger = logging.getLogger(__name__)
 
 
 class FetchCachedResultTool(BaseTool):
@@ -109,6 +112,11 @@ class FetchCachedResultTool(BaseTool):
         time_start = kwargs.get("time_start")
         time_end = kwargs.get("time_end")
 
+        logger.debug(
+            f"Tool: fetch_cached_result_chunk called with cache_id={cache_id}, "
+            f"offset={offset}, limit={limit}"
+        )
+
         try:
             result = await self.result_cache.fetch_chunk(
                 cache_id=cache_id,
@@ -118,6 +126,16 @@ class FetchCachedResultTool(BaseTool):
                 time_start=time_start,
                 time_end=time_end,
             )
+
+            # Log the result status
+            if not result.get("success", False):
+                reason = result.get("error", "unknown")
+                logger.warning(f"Tool: fetch failed for cache_id={cache_id}, reason: {reason}")
+            else:
+                logger.debug(
+                    f"Tool: fetch succeeded for cache_id={cache_id}, "
+                    f"returned {result.get('count', 0)} events"
+                )
 
             return result
 

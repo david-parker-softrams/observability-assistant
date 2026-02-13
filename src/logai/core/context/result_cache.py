@@ -335,6 +335,11 @@ class ResultCacheManager:
         now = int(time.time())
         expires_at = now + self.ttl_seconds
 
+        logger.debug(
+            f"Caching result: cache_id={cache_id}, events={len(events)}, "
+            f"expires_at={expires_at} (TTL={self.ttl_seconds}s)"
+        )
+
         # Store in database
         async with aiosqlite.connect(str(self.db_path)) as db:
             try:
@@ -403,6 +408,11 @@ class ResultCacheManager:
         Returns:
             Dictionary with events and metadata
         """
+        logger.debug(
+            f"fetch_chunk called: cache_id={cache_id}, offset={offset}, limit={limit}, "
+            f"filter_pattern={filter_pattern}, time_start={time_start}, time_end={time_end}"
+        )
+
         await self.initialize()
 
         # Enforce limit
@@ -421,6 +431,7 @@ class ResultCacheManager:
                 row = await cursor.fetchone()
 
             if not row:
+                logger.warning(f"Cache miss: No entry found for cache_id={cache_id}")
                 return {
                     "success": False,
                     "error": f"Cache entry '{cache_id}' not found",
@@ -429,8 +440,20 @@ class ResultCacheManager:
 
             result_data, event_count, expires_at = row
 
-            # Check expiration
-            if expires_at < int(time.time()):
+            current_time = int(time.time())
+            time_until_expiry = expires_at - current_time
+
+            logger.debug(
+                f"Cache entry found: cache_id={cache_id}, expires_at={expires_at}, "
+                f"current_time={current_time}, time_until_expiry={time_until_expiry}s"
+            )
+
+            # Check expiration (FIXED: off-by-one bug - now using <=)
+            if expires_at <= current_time:
+                expired_seconds_ago = current_time - expires_at
+                logger.warning(
+                    f"Cache entry expired: cache_id={cache_id}, expired {expired_seconds_ago}s ago"
+                )
                 await db.execute("DELETE FROM cached_results WHERE cache_id = ?", (cache_id,))
                 await db.commit()
                 return {
@@ -490,6 +513,11 @@ class ResultCacheManager:
         # Apply pagination
         total_filtered = len(filtered_events)
         chunk = filtered_events[offset : offset + limit]
+
+        logger.debug(
+            f"Cache hit: cache_id={cache_id}, returning {len(chunk)} events "
+            f"(total_filtered={total_filtered}, total_cached={event_count})"
+        )
 
         return {
             "success": True,
