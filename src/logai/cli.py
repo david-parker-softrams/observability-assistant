@@ -44,14 +44,14 @@ def setup_logging(debug: bool = False, log_file: str | None = None) -> None:
         print(f"⚠️  Warning: Could not create log file: {e}", file=sys.stderr)
         print("   Logging to console only", file=sys.stderr)
         log_file = None  # Mark that file logging failed
-
-    # Always add console handler
-    handlers.append(logging.StreamHandler())
+        # Add console handler as fallback when file logging fails
+        handlers.append(logging.StreamHandler())
 
     logging.basicConfig(
         level=level,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         handlers=handlers,
+        force=True,  # Clear existing handlers (e.g., from pytest)
     )
 
     logger = logging.getLogger(__name__)
