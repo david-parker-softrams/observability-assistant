@@ -356,6 +356,7 @@ Current time: {current_time}
             cache_dir=settings.cache_dir / "results",
             ttl_seconds=getattr(settings, "cache_ttl_seconds", 3600),
             max_size_mb=100,
+            metrics_collector=self.metrics,
         )
 
         # Context notification callback for UI updates

@@ -330,6 +330,11 @@ For more information, visit: https://github.com/logai/logai
         sanitizer = LogSanitizer(enabled=settings.pii_sanitization_enabled)
         cache_manager = CacheManager(settings)
 
+        # Initialize metrics collector
+        from logai.core.metrics import MetricsCollector
+
+        metrics_collector = MetricsCollector()
+
         # Import and register tools
         from logai.core.tools.cloudwatch_tools import (
             FetchLogsTool,
@@ -350,10 +355,16 @@ For more information, visit: https://github.com/logai/logai
             cache_dir=settings.cache_dir / "results",
             ttl_seconds=getattr(settings, "cache_ttl_seconds", 3600),
             max_size_mb=100,
+            metrics_collector=metrics_collector,
         )
 
         # Register context management tool
-        ToolRegistry.register(FetchCachedResultTool(result_cache))
+        ToolRegistry.register(
+            FetchCachedResultTool(
+                result_cache=result_cache,
+                metrics_collector=metrics_collector,
+            )
+        )
 
         # === NEW: Pre-load log groups ===
         from logai.core.log_group_manager import LogGroupManager
@@ -387,6 +398,7 @@ For more information, visit: https://github.com/logai/logai
             sanitizer=sanitizer,
             settings=settings,
             cache=cache_manager,
+            metrics_collector=metrics_collector,
             log_group_manager=log_group_manager,
             result_cache=result_cache,
         )

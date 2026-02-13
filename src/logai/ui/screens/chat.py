@@ -280,10 +280,9 @@ class ChatScreen(Screen[None]):
             # Update status
             status_footer.set_status("Ready")
 
-            # Update cache stats
-            cache_stats = await self.cache_manager.get_statistics()
-            hits = cache_stats.get("total_hits", 0)
-            misses = cache_stats.get("total_misses", 0)
+            # Get cache stats from metrics instead of cache manager
+            hits = int(self.orchestrator.metrics.get_counter_value("cache_hit"))
+            misses = int(self.orchestrator.metrics.get_counter_value("cache_miss"))
             status_footer.update_cache_stats(hits, misses)
 
             # Update context usage

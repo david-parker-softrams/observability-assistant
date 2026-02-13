@@ -10,6 +10,8 @@ from typing import Any
 
 import aiosqlite
 
+from logai.core.metrics import MetricsCollector
+
 logger = logging.getLogger(__name__)
 
 
@@ -86,6 +88,7 @@ class ResultCacheManager:
         cache_dir: Path,
         ttl_seconds: int = DEFAULT_TTL_SECONDS,
         max_size_mb: int = MAX_CACHE_SIZE_MB,
+        metrics_collector: MetricsCollector | None = None,
     ):
         """
         Initialize result cache manager.
@@ -94,6 +97,7 @@ class ResultCacheManager:
             cache_dir: Directory for cache database
             ttl_seconds: Time-to-live for cached results (seconds)
             max_size_mb: Maximum cache size in MB
+            metrics_collector: Optional metrics collector for recording cache operations
         """
         self.cache_dir = cache_dir
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -101,6 +105,7 @@ class ResultCacheManager:
         self.ttl_seconds = ttl_seconds
         self.max_size_bytes = max_size_mb * 1024 * 1024
         self._initialized = False
+        self.metrics = metrics_collector
 
     async def initialize(self) -> None:
         """Initialize database schema."""
@@ -370,6 +375,13 @@ class ResultCacheManager:
 
         logger.info(f"Cached result {cache_id}: {len(events)} events, {data_size} bytes")
 
+        # Record cache store metric
+        if self.metrics:
+            self.metrics.increment(
+                "cache_store",
+                labels={"tool": tool_name, "size_bytes": str(data_size)},
+            )
+
         # Enforce cache size limit
         await self._enforce_size_limit()
 
@@ -432,6 +444,11 @@ class ResultCacheManager:
 
             if not row:
                 logger.warning(f"Cache miss: No entry found for cache_id={cache_id}")
+
+                # Record cache miss metric
+                if self.metrics:
+                    self.metrics.increment("cache_miss", labels={"reason": "not_found"})
+
                 return {
                     "success": False,
                     "error": f"Cache entry '{cache_id}' not found",
@@ -454,6 +471,11 @@ class ResultCacheManager:
                 logger.warning(
                     f"Cache entry expired: cache_id={cache_id}, expired {expired_seconds_ago}s ago"
                 )
+
+                # Record cache miss metric
+                if self.metrics:
+                    self.metrics.increment("cache_miss", labels={"reason": "expired"})
+
                 await db.execute("DELETE FROM cached_results WHERE cache_id = ?", (cache_id,))
                 await db.commit()
                 return {
@@ -468,6 +490,11 @@ class ResultCacheManager:
                 result = json.loads(result_data)
             except json.JSONDecodeError as e:
                 logger.error(f"Cache {cache_id} contains corrupted JSON: {e}")
+
+                # Record cache miss metric
+                if self.metrics:
+                    self.metrics.increment("cache_miss", labels={"reason": "corrupted"})
+
                 # Delete in the SAME transaction context (still inside async with db:)
                 await db.execute("DELETE FROM cached_results WHERE cache_id = ?", (cache_id,))
                 await db.commit()
@@ -518,6 +545,10 @@ class ResultCacheManager:
             f"Cache hit: cache_id={cache_id}, returning {len(chunk)} events "
             f"(total_filtered={total_filtered}, total_cached={event_count})"
         )
+
+        # Record cache hit metric
+        if self.metrics:
+            self.metrics.increment("cache_hit", labels={"chunk_size": str(len(chunk))})
 
         return {
             "success": True,

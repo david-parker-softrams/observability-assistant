@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 from logai.core.context.result_cache import ResultCacheManager
+from logai.core.metrics import MetricsCollector
 from logai.core.tools.base import BaseTool, ToolExecutionError
 
 logger = logging.getLogger(__name__)
@@ -19,14 +20,20 @@ class FetchCachedResultTool(BaseTool):
     agent to retrieve specific chunks of those cached results.
     """
 
-    def __init__(self, result_cache: ResultCacheManager) -> None:
+    def __init__(
+        self,
+        result_cache: ResultCacheManager,
+        metrics_collector: MetricsCollector | None = None,
+    ) -> None:
         """
         Initialize FetchCachedResultTool.
 
         Args:
             result_cache: Result cache manager instance
+            metrics_collector: Optional metrics collector for recording tool execution
         """
         self.result_cache = result_cache
+        self.metrics = metrics_collector
 
     @property
     def name(self) -> str:
@@ -146,11 +153,21 @@ class FetchCachedResultTool(BaseTool):
             if not result.get("success", False):
                 reason = result.get("error", "unknown")
                 logger.warning(f"Tool: fetch failed for cache_id={cache_id}, reason: {reason}")
+
+                # Record tool failure metric
+                if self.metrics:
+                    self.metrics.increment(
+                        "tool_execution_failed", labels={"tool": self.name, "reason": reason}
+                    )
             else:
                 logger.debug(
                     f"Tool: fetch succeeded for cache_id={cache_id}, "
                     f"returned {result.get('count', 0)} events"
                 )
+
+                # Record tool success metric
+                if self.metrics:
+                    self.metrics.increment("tool_execution_success", labels={"tool": self.name})
 
             return result
 
