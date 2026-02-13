@@ -10,7 +10,6 @@ from logai.ui.widgets.messages import (
     SystemMessage,
     UserMessage,
 )
-from logai.ui.widgets.status_bar import StatusBar
 from logai.ui.widgets.status_footer import StatusFooter
 from logai.ui.widgets.tool_sidebar import ToolCallsSidebar
 
@@ -22,7 +21,6 @@ __all__ = [
     "SystemMessage",
     "LoadingIndicator",
     "ErrorMessage",
-    "StatusBar",
     "StatusFooter",
     "LogGroupsSidebar",
     "ToolCallsSidebar",

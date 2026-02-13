@@ -106,6 +106,11 @@ class ChatScreen(Screen[None]):
         self._current_assistant_message: AssistantMessage | None = None
         self._current_loading_indicator: LoadingIndicator | None = None
 
+        # Tool progress tracking (Phase 1, step 2)
+        self._current_tool_index: int = 0
+        self._total_tools: int = 0
+        self._loading_indicator_start_time: float = 0.0
+
         # Sidebar states - read defaults from settings
         self._tool_sidebar_visible = True  # Right sidebar (existing)
         self._log_groups_sidebar_visible = self.settings.log_groups_sidebar_visible  # Left sidebar
@@ -240,7 +245,8 @@ class ChatScreen(Screen[None]):
             # Update status
             status_footer.set_status("Thinking...")
 
-            # Add loading indicator
+            # Add loading indicator (Phase 1, step 3: Track start time for minimum display)
+            self._loading_indicator_start_time = time.time()
             self._current_loading_indicator = LoadingIndicator()
             messages_container.mount(self._current_loading_indicator)
             messages_container.scroll_end(animate=False)
@@ -249,8 +255,16 @@ class ChatScreen(Screen[None]):
             self._current_assistant_message = AssistantMessage("")
             messages_container.mount(self._current_assistant_message)
 
-            # Remove loading indicator
+            # Remove loading indicator (Phase 1, step 3: Ensure minimum 200ms display time)
             if self._current_loading_indicator:
+                # Calculate elapsed time since loading indicator was shown
+                elapsed = time.time() - self._loading_indicator_start_time
+                min_display_time = 0.2  # 200ms minimum
+
+                # Wait if needed to reach minimum display time
+                if elapsed < min_display_time:
+                    await asyncio.sleep(min_display_time - elapsed)
+
                 self._current_loading_indicator.remove()
                 self._current_loading_indicator = None
 
@@ -514,5 +528,38 @@ class ChatScreen(Screen[None]):
         try:
             # Orchestrator runs in same event loop, so we can call directly
             self.on_tool_call(record)
+
+            # Phase 1, step 2: Update status footer based on tool execution
+            status_footer = self.query_one(StatusFooter)
+
+            # Update status based on tool state
+            if record.status == "running":
+                # Tool is executing - show progress
+                # Count total tools to show progress (simple heuristic: count recent tools)
+                running_tools = [r for r in self._recent_tool_calls if r.status == "running"]
+                if len(running_tools) > 1:
+                    # Multiple tools - show progress counter
+                    tool_index = (
+                        len(
+                            [
+                                r
+                                for r in self._recent_tool_calls
+                                if r.status in ["completed", "error"]
+                            ]
+                        )
+                        + 1
+                    )
+                    total = len(self._recent_tool_calls)
+                    status_footer.set_status(f"Running tool {tool_index}/{total}: {record.name}...")
+                else:
+                    # Single tool or first tool
+                    status_footer.set_status(f"Running tool: {record.name}...")
+            elif record.status == "completed":
+                # Tool completed - show processing message
+                status_footer.set_status("Processing results...")
+            elif record.status == "error":
+                # Tool failed - show error
+                status_footer.set_status(f"Tool error: {record.name}")
+
         except Exception as e:
-            logger.warning(f"Failed to update tool sidebar: {e}", exc_info=True)
+            logger.warning(f"Failed to update tool sidebar or status: {e}", exc_info=True)

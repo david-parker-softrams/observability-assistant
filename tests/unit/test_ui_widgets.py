@@ -8,7 +8,6 @@ from logai.ui.widgets.messages import (
     SystemMessage,
     UserMessage,
 )
-from logai.ui.widgets.status_bar import StatusBar
 from logai.ui.widgets.status_footer import StatusFooter
 from logai.ui.widgets.tool_sidebar import ToolCallsSidebar
 from textual.widgets import Footer, Static
@@ -94,29 +93,6 @@ class TestErrorMessage:
         """Test that error message has the correct CSS class."""
         msg = ErrorMessage("Test error")
         assert msg.has_class("error-message")
-
-
-class TestStatusBar:
-    """Tests for StatusBar widget."""
-
-    def test_status_bar_creation(self) -> None:
-        """Test that status bar is created correctly."""
-        status_bar = StatusBar(model="claude-3-5-sonnet")
-        assert isinstance(status_bar, Static)
-        assert status_bar.model == "claude-3-5-sonnet"
-
-    def test_status_bar_set_status(self) -> None:
-        """Test that status can be set."""
-        status_bar = StatusBar()
-        status_bar.set_status("Thinking...")
-        assert status_bar.status == "Thinking..."
-
-    def test_status_bar_update_cache_stats(self) -> None:
-        """Test that cache stats can be updated."""
-        status_bar = StatusBar()
-        status_bar.update_cache_stats(10, 5)
-        assert status_bar.cache_hits == 10
-        assert status_bar.cache_misses == 5
 
 
 class TestStatusFooter:
