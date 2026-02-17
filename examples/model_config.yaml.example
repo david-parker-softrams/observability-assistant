@@ -1,0 +1,99 @@
+# Example Model Configuration for LogAI
+# Copy this file to ~/.logai/model_config.yaml to customize your model settings
+#
+# This file demonstrates how to:
+# 1. Add custom models
+# 2. Override built-in model settings
+# 3. Configure default values
+
+schema_version: "1.0"
+
+models:
+  # ===================
+  # EXAMPLE: Add a custom model
+  # ===================
+
+  # my-custom-llama:
+  #   context_window: 32768
+  #   encoding: cl100k_base
+  #   chars_per_token: 3.5
+
+  # ===================
+  # EXAMPLE: Override existing model
+  # ===================
+
+  # qwen3:
+  #   context_window: 65536  # Upgraded to larger context
+  #   encoding: cl100k_base
+
+  # ===================
+  # EXAMPLE: Add company-specific models
+  # ===================
+
+  # internal-gpt-fine-tuned:
+  #   context_window: 16384
+  #   encoding: cl100k_base
+
+  # company-code-model:
+  #   context_window: 8192
+  #   encoding: cl100k_base
+
+  # ===================
+  # EXAMPLE: Ollama custom models
+  # ===================
+
+  # mistral-custom:
+  #   context_window: 32768
+  #   encoding: cl100k_base
+
+  # llama3.2:90b:
+  #   context_window: 128000
+  #   encoding: cl100k_base
+
+# ===================
+# EXAMPLE: Override defaults for unknown models
+# ===================
+
+# defaults:
+#   context_window: 16384  # Assume larger default for modern models
+#   encoding: cl100k_base
+#   chars_per_token: 3.5
+
+# ===================
+# NOTES
+# ===================
+#
+# 1. Model Matching:
+#    - Models are matched using substring matching
+#    - "qwen3" matches "qwen3:32b", "qwen3:70b", etc.
+#    - More specific patterns should be defined before generic ones
+#
+# 2. Available Encodings (tiktoken):
+#    - cl100k_base: GPT-4, Claude (approximation)
+#    - o200k_base: GPT-4o
+#    - p50k_base: GPT-3.5
+#    - r50k_base: GPT-3
+#    - gpt2: Legacy models
+#
+# 3. Context Window:
+#    - Measured in tokens
+#    - Must be a positive integer
+#    - Typical values: 8192, 16384, 32768, 128000, 200000
+#
+# 4. Chars Per Token:
+#    - Used for fallback estimation when tiktoken is unavailable
+#    - Typical values: 3.0 - 4.5
+#    - Default: 3.5
+#
+# 5. Configuration Precedence:
+#    - User config (~/.logai/model_config.yaml) overrides built-in defaults
+#    - You only need to specify models you want to add or override
+#    - All built-in models remain available
+#
+# 6. Validation:
+#    - Invalid YAML will be logged and ignored
+#    - Built-in defaults will be used if user config is invalid
+#    - Check logs for validation warnings
+#
+# For more information, see the LogAI documentation:
+# https://github.com/your-org/logai/docs/custom-models.md

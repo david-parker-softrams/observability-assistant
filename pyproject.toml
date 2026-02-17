@@ -44,6 +44,7 @@ dependencies = [
     "pydantic>=2.6.0",
     "pydantic-settings>=2.2.0",
     "python-dotenv>=1.0.0",
+    "PyYAML>=6.0",
 
     # Utilities
     "structlog>=24.1.0",
@@ -102,7 +103,7 @@ strict_optional = true
 
 # Ignore missing imports for third-party libraries
 [[tool.mypy.overrides]]
-module = ["boto3.*", "botocore.*", "aiofiles.*", "textual.*", "litellm.*", "moto.*", "respx.*"]
+module = ["boto3.*", "botocore.*", "aiofiles.*", "textual.*", "litellm.*", "moto.*", "respx.*", "yaml"]
 ignore_missing_imports = true
 
 [tool.ruff]

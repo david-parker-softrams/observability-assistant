@@ -17,27 +17,19 @@ class TokenCounter:
     Uses tiktoken for OpenAI/Claude models with fallback heuristics
     for unsupported models. All methods are class methods for ease of use.
 
+    Model configurations are loaded from YAML files:
+    - Built-in: src/logai/config/default_models.yaml
+    - User overrides: ~/.logai/model_config.yaml
+
     Performance: <1ms for typical content, <10ms for very large content (500KB)
     Accuracy: Within ±5% for supported models
     """
 
-    # Model family to tokenizer encoding mapping
-    MODEL_ENCODINGS: dict[str, str] = {
-        # OpenAI models
-        "gpt-4": "cl100k_base",
-        "gpt-4-turbo": "cl100k_base",
-        "gpt-4o": "o200k_base",
-        # Anthropic models (use cl100k_base as approximation)
-        "claude": "cl100k_base",
-        # GitHub Copilot (uses GPT-4 or Claude backend)
-        "github-copilot": "cl100k_base",
-    }
+    # Reference to config loader (allows injection for testing)
+    _config_loader: Any = None
 
-    # Default tokens per character for unknown models (conservative)
-    DEFAULT_CHARS_PER_TOKEN: float = 3.5
-
-    # Context window sizes by model family
-    CONTEXT_WINDOWS: dict[str, int] = {
+    # Hardcoded fallbacks (used if config loading fails completely)
+    _FALLBACK_CONTEXT_WINDOWS: dict[str, int] = {
         "gpt-4-turbo": 128_000,
         "gpt-4o": 128_000,
         "gpt-4": 8_192,
@@ -47,10 +39,38 @@ class TokenCounter:
         "claude-sonnet-4": 200_000,
         "llama3.1:8b": 8_192,
         "llama3.1:70b": 128_000,
-        "qwen3": 32_768,  # Qwen3 models (matches qwen3:32b, qwen3:70b, etc.)
-        # Default for unknown models
+        "qwen3": 32_768,
         "default": 8_192,
     }
+
+    _FALLBACK_MODEL_ENCODINGS: dict[str, str] = {
+        "gpt-4": "cl100k_base",
+        "gpt-4-turbo": "cl100k_base",
+        "gpt-4o": "o200k_base",
+        "claude": "cl100k_base",
+        "github-copilot": "cl100k_base",
+    }
+
+    # Default tokens per character for unknown models (conservative)
+    DEFAULT_CHARS_PER_TOKEN: float = 3.5
+
+    @classmethod
+    def _get_config_loader(cls) -> Any:
+        """Get or create the model config loader."""
+        if cls._config_loader is None:
+            try:
+                from logai.config.model_config import get_model_config_loader
+
+                cls._config_loader = get_model_config_loader()
+            except Exception as e:
+                logger.warning(f"Failed to load model config, using fallback: {e}")
+                cls._config_loader = None
+        return cls._config_loader
+
+    @classmethod
+    def _set_config_loader(cls, loader: Any) -> None:
+        """Set custom config loader (for testing)."""
+        cls._config_loader = loader
 
     @classmethod
     def _get_encoding(cls, model: str) -> Any:
@@ -58,6 +78,18 @@ class TokenCounter:
         Get or create tokenizer encoding for a model.
 
         Uses lazy loading and caching for performance.
+
+        Integration with ModelConfigLoader provides a semantic improvement:
+        Unknown models now attempt to use the default encoding (cl100k_base)
+        before falling back to character-based estimation. This gives more
+        accurate token counts for models not explicitly configured, especially
+        for new or local models that are similar to OpenAI/Anthropic models.
+
+        Fallback chain:
+        1. ModelConfigLoader.get_encoding(model) - from YAML config
+        2. FALLBACK_MODEL_ENCODINGS - hardcoded prefix matching
+        3. Default encoding (cl100k_base) - via ModelConfigLoader
+        4. Character-based estimation - when tiktoken unavailable or fails
 
         Args:
             model: Model name or identifier
@@ -69,14 +101,23 @@ class TokenCounter:
         if model in _tokenizer_cache:
             return _tokenizer_cache[model]
 
-        # Find the right encoding
+        # Try to get encoding name from config loader
         encoding_name = None
-        model_lower = model.lower()
+        loader = cls._get_config_loader()
 
-        for model_prefix, enc_name in cls.MODEL_ENCODINGS.items():
-            if model_prefix in model_lower:
-                encoding_name = enc_name
-                break
+        if loader is not None:
+            try:
+                encoding_name = loader.get_encoding(model)
+            except Exception as e:
+                logger.debug(f"Config loader failed for {model}: {e}")
+
+        # Fallback to hardcoded mappings if config failed
+        if encoding_name is None:
+            model_lower = model.lower()
+            for model_prefix, enc_name in cls._FALLBACK_MODEL_ENCODINGS.items():
+                if model_prefix in model_lower:
+                    encoding_name = enc_name
+                    break
 
         if encoding_name is None:
             _tokenizer_cache[model] = None
@@ -123,7 +164,16 @@ class TokenCounter:
                 logger.warning(f"Token counting failed, using fallback: {e}")
 
         # Fallback: character-based estimation (conservative)
-        return int(len(text) / cls.DEFAULT_CHARS_PER_TOKEN) + 1
+        loader = cls._get_config_loader()
+        chars_per_token = cls.DEFAULT_CHARS_PER_TOKEN
+
+        if loader is not None:
+            try:
+                chars_per_token = loader.get_chars_per_token(model)
+            except Exception:
+                pass  # Use default
+
+        return int(len(text) / chars_per_token) + 1
 
     @classmethod
     def count_message_tokens(
@@ -208,13 +258,22 @@ class TokenCounter:
         Returns:
             Context window size in tokens
         """
-        model_lower = model.lower()
+        # Try config loader first
+        loader = cls._get_config_loader()
+        if loader is not None:
+            try:
+                window: int = loader.get_context_window(model)
+                return window
+            except Exception as e:
+                logger.debug(f"Config loader failed for {model}: {e}")
 
-        for model_prefix, window_size in cls.CONTEXT_WINDOWS.items():
+        # Fallback to hardcoded values
+        model_lower = model.lower()
+        for model_prefix, window_size in cls._FALLBACK_CONTEXT_WINDOWS.items():
             if model_prefix in model_lower:
                 return window_size
 
-        return cls.CONTEXT_WINDOWS["default"]
+        return cls._FALLBACK_CONTEXT_WINDOWS["default"]
 
     @classmethod
     def will_fit(
