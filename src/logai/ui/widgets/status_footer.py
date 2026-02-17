@@ -47,6 +47,8 @@ class StatusFooter(Widget):
     cache_misses: reactive[int] = reactive(0)
     model: reactive[str] = reactive("Unknown")
     context_utilization: reactive[float] = reactive(0.0)
+    context_used_tokens: reactive[int] = reactive(0)  # NEW
+    context_total_tokens: reactive[int] = reactive(0)  # NEW
 
     def __init__(self, model: str = "Unknown") -> None:
         """
@@ -231,20 +233,37 @@ class StatusFooter(Widget):
         else:
             cache_info = "Cache: 0/0"
 
-        # Format context utilization with color coding
-        if self.context_utilization >= 86:
+        # Format context utilization with enhanced color coding
+        if self.context_utilization >= 95:
+            context_color = "red bold"
+            context_prefix = "(!!) "
+        elif self.context_utilization >= 86:
             context_color = "red"
+            context_prefix = "(!) "
         elif self.context_utilization >= 71:
             context_color = "yellow"
+            context_prefix = ""
         else:
             context_color = "green"
+            context_prefix = ""
 
-        # Build context text for right side
+        # Build context text with absolute values
         context_text = Text()
         context_text.append(cache_info, style="dim")
         context_text.append(" | ", style="dim")
         context_text.append("Context: ", style="dim")
-        context_text.append(f"{self.context_utilization:.0f}%", style=context_color)
+
+        # Show tokens in K format (e.g., "25.5K/32K") if available
+        if self.context_total_tokens > 0:
+            used_k = self.context_used_tokens / 1000
+            total_k = self.context_total_tokens / 1000
+            context_text.append(context_prefix, style=context_color)
+            context_text.append(f"{used_k:.1f}K/{total_k:.0f}K ", style=context_color)
+            context_text.append(f"({self.context_utilization:.0f}%)", style=context_color)
+        else:
+            # Fallback to percentage-only display if absolute values not available
+            context_text.append(context_prefix, style=context_color)
+            context_text.append(f"{self.context_utilization:.0f}%", style=context_color)
         context_text.append(" | ", style="dim")
         context_text.append(self.model, style="dim")
 
@@ -277,11 +296,17 @@ class StatusFooter(Widget):
         self.cache_hits = hits
         self.cache_misses = misses
 
-    def update_context_usage(self, utilization_pct: float) -> None:
+    def update_context_usage(
+        self, utilization_pct: float, used_tokens: int = 0, total_tokens: int = 0
+    ) -> None:
         """
         Update context usage display.
 
         Args:
             utilization_pct: Context utilization percentage (0-100)
+            used_tokens: Currently used tokens (optional)
+            total_tokens: Total available tokens (optional)
         """
         self.context_utilization = utilization_pct
+        self.context_used_tokens = used_tokens
+        self.context_total_tokens = total_tokens

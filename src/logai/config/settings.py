@@ -205,6 +205,13 @@ class LogAISettings(BaseSettings):
         le=20000,
     )
 
+    emergency_prune_threshold: int = Field(
+        default=5000,
+        description="Trigger emergency pruning when remaining tokens below this value",
+        ge=1000,
+        le=20000,
+    )
+
     # === Result Handling ===
     enable_result_caching: bool = Field(
         default=True,

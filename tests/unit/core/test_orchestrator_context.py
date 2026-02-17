@@ -217,10 +217,13 @@ class TestAutomaticResultCaching:
         # Parse the tool result
         tool_result = json.loads(tool_messages[0]["content"])
 
-        # If it was cached, it should have a cache_id
+        # If it was cached, it should have a cache_id and dataset info
         if "cached" in tool_result and tool_result["cached"]:
             assert "cache_id" in tool_result
-            assert "summary" in tool_result
+            assert "dataset" in tool_result  # Changed from "summary" to match new structure
+            assert (
+                "preview_only" in tool_result
+            )  # New structure has preview_only instead of summary
 
     @pytest.mark.asyncio
     async def test_small_result_not_cached(self, orchestrator, mock_llm_provider):
@@ -832,7 +835,7 @@ class TestCachedResultGuidance:
         # Check injection uses custom chunk size
         injection = orchestrator._get_pending_context_injection()
         assert injection is not None
-        assert "limit=150" in injection
+        assert "limit: 150" in injection  # Format changed to match actual implementation
 
     @pytest.mark.asyncio
     async def test_cache_guidance_includes_cache_id_in_injection(
@@ -864,7 +867,7 @@ class TestCachedResultGuidance:
         # Check injection includes the cache_id
         injection = orchestrator._get_pending_context_injection()
         assert injection is not None
-        assert f'cache_id="{cache_id}"' in injection
+        assert f"cache_id: {cache_id}" in injection  # Format changed to match actual implementation
 
     @pytest.mark.asyncio
     async def test_pending_cache_guidance_cleared_after_use(

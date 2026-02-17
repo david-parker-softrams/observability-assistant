@@ -3,7 +3,6 @@
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-
 from logai.config.settings import LogAISettings
 from logai.core.sanitizer import LogSanitizer
 from logai.core.tools.cloudwatch_tools import (

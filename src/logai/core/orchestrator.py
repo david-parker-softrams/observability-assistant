@@ -512,6 +512,9 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
         This is a critical integration point for context management. When a tool
         returns a large result, we cache it and return a summary instead.
 
+        ENHANCEMENT: Now enforces max_result_tokens setting by force-caching
+        any result that exceeds the configured limit.
+
         Args:
             tool_result: Raw tool result with tool_call_id and result
             tool_name: Name of the tool that produced this result
@@ -531,6 +534,30 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
             result_data,
             threshold=self.settings.cache_large_results_threshold,
         )
+
+        # ==== NEW: Enforce max_result_tokens ====
+        # Check against max_result_tokens limit to prevent single large results
+        # from consuming all available context
+        max_allowed = self.settings.max_result_tokens
+        force_cache_due_to_size = token_count > max_allowed
+
+        if force_cache_due_to_size:
+            logger.info(
+                f"Tool result exceeds max_result_tokens: {token_count} > {max_allowed}, "
+                f"forcing cache for {tool_name}",
+                extra={
+                    "tool_name": tool_name,
+                    "token_count": token_count,
+                    "max_result_tokens": max_allowed,
+                },
+            )
+            self._notify_context_event(
+                "info",
+                f"Large result ({token_count} tokens) exceeds limit, caching...",
+            )
+            # Force caching even if under normal threshold
+            should_cache = True
+        # ==== END NEW ====
 
         if should_cache:
             try:
@@ -583,9 +610,12 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
                 )
 
                 # Record metric
+                cache_reason = (
+                    "max_tokens_exceeded" if force_cache_due_to_size else "size_threshold"
+                )
                 self.metrics.increment(
                     "result_cached",
-                    labels={"tool": tool_name, "reason": "size_threshold"},
+                    labels={"tool": tool_name, "reason": cache_reason},
                 )
 
                 return {
@@ -733,6 +763,161 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
         elif usage.utilization_pct >= 70:
             self._notify_context_event("info", f"Context window {usage.utilization_pct:.0f}% full")
 
+    def _check_mid_loop_budget(self, messages: list[dict[str, Any]]) -> tuple[bool, int]:
+        """
+        Check budget status mid-loop and determine if action needed.
+
+        This method is called after each tool result is added to messages
+        during the conversation loop. It calculates remaining budget and
+        determines if emergency pruning is needed.
+
+        Args:
+            messages: Current messages list (including new tool results)
+
+        Returns:
+            Tuple of (needs_action: bool, remaining_tokens: int)
+            needs_action is True if remaining < emergency_threshold
+        """
+        # Get current usage from budget tracker
+        usage = self.budget_tracker.get_usage()
+
+        # Calculate remaining budget
+        remaining = usage.remaining_tokens
+
+        # Determine threshold (use setting or default to context_window_buffer)
+        emergency_threshold = self.settings.emergency_prune_threshold
+
+        # Log current state at debug level
+        logger.debug(
+            f"Mid-loop budget check: {remaining} tokens remaining "
+            f"(threshold: {emergency_threshold}), "
+            f"utilization: {usage.utilization_pct:.1f}%"
+        )
+
+        needs_action = remaining < emergency_threshold
+
+        if needs_action:
+            logger.warning(
+                f"Context budget critically low: {remaining} tokens remaining "
+                f"(< {emergency_threshold} threshold)"
+            )
+            self._notify_context_event(
+                "warning",
+                f"Context budget low: {remaining} tokens remaining",
+            )
+
+        return needs_action, remaining
+
+    def _emergency_prune_history(
+        self, messages: list[dict[str, Any]], target_tokens_to_free: int = 0
+    ) -> int:
+        """
+        Emergency pruning when context budget is critically low during tool execution.
+
+        This is different from regular pruning:
+        - Called mid-loop, not just at turn start
+        - More aggressive (aims to free 25% of context)
+        - Syncs both conversation_history AND messages list
+        - Never removes system messages or current tool cycle
+
+        Args:
+            messages: Current messages list being used in LLM call (mutated in place)
+            target_tokens_to_free: Minimum tokens to free. If 0, aims for 25% of context.
+
+        Returns:
+            Number of tokens actually freed
+        """
+        logger.warning("Emergency pruning triggered - context budget critically low")
+
+        # Calculate target if not specified
+        if target_tokens_to_free <= 0:
+            usage = self.budget_tracker.get_usage()
+            target_tokens_to_free = int(usage.total_tokens * 0.25)  # Free 25%
+
+        # Identify prunable messages
+        # Rules:
+        # 1. Never prune index 0 (system message)
+        # 2. Keep last 4 messages (2 exchanges minimum for continuity)
+        # 3. Prune oldest first
+
+        PRESERVE_RECENT = 4  # Keep last 4 messages (2 user/assistant pairs)
+
+        # Find indices of prunable messages in conversation_history
+        # Note: conversation_history doesn't include system message (it's prepended separately)
+        prunable_indices = []
+
+        for i in range(len(self.conversation_history)):
+            # Skip recent messages
+            if i >= len(self.conversation_history) - PRESERVE_RECENT:
+                continue
+            prunable_indices.append(i)
+
+        if not prunable_indices:
+            logger.warning("Emergency prune: No messages available for pruning")
+            self._notify_context_event(
+                "warning", "Cannot prune - minimum messages required for continuity"
+            )
+            return 0
+
+        # Calculate tokens for each prunable message and select for removal
+        tokens_freed = 0
+        indices_to_remove = []
+
+        for idx in prunable_indices:
+            if tokens_freed >= target_tokens_to_free:
+                break
+
+            msg = self.conversation_history[idx]
+            content = msg.get("content", "")
+            if isinstance(content, dict):
+                content = json.dumps(content)
+
+            msg_tokens = TokenCounter.count_tokens(str(content), self.settings.current_llm_model)
+
+            indices_to_remove.append(idx)
+            tokens_freed += msg_tokens
+
+        # Remove messages (reverse order to maintain indices)
+        messages_removed = 0
+        for idx in sorted(indices_to_remove, reverse=True):
+            removed_msg = self.conversation_history.pop(idx)
+            messages_removed += 1
+            logger.debug(f"Emergency pruned message at index {idx}: role={removed_msg.get('role')}")
+
+        # Also remove from the messages list being used in current LLM call
+        # Messages list has system message at index 0, so offset by 1
+        for idx in sorted(indices_to_remove, reverse=True):
+            messages_idx = idx + 1  # Account for system message at index 0
+            if messages_idx < len(messages):
+                messages.pop(messages_idx)
+
+        # Reset budget tracker to recalculate
+        self.budget_tracker.reset()
+        self._update_budget_tracker(messages)
+
+        # Notify and log
+        self._notify_context_event(
+            "info",
+            f"Emergency pruned {messages_removed} messages, freed ~{tokens_freed} tokens",
+        )
+
+        logger.info(
+            f"Emergency pruning complete: removed {messages_removed} messages, "
+            f"freed ~{tokens_freed} tokens",
+            extra={
+                "messages_removed": messages_removed,
+                "tokens_freed": tokens_freed,
+                "target_tokens": target_tokens_to_free,
+            },
+        )
+
+        # Record metric
+        self.metrics.increment(
+            "emergency_prune", labels={"messages_removed": str(messages_removed)}
+        )
+
+        return tokens_freed
+
     async def chat(
         self,
         user_message: str,
@@ -860,7 +1045,7 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
                     self.conversation_history.append(assistant_message)
                     messages.append(assistant_message)
 
-                    # Add tool results as separate messages
+                    # Add tool results as separate messages WITH budget tracking
                     for tool_result in tool_results:
                         tool_message: dict[str, Any] = {
                             "role": "tool",
@@ -869,6 +1054,40 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
                         }
                         self.conversation_history.append(tool_message)
                         messages.append(tool_message)
+
+                        # Track the tool result tokens for mid-loop budget management
+                        result_content = tool_message["content"]
+                        result_tokens = TokenCounter.count_tokens(
+                            result_content, self.settings.current_llm_model
+                        )
+                        self.budget_tracker.add_result_tokens(result_tokens)
+
+                    # After processing all tool results, check budget
+                    needs_prune, remaining = self._check_mid_loop_budget(messages)
+
+                    if needs_prune:
+                        # Attempt emergency pruning
+                        self._emergency_prune_history(messages)
+
+                        # Re-check after pruning
+                        _, remaining_after = self._check_mid_loop_budget(messages)
+
+                        if remaining_after < 0:
+                            # Context still exhausted after pruning - graceful exit
+                            error_msg = (
+                                "I've reached my context limit and cannot continue this conversation. "
+                                "Please use /clear to start a new conversation."
+                            )
+                            self.conversation_history.append(
+                                {"role": "assistant", "content": error_msg}
+                            )
+                            self._notify_context_event(
+                                "error", "Context exhausted - conversation ended"
+                            )
+                            # Use appropriate return for each method context
+                            # In _chat_complete: return error_msg
+                            # In _chat_stream: yield then return
+                            return error_msg
 
                     # Analyze results for retry logic
                     should_retry, retry_reason = self._analyze_tool_results(
@@ -1115,7 +1334,7 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
                     self.conversation_history.append(assistant_message)
                     messages.append(assistant_message)
 
-                    # Add tool results as separate messages
+                    # Add tool results as separate messages WITH budget tracking
                     for tool_result in tool_results:
                         tool_message: dict[str, Any] = {
                             "role": "tool",
@@ -1124,6 +1343,39 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
                         }
                         self.conversation_history.append(tool_message)
                         messages.append(tool_message)
+
+                        # Track the tool result tokens for mid-loop budget management
+                        result_content = tool_message["content"]
+                        result_tokens = TokenCounter.count_tokens(
+                            result_content, self.settings.current_llm_model
+                        )
+                        self.budget_tracker.add_result_tokens(result_tokens)
+
+                    # After processing all tool results, check budget
+                    needs_prune, remaining = self._check_mid_loop_budget(messages)
+
+                    if needs_prune:
+                        # Attempt emergency pruning
+                        self._emergency_prune_history(messages)
+
+                        # Re-check after pruning
+                        _, remaining_after = self._check_mid_loop_budget(messages)
+
+                        if remaining_after < 0:
+                            # Context still exhausted after pruning - graceful exit
+                            error_msg = (
+                                "I've reached my context limit and cannot continue this conversation. "
+                                "Please use /clear to start a new conversation."
+                            )
+                            self.conversation_history.append(
+                                {"role": "assistant", "content": error_msg}
+                            )
+                            self._notify_context_event(
+                                "error", "Context exhausted - conversation ended"
+                            )
+                            # In streaming mode, yield the error message then exit
+                            yield error_msg
+                            return
 
                     # Analyze results for retry logic
                     should_retry, retry_reason = self._analyze_tool_results(

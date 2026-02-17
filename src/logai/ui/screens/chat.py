@@ -357,8 +357,13 @@ class ChatScreen(Screen[None]):
             # Get usage from orchestrator's budget tracker
             if hasattr(self.orchestrator, "budget_tracker"):
                 usage = self.orchestrator.budget_tracker.get_usage()
+                allocation = self.orchestrator.budget_tracker.allocation
                 status_footer = self.query_one(StatusFooter)
-                status_footer.update_context_usage(usage.utilization_pct)
+                status_footer.update_context_usage(
+                    utilization_pct=usage.utilization_pct,
+                    used_tokens=usage.total_tokens,
+                    total_tokens=allocation.usable_tokens,
+                )
 
         except Exception as e:
             logger.debug(f"Failed to update context status: {e}", exc_info=True)

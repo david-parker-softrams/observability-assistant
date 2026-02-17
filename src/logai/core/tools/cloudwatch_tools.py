@@ -478,7 +478,8 @@ class SearchLogsTool(BaseTool):
                 "success": True,
                 "log_group_patterns": log_group_patterns,
                 "search_pattern": search_pattern,
-                "events": sanitized_events,
+                # NOTE: "events" field removed to prevent duplicate data (50% token reduction).
+                # All event data is available in "events_by_group" organized by log group.
                 "events_by_group": events_by_group,
                 "count": len(sanitized_events),
                 "groups_found": len(events_by_group),
