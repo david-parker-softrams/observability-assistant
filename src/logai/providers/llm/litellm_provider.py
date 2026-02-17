@@ -127,6 +127,7 @@ class LiteLLMProvider(BaseLLMProvider):
             return GitHubCopilotProvider(
                 model=settings.github_copilot_model,
                 api_base=settings.github_copilot_api_base,
+                settings=settings,
             )
         else:
             raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")

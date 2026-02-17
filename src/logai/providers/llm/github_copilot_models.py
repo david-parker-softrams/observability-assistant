@@ -11,6 +11,7 @@ import aiofiles
 import httpx
 
 from logai.auth import get_github_copilot_token
+from logai.config.settings import get_settings
 
 # Static fallback model list (from Hans's investigation, Feb 2026)
 DEFAULT_MODELS = [
@@ -77,10 +78,6 @@ MODEL_METADATA: dict[str, dict[str, Any]] = {
 # Default model
 DEFAULT_MODEL = "claude-opus-4.6"
 
-# Cache configuration
-CACHE_DURATION_HOURS = 24
-CACHE_FILE_NAME = "github_copilot_models.json"
-
 
 def get_cache_path() -> Path:
     """
@@ -91,10 +88,11 @@ def get_cache_path() -> Path:
     """
     import os
 
+    settings = get_settings()
     xdg_data_home = os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))
     cache_dir = Path(xdg_data_home) / "logai"
     cache_dir.mkdir(parents=True, exist_ok=True)
-    return cache_dir / CACHE_FILE_NAME
+    return cache_dir / settings.github_model_cache_file
 
 
 def is_cache_valid(cache_path: Path) -> bool:
@@ -111,13 +109,14 @@ def is_cache_valid(cache_path: Path) -> bool:
         return False
 
     try:
+        settings = get_settings()
         with open(cache_path) as f:
             cache_data = json.load(f)
 
         cached_at = cache_data.get("cached_at", 0)
         cache_age_hours = (time.time() - cached_at) / 3600
 
-        is_valid: bool = cache_age_hours < CACHE_DURATION_HOURS
+        is_valid: bool = cache_age_hours < settings.github_model_cache_hours
         return is_valid
     except (json.JSONDecodeError, OSError, KeyError):
         return False
@@ -139,7 +138,8 @@ async def fetch_models_from_api() -> list[str] | None:
         return None
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        settings = get_settings()
+        async with httpx.AsyncClient(timeout=settings.model_discovery_timeout) as client:
             # Note: This endpoint might not exist or might require different path
             # GitHub Copilot API may not expose a /models endpoint publicly
             # We'll try, but expect it might fail - that's why we have fallback

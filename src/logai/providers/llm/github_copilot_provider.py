@@ -11,6 +11,7 @@ from typing import Any
 import httpx
 
 from logai.auth import get_github_copilot_token
+from logai.config.settings import LogAISettings, get_settings
 
 from .base import (
     AuthenticationError,
@@ -58,19 +59,14 @@ class GitHubCopilotProvider(BaseLLMProvider):
     # GitHub Copilot API endpoint
     API_ENDPOINT = "https://api.githubcopilot.com/chat/completions"
 
-    # Retry configuration for handling temporary 403 errors
-    # GitHub Copilot API sometimes returns 403 for rate limiting instead of 429
-    MAX_RETRIES = 3  # Total of 4 attempts (1 original + 3 retries)
-    RETRY_BASE_DELAY = 1.0  # Initial delay in seconds
-    RETRY_MAX_DELAY = 8.0  # Maximum delay in seconds
-
     def __init__(
         self,
         model: str = DEFAULT_MODEL,
         temperature: float = 0.7,
         max_tokens: int | None = None,
         api_base: str | None = None,
-        timeout: float = 120.0,
+        timeout: float | None = None,
+        settings: LogAISettings | None = None,
     ):
         """
         Initialize GitHub Copilot provider.
@@ -80,7 +76,8 @@ class GitHubCopilotProvider(BaseLLMProvider):
             temperature: Sampling temperature (0.0 to 2.0)
             max_tokens: Maximum tokens to generate (None for model default)
             api_base: Override API base URL (for testing)
-            timeout: Request timeout in seconds
+            timeout: Request timeout in seconds (None uses settings default)
+            settings: Application settings (uses global settings if None)
         """
         # Strip provider prefix if present (API expects model name without prefix)
         if model.startswith("github-copilot/"):
@@ -89,8 +86,25 @@ class GitHubCopilotProvider(BaseLLMProvider):
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
-        self._api_base = api_base or self.API_ENDPOINT
-        self._timeout = timeout
+
+        # Load settings for configuration
+        self._settings = settings or get_settings()
+
+        # Configuration from settings
+        self._api_base = api_base or self._settings.github_copilot_api_base
+        self._timeout = (
+            timeout if timeout is not None else self._settings.github_copilot_request_timeout
+        )
+        self._connect_timeout = self._settings.github_copilot_connect_timeout
+
+        # Retry configuration from settings
+        self._max_retries = self._settings.github_copilot_max_retries
+        self._retry_base_delay = self._settings.github_copilot_retry_base_delay
+        self._retry_max_delay = self._settings.github_copilot_retry_max_delay
+
+        # Header configuration from settings
+        self._integration_id = self._settings.github_copilot_integration_id
+        self._editor_version = self._settings.github_copilot_editor_version
 
         # HTTP client (created on first use)
         self._http_client: httpx.AsyncClient | None = None
@@ -156,7 +170,7 @@ class GitHubCopilotProvider(BaseLLMProvider):
             # GitHub Copilot API requires Copilot-Integration-Id and Editor-Version headers
             # These are added per-request to identify the client application
             self._http_client = httpx.AsyncClient(
-                timeout=httpx.Timeout(self._timeout, connect=10.0),
+                timeout=httpx.Timeout(self._timeout, connect=self._connect_timeout),
             )
         return self._http_client
 
@@ -258,7 +272,7 @@ class GitHubCopilotProvider(BaseLLMProvider):
         # Retry loop for handling intermittent 403 errors
         last_exception: Exception | None = None
 
-        for attempt in range(self.MAX_RETRIES + 1):
+        for attempt in range(self._max_retries + 1):
             try:
                 token = self._get_auth_token()
                 client = await self._get_http_client()
@@ -276,17 +290,17 @@ class GitHubCopilotProvider(BaseLLMProvider):
                         # Required by GitHub Copilot API for client identification and routing
                         # Copilot-Integration-Id identifies the integration type (vscode-chat is standard)
                         # Editor-Version must follow vscode/X.Y.Z format for API to accept request
-                        "Copilot-Integration-Id": "vscode-chat",
-                        "Editor-Version": "vscode/1.98.2",
+                        "Copilot-Integration-Id": self._integration_id,
+                        "Editor-Version": self._editor_version,
                     },
                 )
 
                 # Check for retriable 403 errors (GitHub's intermittent rate limiting)
-                if response.status_code == 403 and attempt < self.MAX_RETRIES:
+                if response.status_code == 403 and attempt < self._max_retries:
                     # Calculate exponential backoff delay: 1s, 2s, 4s
-                    delay = min(self.RETRY_BASE_DELAY * (2**attempt), self.RETRY_MAX_DELAY)
+                    delay = min(self._retry_base_delay * (2**attempt), self._retry_max_delay)
                     logger.debug(
-                        f"GitHub Copilot API returned 403 (attempt {attempt + 1}/{self.MAX_RETRIES + 1}), "
+                        f"GitHub Copilot API returned 403 (attempt {attempt + 1}/{self._max_retries + 1}), "
                         f"retrying in {delay:.1f}s..."
                     )
                     await asyncio.sleep(delay)
@@ -370,7 +384,7 @@ class GitHubCopilotProvider(BaseLLMProvider):
         # Retry loop for handling intermittent 403 errors
         last_exception: Exception | None = None
 
-        for attempt in range(self.MAX_RETRIES + 1):
+        for attempt in range(self._max_retries + 1):
             try:
                 token = self._get_auth_token()
                 client = await self._get_http_client()
@@ -389,16 +403,16 @@ class GitHubCopilotProvider(BaseLLMProvider):
                         # Required by GitHub Copilot API for client identification and routing
                         # Copilot-Integration-Id identifies the integration type (vscode-chat is standard)
                         # Editor-Version must follow vscode/X.Y.Z format for API to accept request
-                        "Copilot-Integration-Id": "vscode-chat",
-                        "Editor-Version": "vscode/1.98.2",
+                        "Copilot-Integration-Id": self._integration_id,
+                        "Editor-Version": self._editor_version,
                     },
                 ) as response:
                     # Check for retriable 403 errors (GitHub's intermittent rate limiting)
-                    if response.status_code == 403 and attempt < self.MAX_RETRIES:
+                    if response.status_code == 403 and attempt < self._max_retries:
                         # Calculate exponential backoff delay: 1s, 2s, 4s
-                        delay = min(self.RETRY_BASE_DELAY * (2**attempt), self.RETRY_MAX_DELAY)
+                        delay = min(self._retry_base_delay * (2**attempt), self._retry_max_delay)
                         logger.debug(
-                            f"GitHub Copilot streaming API returned 403 (attempt {attempt + 1}/{self.MAX_RETRIES + 1}), "
+                            f"GitHub Copilot streaming API returned 403 (attempt {attempt + 1}/{self._max_retries + 1}), "
                             f"retrying in {delay:.1f}s..."
                         )
                         await asyncio.sleep(delay)
