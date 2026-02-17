@@ -12,6 +12,8 @@ from typing import Any
 
 import aiohttp
 
+from logai.config.settings import LogAISettings, get_settings
+
 from .token_storage import TokenData, TokenStorage
 
 
@@ -95,26 +97,20 @@ class GitHubCopilotAuth:
     DEVICE_CODE_URL = "https://github.com/login/device/code"
     TOKEN_URL = "https://github.com/login/oauth/access_token"
 
-    # GitHub Copilot OAuth client ID (public, used by VS Code/OpenCode)
-    CLIENT_ID = "Iv1.b507a08c87ecfe98"
-
-    # OAuth scopes required for Copilot access
-    # GitHub Copilot API requires both scopes:
-    # - read:user: Access to user profile information
-    # - user:email: Access to user email addresses (required for API authorization)
-    SCOPES = "user:email read:user"
-
-    # Default timeout for authentication (15 minutes)
-    DEFAULT_TIMEOUT = 900
-
-    def __init__(self, token_storage: TokenStorage | None = None):
+    def __init__(
+        self,
+        token_storage: TokenStorage | None = None,
+        settings: LogAISettings | None = None,
+    ):
         """
         Initialize authentication manager.
 
         Args:
             token_storage: Token storage instance (for testing). Defaults to new instance.
+            settings: Application settings (uses global settings if None)
         """
         self._storage = token_storage or TokenStorage()
+        self._settings = settings or get_settings()
         self._http_session: aiohttp.ClientSession | None = None
 
     async def _get_session(self) -> aiohttp.ClientSession:
@@ -184,7 +180,7 @@ class GitHubCopilotAuth:
 
         return None
 
-    async def authenticate(self, timeout: int = DEFAULT_TIMEOUT) -> str:
+    async def authenticate(self, timeout: int | None = None) -> str:
         """
         Initiate OAuth device code flow for GitHub Copilot.
 
@@ -195,7 +191,8 @@ class GitHubCopilotAuth:
             4. Save token
 
         Args:
-            timeout: Maximum time to wait for authentication (seconds). Default 15 minutes.
+            timeout: Maximum time to wait for authentication (seconds).
+                    Defaults to settings.github_auth_timeout (900 seconds).
 
         Returns:
             The access token on successful authentication
@@ -205,6 +202,10 @@ class GitHubCopilotAuth:
             AuthenticationDeniedError: If user denies access
             GitHubCopilotAuthError: For other authentication errors
         """
+        # Use settings default if timeout not provided
+        if timeout is None:
+            timeout = self._settings.github_auth_timeout
+
         try:
             # Step 1: Request device code
             device_response = await self._request_device_code()
@@ -290,8 +291,8 @@ class GitHubCopilotAuth:
             async with session.post(
                 self.DEVICE_CODE_URL,
                 json={
-                    "client_id": self.CLIENT_ID,
-                    "scope": self.SCOPES,
+                    "client_id": self._settings.github_oauth_client_id,
+                    "scope": self._settings.github_oauth_scopes,
                 },
                 headers={"Content-Type": "application/json"},
             ) as response:
@@ -308,7 +309,7 @@ class GitHubCopilotAuth:
                     user_code=data["user_code"],
                     verification_uri=data["verification_uri"],
                     expires_in=data["expires_in"],
-                    interval=data.get("interval", 5),
+                    interval=data.get("interval", self._settings.github_auth_poll_interval),
                 )
 
         except aiohttp.ClientError as e:
@@ -356,7 +357,7 @@ class GitHubCopilotAuth:
                 async with session.post(
                     self.TOKEN_URL,
                     json={
-                        "client_id": self.CLIENT_ID,
+                        "client_id": self._settings.github_oauth_client_id,
                         "device_code": device_code,
                         "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
                     },
@@ -376,7 +377,7 @@ class GitHubCopilotAuth:
                         continue
                     elif error == "slow_down":
                         # GitHub asked us to slow down
-                        current_interval += 5
+                        current_interval += self._settings.github_auth_slow_down_increment
                         print(f"\nSlowing down polling interval to {current_interval}s...")
                         continue
                     elif error == "expired_token":
