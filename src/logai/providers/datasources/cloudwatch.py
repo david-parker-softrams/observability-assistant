@@ -41,11 +41,14 @@ class CloudWatchDataSource(BaseDataSource):
         """
         self.settings = settings
 
-        # Configure boto3 with retry and timeout settings
+        # Configure boto3 with retry and timeout settings from configuration
         self.config = Config(
-            retries={"max_attempts": 3, "mode": "adaptive"},
-            connect_timeout=5,
-            read_timeout=30,
+            retries={
+                "max_attempts": settings.cloudwatch_max_retry_attempts,
+                "mode": settings.cloudwatch_retry_mode,
+            },
+            connect_timeout=settings.cloudwatch_connect_timeout,
+            read_timeout=settings.cloudwatch_read_timeout,
         )
 
         # Create CloudWatch Logs client
@@ -112,12 +115,12 @@ class CloudWatchDataSource(BaseDataSource):
             error_message = e.response["Error"]["Message"]
 
             if error_code == "ThrottlingException":
-                raise RateLimitError(f"CloudWatch rate limit exceeded: {error_message}")
+                raise RateLimitError(f"CloudWatch rate limit exceeded: {error_message}") from e
             elif error_code == "AccessDeniedException":
                 raise AuthenticationError(
                     f"Access denied to CloudWatch Logs: {error_message}. "
                     "Check your AWS credentials and IAM permissions."
-                )
+                ) from e
             else:
                 raise DataSourceError(
                     f"Failed to list log groups: {error_code} - {error_message}"
@@ -209,13 +212,13 @@ class CloudWatchDataSource(BaseDataSource):
             error_message = e.response["Error"]["Message"]
 
             if error_code == "ResourceNotFoundException":
-                raise LogGroupNotFoundError(f"Log group not found: {log_group}")
+                raise LogGroupNotFoundError(f"Log group not found: {log_group}") from e
             elif error_code == "ThrottlingException":
-                raise RateLimitError(f"CloudWatch rate limit exceeded: {error_message}")
+                raise RateLimitError(f"CloudWatch rate limit exceeded: {error_message}") from e
             elif error_code == "AccessDeniedException":
                 raise AuthenticationError(
                     f"Access denied to log group '{log_group}': {error_message}"
-                )
+                ) from e
             elif error_code == "InvalidParameterException":
                 raise DataSourceError(
                     f"Invalid parameter: {error_message}. Check your filter pattern syntax."
