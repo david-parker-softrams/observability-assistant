@@ -47,6 +47,7 @@ class TokenCounter:
         "claude-sonnet-4": 200_000,
         "llama3.1:8b": 8_192,
         "llama3.1:70b": 128_000,
+        "qwen3": 32_768,  # Qwen3 models (matches qwen3:32b, qwen3:70b, etc.)
         # Default for unknown models
         "default": 8_192,
     }

@@ -576,11 +576,20 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
                 )
 
                 # Store pending injection for next LLM call
-                self._pending_cache_guidance = {
-                    "cache_id": summary.cache_id,
-                    "tool_name": tool_name,
-                    "total_events": summary.total_events,
-                }
+                # BUT: Skip cache fetch instructions if result has 0 events
+                # (no point fetching chunks from an empty cache)
+                if summary.total_events > 0:
+                    self._pending_cache_guidance = {
+                        "cache_id": summary.cache_id,
+                        "tool_name": tool_name,
+                        "total_events": summary.total_events,
+                    }
+                else:
+                    # Don't set guidance for empty results - let retry logic handle it
+                    logger.info(
+                        "Skipping cache fetch guidance for empty result (0 events)",
+                        extra={"tool_name": tool_name, "cache_id": summary.cache_id},
+                    )
 
                 # Use summary instead of full result
                 modified_result = summary.to_context_dict()
@@ -1683,9 +1692,16 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
                 events = result_data.get("events", None)
                 log_groups = result_data.get("log_groups", None)
 
+                # Also check cached result format (dataset.total_events)
+                dataset = result_data.get("dataset", {})
+                total_events = dataset.get("total_events", -1)
+
                 is_empty = False
 
                 if count == 0:
+                    is_empty = True
+                elif total_events == 0:
+                    # Cached result with 0 events
                     is_empty = True
                 elif events is not None and len(events) == 0:
                     is_empty = True
