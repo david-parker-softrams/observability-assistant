@@ -64,9 +64,9 @@ class ListLogGroupsTool(BaseTool):
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "Maximum number of log groups to return (default: 50, max: 100)",
+                    "description": f"Maximum number of log groups to return (default: {self.settings.tool_list_log_groups_default_limit}, max: {self.settings.tool_list_log_groups_max_limit})",
                     "minimum": 1,
-                    "maximum": 100,
+                    "maximum": self.settings.tool_list_log_groups_max_limit,
                 },
             },
             "required": [],
@@ -83,7 +83,7 @@ class ListLogGroupsTool(BaseTool):
             Dictionary with log groups and metadata
         """
         prefix = kwargs.get("prefix")
-        limit = kwargs.get("limit", 50)
+        limit = kwargs.get("limit", self.settings.tool_list_log_groups_default_limit)
 
         try:
             # Check cache first
@@ -199,9 +199,9 @@ class FetchLogsTool(BaseTool):
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "Maximum number of log events to return (default: 100, max: 1000)",
+                    "description": f"Maximum number of log events to return (default: {self.settings.tool_fetch_logs_default_limit}, max: {self.settings.tool_fetch_logs_max_limit})",
                     "minimum": 1,
-                    "maximum": 1000,
+                    "maximum": self.settings.tool_fetch_logs_max_limit,
                 },
             },
             "required": ["log_group", "start_time"],
@@ -221,7 +221,7 @@ class FetchLogsTool(BaseTool):
         start_time_str = kwargs.get("start_time")
         end_time_str = kwargs.get("end_time")
         filter_pattern = kwargs.get("filter_pattern")
-        limit = kwargs.get("limit", 100)
+        limit = kwargs.get("limit", self.settings.tool_fetch_logs_default_limit)
 
         if not log_group:
             raise ToolExecutionError(
@@ -385,9 +385,9 @@ class SearchLogsTool(BaseTool):
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "Maximum total number of log events to return (default: 100, max: 1000)",
+                    "description": f"Maximum total number of log events to return (default: {self.settings.tool_fetch_logs_default_limit}, max: {self.settings.tool_fetch_logs_max_limit})",
                     "minimum": 1,
-                    "maximum": 1000,
+                    "maximum": self.settings.tool_fetch_logs_max_limit,
                 },
             },
             "required": ["log_group_patterns", "search_pattern", "start_time"],
@@ -407,7 +407,7 @@ class SearchLogsTool(BaseTool):
         search_pattern = kwargs.get("search_pattern")
         start_time_str = kwargs.get("start_time")
         end_time_str = kwargs.get("end_time")
-        limit = kwargs.get("limit", 100)
+        limit = kwargs.get("limit", self.settings.tool_fetch_logs_default_limit)
 
         if not log_group_patterns:
             raise ToolExecutionError(

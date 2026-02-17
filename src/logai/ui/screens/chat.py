@@ -127,7 +127,9 @@ class ChatScreen(Screen[None]):
 
         # Context notification throttling
         self._last_context_update_time: float = 0.0
-        self._context_update_throttle_seconds: float = 1.0  # Max 1 update per second
+        self._context_update_throttle_seconds: float = (
+            self.settings.ui_context_update_throttle
+        )  # Max updates per second from settings
 
     def compose(self) -> ComposeResult:
         """Compose the chat screen layout."""
@@ -317,16 +319,16 @@ class ChatScreen(Screen[None]):
             message: Notification message
         """
         try:
-            # Map level to Textual severity
+            # Map level to Textual severity with configurable timeouts
             if level == "error":
                 severity = "error"
-                timeout = 10
+                timeout = self.settings.ui_tool_timeout_initial
             elif level == "warning":
                 severity = "warning"
-                timeout = 8
+                timeout = self.settings.ui_tool_timeout_subsequent
             else:
                 severity = "information"
-                timeout = 5
+                timeout = self.settings.ui_tool_timeout_final
 
             # Show toast notification
             self.notify(message, severity=severity, timeout=timeout)

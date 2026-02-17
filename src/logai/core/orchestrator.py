@@ -1733,8 +1733,8 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
         Returns:
             Delay in seconds (0.5s → 1s → 2s → 4s...)
         """
-        # Base delays for first few attempts
-        base_delays = [0.5, 1.0, 2.0]
+        # Base delays from settings for first few attempts
+        base_delays = self.settings.orchestrator_retry_delays_list
 
         if attempt_count < len(base_delays):
             delay: float = base_delays[attempt_count]
