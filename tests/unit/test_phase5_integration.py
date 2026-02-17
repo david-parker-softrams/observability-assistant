@@ -3,7 +3,6 @@
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-
 from logai.config.settings import LogAISettings
 from logai.core.orchestrator import LLMOrchestrator
 from logai.core.sanitizer import LogSanitizer
@@ -15,18 +14,37 @@ from logai.providers.llm.litellm_provider import LiteLLMProvider
 
 
 @pytest.fixture
-def mock_settings():
+def mock_settings(tmp_path):
     """Create test settings."""
     settings = Mock(spec=LogAISettings)
     settings.llm_provider = "anthropic"
     settings.current_llm_api_key = "test-key"
     settings.current_llm_model = "claude-3-5-sonnet-20241022"
     settings.pii_sanitization_enabled = True
-    # Add self-direction settings for new features
+
+    # Self-direction settings
     settings.max_retry_attempts = 3
     settings.intent_detection_enabled = True
     settings.auto_retry_enabled = True
     settings.time_expansion_factor = 4.0
+    settings.max_tool_iterations = 10
+
+    # Phase 2 settings
+    settings.cache_dir = tmp_path / "cache"
+    settings.enable_result_caching = True
+    settings.cache_large_results_threshold = 5000
+    settings.max_result_tokens = 10000
+    settings.initial_chunk_size = 100
+    settings.enable_auto_fetch_guidance = True
+    settings.enable_history_pruning = True
+    settings.emergency_prune_threshold = 0.95
+    settings.orchestrator_retry_delays = "1.0,2.0,4.0"
+    settings.orchestrator_retry_delays_list = [1.0, 2.0, 4.0]
+    settings.tool_list_log_groups_default_limit = 50
+    settings.tool_list_log_groups_max_limit = 100
+    settings.tool_fetch_logs_default_limit = 100
+    settings.tool_fetch_logs_max_limit = 1000
+
     return settings
 
 
@@ -40,6 +58,10 @@ def setup_tools():
     datasource = AsyncMock(spec=CloudWatchDataSource)
     sanitizer = LogSanitizer(enabled=True)
     settings = Mock(spec=LogAISettings)
+    settings.tool_list_log_groups_default_limit = 50
+    settings.tool_list_log_groups_max_limit = 100
+    settings.tool_fetch_logs_default_limit = 100
+    settings.tool_fetch_logs_max_limit = 1000
 
     # Register tools
     list_tool = ListLogGroupsTool(datasource=datasource, settings=settings)

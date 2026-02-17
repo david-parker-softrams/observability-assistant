@@ -4,7 +4,6 @@ import os
 from pathlib import Path
 
 import pytest
-
 from logai.config import LogAISettings, get_settings, reload_settings
 
 
@@ -17,7 +16,7 @@ class TestLogAISettings:
         os.environ["LOGAI_ANTHROPIC_API_KEY"] = "sk-ant-test-key"
         os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
 
-        settings = LogAISettings()  # type: ignore
+        settings = LogAISettings(_env_file=None)  # type: ignore
 
         assert settings.llm_provider == "anthropic"
         assert settings.pii_sanitization_enabled is True
@@ -69,7 +68,7 @@ class TestLogAISettings:
         os.environ["AWS_ACCESS_KEY_ID"] = "test"
         os.environ["AWS_SECRET_ACCESS_KEY"] = "test"
 
-        settings = LogAISettings()  # type: ignore
+        settings = LogAISettings(_env_file=None)  # type: ignore
 
         with pytest.raises(ValueError, match="LOGAI_ANTHROPIC_API_KEY is required"):
             settings.validate_required_credentials()
@@ -92,7 +91,7 @@ class TestLogAISettings:
         os.environ["AWS_ACCESS_KEY_ID"] = "test"
         os.environ["AWS_SECRET_ACCESS_KEY"] = "test"
 
-        settings = LogAISettings()  # type: ignore
+        settings = LogAISettings(_env_file=None)  # type: ignore
 
         with pytest.raises(ValueError, match="AWS_DEFAULT_REGION is required"):
             settings.validate_required_credentials()

@@ -14,9 +14,16 @@ from logai.core.tools.cloudwatch_tools import (
 
 @pytest.fixture
 def mock_settings():
-    """Create mock settings."""
+    """Create mock settings with Phase 2 tool settings."""
     settings = Mock(spec=LogAISettings)
     settings.pii_sanitization_enabled = True
+
+    # Phase 2 tool settings
+    settings.tool_list_log_groups_default_limit = 50
+    settings.tool_list_log_groups_max_limit = 100
+    settings.tool_fetch_logs_default_limit = 100
+    settings.tool_fetch_logs_max_limit = 1000
+
     return settings
 
 

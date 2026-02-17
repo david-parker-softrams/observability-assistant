@@ -4,14 +4,13 @@ import asyncio
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-
 from logai.config.settings import LogAISettings
 from logai.core.metrics import MetricsCollector
 from logai.core.orchestrator import (
     LLMOrchestrator,
     OrchestratorError,
-    RetryState,
     RetryPromptGenerator,
+    RetryState,
 )
 from logai.core.sanitizer import LogSanitizer
 from logai.core.tools.registry import ToolRegistry
@@ -19,7 +18,7 @@ from logai.providers.llm.base import LLMResponse
 
 
 @pytest.fixture
-def mock_settings():
+def mock_settings(tmp_path):
     """Create mock settings with self-direction enabled."""
     settings = Mock(spec=LogAISettings)
     settings.pii_sanitization_enabled = True
@@ -29,6 +28,26 @@ def mock_settings():
     settings.auto_retry_enabled = True
     settings.time_expansion_factor = 4.0
     settings.max_tool_iterations = 10  # Default value
+
+    # Model and context settings (needed for TokenCounter)
+    settings.current_llm_model = "claude-3-5-sonnet-20241022"
+
+    # Caching settings
+    settings.enable_result_caching = True
+    settings.cache_dir = tmp_path / "cache"
+    settings.cache_large_results_threshold = 5000
+    settings.max_result_tokens = 10000
+    settings.initial_chunk_size = 100
+    settings.enable_auto_fetch_guidance = True
+
+    # History pruning settings
+    settings.enable_history_pruning = True
+    settings.emergency_prune_threshold = 0.95
+
+    # Phase 2 orchestrator settings
+    settings.orchestrator_retry_delays = "1.0,2.0,4.0"
+    settings.orchestrator_retry_delays_list = [1.0, 2.0, 4.0]
+
     return settings
 
 
@@ -65,6 +84,38 @@ def orchestrator(mock_llm_provider, mock_tool_registry, mock_sanitizer, mock_set
         sanitizer=mock_sanitizer,
         settings=mock_settings,
     )
+
+
+def create_mock_settings(**overrides):
+    """Helper to create complete mock settings with all required attributes."""
+    from pathlib import Path
+
+    settings = Mock(spec=LogAISettings)
+
+    # Default values
+    settings.pii_sanitization_enabled = True
+    settings.max_retry_attempts = 3
+    settings.intent_detection_enabled = True
+    settings.auto_retry_enabled = True
+    settings.time_expansion_factor = 4.0
+    settings.max_tool_iterations = 10
+    settings.current_llm_model = "claude-3-5-sonnet-20241022"
+    settings.enable_result_caching = True
+    settings.cache_dir = Path("/tmp/cache")
+    settings.cache_large_results_threshold = 5000
+    settings.max_result_tokens = 10000
+    settings.initial_chunk_size = 100
+    settings.enable_auto_fetch_guidance = True
+    settings.enable_history_pruning = True
+    settings.emergency_prune_threshold = 0.95
+    settings.orchestrator_retry_delays = "1.0,2.0,4.0"
+    settings.orchestrator_retry_delays_list = [1.0, 2.0, 4.0]
+
+    # Apply overrides
+    for key, value in overrides.items():
+        setattr(settings, key, value)
+
+    return settings
 
 
 class TestLLMOrchestrator:
@@ -230,13 +281,7 @@ class TestLLMOrchestrator:
     ):
         """Test that retry is disabled when auto_retry_enabled is False."""
         # Create settings with retry disabled
-        settings = Mock(spec=LogAISettings)
-        settings.pii_sanitization_enabled = True
-        settings.max_retry_attempts = 3
-        settings.intent_detection_enabled = True
-        settings.auto_retry_enabled = False  # Disabled
-        settings.time_expansion_factor = 4.0
-        settings.max_tool_iterations = 10
+        settings = create_mock_settings(auto_retry_enabled=False)
 
         orch = LLMOrchestrator(
             llm_provider=mock_llm_provider,
@@ -312,7 +357,7 @@ class TestLLMOrchestrator:
             {"success": True, "log_groups": [{"name": "/correct"}], "count": 1},  # List succeeds
         ]
 
-        result = await orchestrator.chat("Fetch logs from /wrong")
+        _ = await orchestrator.chat("Fetch logs from /wrong")
 
         # Should have called tools twice and provided alternatives
         assert mock_tool_registry.execute.call_count == 2
@@ -327,13 +372,7 @@ class TestMaxToolIterationsConfiguration:
     ):
         """Test that custom max_tool_iterations limit is respected."""
         # Create settings with custom limit
-        settings = Mock(spec=LogAISettings)
-        settings.pii_sanitization_enabled = True
-        settings.max_retry_attempts = 3
-        settings.intent_detection_enabled = True
-        settings.auto_retry_enabled = True
-        settings.time_expansion_factor = 4.0
-        settings.max_tool_iterations = 5  # Custom limit
+        settings = create_mock_settings(max_tool_iterations=5)
 
         orch = LLMOrchestrator(
             llm_provider=mock_llm_provider,
@@ -399,13 +438,7 @@ class TestMaxToolIterationsConfiguration:
     ):
         """Test that max_tool_iterations limit works in streaming mode."""
         # Create settings with custom limit
-        settings = Mock(spec=LogAISettings)
-        settings.pii_sanitization_enabled = True
-        settings.max_retry_attempts = 3
-        settings.intent_detection_enabled = True
-        settings.auto_retry_enabled = True
-        settings.time_expansion_factor = 4.0
-        settings.max_tool_iterations = 3  # Low limit for testing
+        settings = create_mock_settings(max_tool_iterations=3)
 
         orch = LLMOrchestrator(
             llm_provider=mock_llm_provider,
@@ -442,7 +475,7 @@ class TestMaxToolIterationsConfiguration:
         assert mock_tool_registry.execute.call_count == 3
         assert "Maximum tool iterations (3) exceeded" in result
 
-    def test_settings_validation(self):
+    def test_settings_validation(self, clean_env):
         """Test that max_tool_iterations validates correctly."""
         from pydantic import ValidationError
 
@@ -463,7 +496,7 @@ class TestMaxToolIterationsConfiguration:
         assert settings.max_tool_iterations == 100
 
         # Test default value
-        settings = LogAISettings()
+        settings = LogAISettings(_env_file=None)
         assert settings.max_tool_iterations == 10
 
         # Test invalid values (should raise validation error)
@@ -788,13 +821,14 @@ class TestExponentialBackoff:
         )
 
         # Test base delays
-        assert orch._calculate_backoff_delay(0) == 0.5  # First retry
-        assert orch._calculate_backoff_delay(1) == 1.0  # Second retry
-        assert orch._calculate_backoff_delay(2) == 2.0  # Third retry
+        # Test base delays (Phase 2 defaults: 1.0, 2.0, 4.0)
+        assert orch._calculate_backoff_delay(0) == 1.0  # First retry
+        assert orch._calculate_backoff_delay(1) == 2.0  # Second retry
+        assert orch._calculate_backoff_delay(2) == 4.0  # Third retry
 
         # Test exponential growth beyond base delays
-        assert orch._calculate_backoff_delay(3) == 4.0  # Fourth retry (2 * 2^1)
-        assert orch._calculate_backoff_delay(4) == 8.0  # Fifth retry (2 * 2^2)
+        assert orch._calculate_backoff_delay(3) == 8.0  # Fourth retry (4 * 2^1)
+        assert orch._calculate_backoff_delay(4) == 16.0  # Fifth retry (4 * 2^2)
 
     def test_confidence_bucket(
         self, mock_llm_provider, mock_tool_registry, mock_sanitizer, mock_settings
