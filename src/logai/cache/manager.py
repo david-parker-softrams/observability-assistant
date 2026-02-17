@@ -15,12 +15,6 @@ from logai.config.settings import LogAISettings
 class CacheManager:
     """Manages caching of log data and query results."""
 
-    # Configuration constants
-    CACHE_MAX_SIZE_MB = 500  # Maximum cache size
-    CACHE_MAX_ENTRIES = 10000  # Maximum number of entries
-    CACHE_EVICTION_BATCH = 100  # Entries to evict at once
-    CACHE_CLEANUP_INTERVAL = 300  # Seconds between cleanup runs
-
     def __init__(self, settings: LogAISettings):
         """Initialize cache manager.
 
@@ -32,6 +26,12 @@ class CacheManager:
         self.store = SQLiteStore(cache_dir)
         self._cleanup_task: asyncio.Task[None] | None = None
         self._initialized = False
+
+        # Store settings values as instance attributes for easy access
+        self._max_size_mb = settings.cache_max_size_mb
+        self._max_entries = settings.cache_max_entries
+        self._eviction_batch = settings.cache_eviction_batch
+        self._cleanup_interval = settings.cache_cleanup_interval
 
     async def initialize(self) -> None:
         """Initialize cache manager and start background tasks."""
@@ -228,7 +228,7 @@ class CacheManager:
             "start": start_normalized,
             "end": end_normalized,
             "filter": filter_pattern,
-            **{k: v for k, v in sorted(kwargs.items())},
+            **dict(sorted(kwargs.items())),
         }
 
         key_string = json.dumps(key_parts, sort_keys=True)
@@ -275,11 +275,11 @@ class CacheManager:
         current_size = await self.store.get_cache_size()
         entry_count = await self.store.get_entry_count()
 
-        max_size_bytes = self.CACHE_MAX_SIZE_MB * 1024 * 1024
+        max_size_bytes = self._max_size_mb * 1024 * 1024
         target_size_bytes = int(max_size_bytes * 0.9)  # Target 90% of max
 
         # Check if eviction is needed
-        if current_size <= max_size_bytes and entry_count <= self.CACHE_MAX_ENTRIES:
+        if current_size <= max_size_bytes and entry_count <= self._max_entries:
             return 0
 
         total_evicted = 0
@@ -293,8 +293,8 @@ class CacheManager:
         entry_count = await self.store.get_entry_count()
 
         # If still over limit, evict by LRU
-        while current_size > target_size_bytes or entry_count > self.CACHE_MAX_ENTRIES:
-            lru_entries = await self.store.get_lru_entries(self.CACHE_EVICTION_BATCH)
+        while current_size > target_size_bytes or entry_count > self._max_entries:
+            lru_entries = await self.store.get_lru_entries(self._eviction_batch)
             if not lru_entries:
                 break
 
@@ -310,7 +310,7 @@ class CacheManager:
         """Background task to periodically clean up expired entries."""
         while True:
             try:
-                await asyncio.sleep(self.CACHE_CLEANUP_INTERVAL)
+                await asyncio.sleep(self._cleanup_interval)
                 await self.store.delete_expired()
                 await self.evict_if_needed()
             except asyncio.CancelledError:

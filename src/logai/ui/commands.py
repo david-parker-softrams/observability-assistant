@@ -7,8 +7,8 @@ from logai.config.settings import LogAISettings
 from logai.core.orchestrator import LLMOrchestrator
 
 if TYPE_CHECKING:
-    from logai.ui.screens.chat import ChatScreen
     from logai.core.log_group_manager import LogGroupManager
+    from logai.ui.screens.chat import ChatScreen
 
 
 class CommandHandler:
@@ -159,6 +159,10 @@ The previous log group list (if any) has been preserved."""
 [cyan]/config[/cyan] - Show current configuration
 [cyan]/quit[/cyan] or [cyan]/exit[/cyan] - Exit the application (or use Ctrl+C)
 
+[bold]Keyboard Shortcuts:[/bold]
+[cyan]F1/F2[/cyan] - Resize log groups sidebar (left)
+[cyan]F3/F4[/cyan] - Resize tool calls sidebar (right)
+
 [bold]Usage Tips:[/bold]
 - Ask questions in natural language about your CloudWatch logs
 - The assistant will use tools to fetch and analyze logs for you
@@ -197,8 +201,8 @@ Cache Misses: {total_misses}
 Hit Rate: {hit_rate:.1f}%
 
 Cache Directory: {self.settings.cache_dir}
-Max Size: {self.cache_manager.CACHE_MAX_SIZE_MB} MB
-Max Entries: {self.cache_manager.CACHE_MAX_ENTRIES}
+Max Size: {self.cache_manager._max_size_mb} MB
+Max Entries: {self.cache_manager._max_entries}
 """
 
     async def _cache_clear(self) -> str:

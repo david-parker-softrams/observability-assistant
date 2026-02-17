@@ -5,7 +5,6 @@ import time
 from pathlib import Path
 
 import pytest
-
 from logai.cache.manager import CacheManager
 from logai.cache.sqlite_store import CacheEntry
 from logai.config.settings import LogAISettings
@@ -229,8 +228,8 @@ class TestCacheManager:
     async def test_eviction_by_size(self, cache_manager: CacheManager) -> None:
         """Test that cache evicts entries when size limit is exceeded."""
         # Temporarily reduce max size for testing
-        original_max = cache_manager.CACHE_MAX_SIZE_MB
-        cache_manager.CACHE_MAX_SIZE_MB = 1  # 1 MB
+        original_max = cache_manager._max_size_mb
+        cache_manager._max_size_mb = 1  # 1 MB
 
         try:
             # Add entries until we exceed limit
@@ -251,16 +250,16 @@ class TestCacheManager:
             size_mb = stats["total_size_mb"]
 
             # Size should be below limit due to eviction
-            assert size_mb <= cache_manager.CACHE_MAX_SIZE_MB
+            assert size_mb <= cache_manager._max_size_mb
 
         finally:
-            cache_manager.CACHE_MAX_SIZE_MB = original_max
+            cache_manager._max_size_mb = original_max
 
     async def test_eviction_by_entry_count(self, cache_manager: CacheManager) -> None:
         """Test that cache evicts entries when entry count limit is exceeded."""
         # Temporarily reduce max entries for testing
-        original_max = cache_manager.CACHE_MAX_ENTRIES
-        cache_manager.CACHE_MAX_ENTRIES = 5
+        original_max = cache_manager._max_entries
+        cache_manager._max_entries = 5
 
         try:
             # Add more entries than limit
@@ -275,17 +274,17 @@ class TestCacheManager:
 
             # Should have triggered eviction
             stats = await cache_manager.get_statistics()
-            assert stats["entry_count"] <= cache_manager.CACHE_MAX_ENTRIES
+            assert stats["entry_count"] <= cache_manager._max_entries
 
         finally:
-            cache_manager.CACHE_MAX_ENTRIES = original_max
+            cache_manager._max_entries = original_max
 
     async def test_lru_eviction_order(self, cache_manager: CacheManager) -> None:
         """Test that LRU eviction removes entries when limit is exceeded."""
-        original_max = cache_manager.CACHE_MAX_ENTRIES
-        original_batch = cache_manager.CACHE_EVICTION_BATCH
-        cache_manager.CACHE_MAX_ENTRIES = 5
-        cache_manager.CACHE_EVICTION_BATCH = 1  # Evict one at a time for predictable behavior
+        original_max = cache_manager._max_entries
+        original_batch = cache_manager._eviction_batch
+        cache_manager._max_entries = 5
+        cache_manager._eviction_batch = 1  # Evict one at a time for predictable behavior
 
         try:
             # Add 5 entries (at limit)
@@ -312,11 +311,11 @@ class TestCacheManager:
 
             # Should have evicted to stay within limit
             stats = await cache_manager.get_statistics()
-            assert stats["entry_count"] <= cache_manager.CACHE_MAX_ENTRIES
+            assert stats["entry_count"] <= cache_manager._max_entries
 
         finally:
-            cache_manager.CACHE_MAX_ENTRIES = original_max
-            cache_manager.CACHE_EVICTION_BATCH = original_batch
+            cache_manager._max_entries = original_max
+            cache_manager._eviction_batch = original_batch
 
     async def test_shutdown_cancels_cleanup_task(self, settings: LogAISettings) -> None:
         """Test that shutdown properly cancels the cleanup task."""
@@ -330,11 +329,67 @@ class TestCacheManager:
 
         assert manager._cleanup_task is None or manager._cleanup_task.done()
 
+    async def test_cache_respects_settings_max_size(self, tmp_path: Path) -> None:
+        """Test that cache manager respects cache_max_size_mb from settings."""
+        settings = LogAISettings(
+            anthropic_api_key="test-key",
+            cache_dir=str(tmp_path / "cache"),
+            cache_max_size_mb=100,
+        )
+        manager = CacheManager(settings)
+
+        assert manager._max_size_mb == 100
+
+        await manager.initialize()
+        await manager.shutdown()
+
+    async def test_cache_respects_settings_max_entries(self, tmp_path: Path) -> None:
+        """Test that cache manager respects cache_max_entries from settings."""
+        settings = LogAISettings(
+            anthropic_api_key="test-key",
+            cache_dir=str(tmp_path / "cache"),
+            cache_max_entries=5000,
+        )
+        manager = CacheManager(settings)
+
+        assert manager._max_entries == 5000
+
+        await manager.initialize()
+        await manager.shutdown()
+
+    async def test_cache_respects_settings_eviction_batch(self, tmp_path: Path) -> None:
+        """Test that cache manager respects cache_eviction_batch from settings."""
+        settings = LogAISettings(
+            anthropic_api_key="test-key",
+            cache_dir=str(tmp_path / "cache"),
+            cache_eviction_batch=50,
+        )
+        manager = CacheManager(settings)
+
+        assert manager._eviction_batch == 50
+
+        await manager.initialize()
+        await manager.shutdown()
+
+    async def test_cache_respects_settings_cleanup_interval(self, tmp_path: Path) -> None:
+        """Test that cache manager respects cache_cleanup_interval from settings."""
+        settings = LogAISettings(
+            anthropic_api_key="test-key",
+            cache_dir=str(tmp_path / "cache"),
+            cache_cleanup_interval=600,
+        )
+        manager = CacheManager(settings)
+
+        assert manager._cleanup_interval == 600
+
+        await manager.initialize()
+        await manager.shutdown()
+
     async def test_cleanup_loop_removes_expired(self, settings: LogAISettings) -> None:
         """Test that cleanup loop periodically removes expired entries."""
         # Use very short cleanup interval for testing
         manager = CacheManager(settings)
-        manager.CACHE_CLEANUP_INTERVAL = 0.1  # 100ms
+        manager._cleanup_interval = 0.1  # 100ms
 
         await manager.initialize()
 

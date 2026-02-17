@@ -122,6 +122,25 @@ class LogAISettings(BaseSettings):
         gt=0,
     )
 
+    cache_max_entries: int = Field(
+        default=10000,
+        description="Maximum number of cache entries",
+        gt=0,
+    )
+
+    cache_eviction_batch: int = Field(
+        default=100,
+        description="Number of entries to evict at once when cache is full",
+        gt=0,
+        le=1000,
+    )
+
+    cache_cleanup_interval: int = Field(
+        default=300,
+        description="Seconds between cache cleanup runs",
+        gt=0,
+    )
+
     # === Logging Configuration ===
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = Field(
         default="INFO",

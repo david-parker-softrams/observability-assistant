@@ -234,23 +234,21 @@ async def demo_eviction():
     settings = LogAISettings(
         anthropic_api_key="test-key",
         cache_dir=str(Path.home() / ".logai" / "cache_demo"),
+        cache_max_entries=5,
+        cache_eviction_batch=1,
     )
     cache = CacheManager(settings)
-
-    # Temporarily reduce limits for demo
-    cache.CACHE_MAX_ENTRIES = 5
-    cache.CACHE_EVICTION_BATCH = 1
 
     await cache.initialize()
 
     try:
         await cache.clear()
 
-        print(f"\n1. Cache limit set to {cache.CACHE_MAX_ENTRIES} entries")
+        print(f"\n1. Cache limit set to {cache._max_entries} entries")
 
         # Add entries up to limit
-        print(f"\n2. Adding {cache.CACHE_MAX_ENTRIES} entries...")
-        for i in range(cache.CACHE_MAX_ENTRIES):
+        print(f"\n2. Adding {cache._max_entries} entries...")
+        for i in range(cache._max_entries):
             await cache.set(
                 query_type="fetch_logs",
                 payload={"events": [], "count": 0},
@@ -274,7 +272,7 @@ async def demo_eviction():
 
         stats = await cache.get_statistics()
         print(f"   Cache has {stats['entry_count']} entries")
-        print(f"   ✓ Eviction triggered! Least recently used entries removed.")
+        print("   ✓ Eviction triggered! Least recently used entries removed.")
 
     finally:
         await cache.shutdown()
