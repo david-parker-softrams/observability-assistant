@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -65,6 +65,176 @@ class LogAISettings(BaseSettings):
     github_copilot_api_base: str = Field(
         default="https://api.githubcopilot.com/chat/completions",
         description="GitHub Copilot API endpoint URL",
+    )
+
+    # === CloudWatch Configuration (Phase 2) ===
+    cloudwatch_connect_timeout: int = Field(
+        default=5,
+        description="CloudWatch API connection timeout in seconds",
+        gt=0,
+        le=60,
+    )
+    cloudwatch_read_timeout: int = Field(
+        default=30,
+        description="CloudWatch API read timeout in seconds",
+        gt=0,
+        le=300,
+    )
+    cloudwatch_max_retry_attempts: int = Field(
+        default=3,
+        description="CloudWatch API maximum retry attempts",
+        gt=0,
+        le=10,
+    )
+    cloudwatch_retry_mode: Literal["standard", "legacy", "adaptive"] = Field(
+        default="adaptive",
+        description="CloudWatch API retry mode",
+    )
+
+    # === GitHub Copilot Provider Configuration (Phase 2) ===
+    github_copilot_max_retries: int = Field(
+        default=3,
+        description="Maximum retry attempts for GitHub Copilot API 403 errors",
+        ge=0,
+        le=10,
+    )
+    github_copilot_retry_base_delay: float = Field(
+        default=1.0,
+        description="Base delay in seconds for GitHub Copilot retry backoff",
+        gt=0,
+        le=10,
+    )
+    github_copilot_retry_max_delay: float = Field(
+        default=8.0,
+        description="Maximum delay in seconds for GitHub Copilot retry backoff",
+        gt=0,
+        le=60,
+    )
+    github_copilot_integration_id: str = Field(
+        default="vscode-chat",
+        description="GitHub Copilot integration identifier header",
+    )
+    github_copilot_editor_version: str = Field(
+        default="vscode/1.98.2",
+        description="GitHub Copilot editor version header",
+    )
+    github_copilot_request_timeout: float = Field(
+        default=120.0,
+        description="GitHub Copilot HTTP request timeout in seconds",
+        gt=0,
+        le=600,
+    )
+    github_copilot_connect_timeout: float = Field(
+        default=10.0,
+        description="GitHub Copilot HTTP connect timeout in seconds",
+        gt=0,
+        le=60,
+    )
+
+    # === GitHub Model Cache (Phase 2) ===
+    github_model_cache_hours: int = Field(
+        default=24,
+        description="Hours to cache GitHub Copilot model list",
+        gt=0,
+        le=168,
+    )
+    github_model_cache_file: str = Field(
+        default="github_copilot_models.json",
+        description="Filename for GitHub Copilot model cache",
+    )
+
+    # === GitHub OAuth (Phase 2) ===
+    github_oauth_client_id: str = Field(
+        default="Iv1.b507a08c87ecfe98",
+        description="GitHub OAuth client ID (change only for custom OAuth apps)",
+    )
+    github_oauth_scopes: str = Field(
+        default="user:email read:user",
+        description="GitHub OAuth scopes (space-separated)",
+    )
+    github_auth_timeout: int = Field(
+        default=900,
+        description="GitHub OAuth authentication timeout in seconds",
+        gt=0,
+        le=3600,
+    )
+    github_auth_poll_interval: int = Field(
+        default=5,
+        description="GitHub OAuth polling interval in seconds",
+        gt=0,
+        le=60,
+    )
+    github_auth_slow_down_increment: int = Field(
+        default=5,
+        description="Seconds to add when GitHub OAuth requests slow_down",
+        gt=0,
+        le=30,
+    )
+
+    # === Tool Configuration (Phase 2) ===
+    tool_list_log_groups_default_limit: int = Field(
+        default=50,
+        description="Default limit for list_log_groups tool",
+        gt=0,
+        le=100,
+    )
+    tool_list_log_groups_max_limit: int = Field(
+        default=100,
+        description="Maximum limit for list_log_groups tool",
+        gt=0,
+        le=100,
+    )
+    tool_fetch_logs_default_limit: int = Field(
+        default=100,
+        description="Default limit for fetch_logs tool",
+        gt=0,
+        le=10000,
+    )
+    tool_fetch_logs_max_limit: int = Field(
+        default=1000,
+        description="Maximum limit for fetch_logs tool",
+        gt=0,
+        le=10000,
+    )
+
+    # === Orchestrator Configuration (Phase 2) ===
+    orchestrator_retry_delays: str = Field(
+        default="0.5,1.0,2.0",
+        description="Comma-separated retry delays in seconds for orchestrator",
+    )
+
+    # === UI Configuration (Phase 2) ===
+    ui_context_update_throttle: float = Field(
+        default=1.0,
+        description="UI context update throttle in seconds",
+        gt=0,
+        le=10,
+    )
+    ui_tool_timeout_initial: int = Field(
+        default=10,
+        description="Initial tool timeout in seconds (first iteration)",
+        gt=0,
+        le=60,
+    )
+    ui_tool_timeout_subsequent: int = Field(
+        default=8,
+        description="Subsequent tool timeout in seconds",
+        gt=0,
+        le=60,
+    )
+    ui_tool_timeout_final: int = Field(
+        default=5,
+        description="Final tool timeout in seconds (last iterations)",
+        gt=0,
+        le=60,
+    )
+
+    # === Model Discovery (Phase 2) ===
+    model_discovery_timeout: float = Field(
+        default=10.0,
+        description="HTTP timeout for model discovery in seconds",
+        gt=0,
+        le=60,
     )
 
     # === AWS Configuration ===
@@ -316,6 +486,15 @@ class LogAISettings(BaseSettings):
             return None
         return Path(os.path.expanduser(str(v)))
 
+    @model_validator(mode="after")
+    def validate_retry_delays(self) -> "LogAISettings":
+        """Validate cross-field constraints for retry delays."""
+        if self.github_copilot_retry_max_delay < self.github_copilot_retry_base_delay:
+            raise ValueError(
+                "github_copilot_retry_max_delay must be >= github_copilot_retry_base_delay"
+            )
+        return self
+
     def validate_required_credentials(self) -> None:
         """Validate that required credentials are present based on provider selection."""
         # Validate LLM credentials
@@ -388,6 +567,11 @@ class LogAISettings(BaseSettings):
         elif self.llm_provider == "github-copilot":
             return self.github_copilot_model
         raise ValueError(f"Unknown LLM provider: {self.llm_provider}")
+
+    @property
+    def orchestrator_retry_delays_list(self) -> list[float]:
+        """Parse orchestrator_retry_delays string into list of floats."""
+        return [float(x.strip()) for x in self.orchestrator_retry_delays.split(",")]
 
 
 # Global settings instance
