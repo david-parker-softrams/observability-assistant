@@ -260,11 +260,11 @@ class LogPreviewScreen(ModalScreen[dict[str, Any] | None]):
         max-width: 120;
         background: $panel;
         border: thick $primary;
-        padding: 1;
+        padding: 0;
+        layout: vertical;
     }
 
     #preview-header {
-        dock: top;
         height: 3;
         background: $primary;
         color: $text;
@@ -274,12 +274,12 @@ class LogPreviewScreen(ModalScreen[dict[str, Any] | None]):
     }
 
     #timeframe-controls {
-        dock: top;
         height: 3;
         layout: horizontal;
         padding: 0 1;
         background: $surface;
         align: left middle;
+        width: 100%;
     }
 
     .timeframe-label {
@@ -305,7 +305,6 @@ class LogPreviewScreen(ModalScreen[dict[str, Any] | None]):
     }
 
     #selection-controls {
-        dock: top;
         height: 3;
         layout: horizontal;
         padding: 0 1;
@@ -331,7 +330,6 @@ class LogPreviewScreen(ModalScreen[dict[str, Any] | None]):
     }
 
     #action-buttons {
-        dock: bottom;
         height: 3;
         layout: horizontal;
         align: center middle;
