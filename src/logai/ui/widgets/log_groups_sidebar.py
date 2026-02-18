@@ -133,10 +133,6 @@ class LogGroupsSidebar(Static):
     LogGroupsSidebar .log-group-item:hover {
         background: $surface;
     }
-
-    LogGroupsSidebar .log-group-item:active {
-        background: $primary-darken-1;
-    }
     """
 
     def __init__(
