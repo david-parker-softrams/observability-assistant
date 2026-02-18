@@ -4,7 +4,7 @@ import json
 import logging
 import time
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from textual import on, work
 from textual.app import ComposeResult
@@ -273,6 +273,37 @@ class LogPreviewScreen(ModalScreen[dict[str, Any] | None]):
         width: 100%;
     }
 
+    #timeframe-controls {
+        dock: top;
+        height: 3;
+        layout: horizontal;
+        padding: 0 1;
+        background: $surface;
+        align: left middle;
+    }
+
+    .timeframe-label {
+        width: auto;
+        padding: 0 1 0 0;
+        color: $text-muted;
+        text-style: bold;
+    }
+
+    #timeframe-selector {
+        width: auto;
+        layout: horizontal;
+        height: auto;
+    }
+
+    .timeframe-btn {
+        min-width: 10;
+        margin: 0 0 0 1;
+    }
+
+    .timeframe-btn:first-child {
+        margin-left: 0;
+    }
+
     #selection-controls {
         dock: top;
         height: 3;
@@ -352,6 +383,17 @@ class LogPreviewScreen(ModalScreen[dict[str, Any] | None]):
     DEFAULT_TIME_RANGE_MINUTES: int = 15
     DEFAULT_LIMIT: int = 10
 
+    # Time frame options for selector
+    TIME_FRAME_OPTIONS: dict[str, int] = {
+        "15 min": 15,
+        "1 hour": 60,
+        "8 hours": 480,
+        "24 hours": 1440,
+    }
+
+    # Reactive property for time frame selection
+    selected_time_frame: reactive[str] = reactive("15 min")
+
     def __init__(
         self,
         log_group_name: str,
@@ -373,12 +415,31 @@ class LogPreviewScreen(ModalScreen[dict[str, Any] | None]):
         super().__init__(**kwargs)
         self.log_group_name = log_group_name
         self.datasource = datasource
-        self.time_range_minutes = time_range_minutes or self.DEFAULT_TIME_RANGE_MINUTES
         self.limit = limit or self.DEFAULT_LIMIT
 
         # Track fetched events and selection state
         self._events: list[dict[str, Any]] = []
         self._selected_ids: set[str] = set()
+
+        # Set initial time frame if custom value provided
+        if time_range_minutes:
+            # Find matching time frame option
+            for label, minutes in self.TIME_FRAME_OPTIONS.items():
+                if minutes == time_range_minutes:
+                    self.selected_time_frame = label
+                    break
+            # If no exact match, use default (keeps "15 min")
+
+    @property
+    def time_range_minutes(self) -> int:
+        """
+        Get current time range in minutes based on selected frame.
+
+        Returns:
+            Number of minutes for the selected time frame.
+            Defaults to 15 if selection is invalid.
+        """
+        return self.TIME_FRAME_OPTIONS.get(self.selected_time_frame, 15)
 
     def compose(self) -> ComposeResult:
         """Compose the preview screen layout."""
@@ -388,6 +449,16 @@ class LogPreviewScreen(ModalScreen[dict[str, Any] | None]):
                 f"Log Preview: {self.log_group_name}",
                 id="preview-header",
             )
+
+            # Time frame selector
+            with Horizontal(id="timeframe-controls"):
+                yield Static("Time Frame:", classes="timeframe-label")
+                with Horizontal(id="timeframe-selector"):
+                    for label in self.TIME_FRAME_OPTIONS.keys():
+                        variant: Literal["default", "primary"] = (
+                            "primary" if label == self.selected_time_frame else "default"
+                        )
+                        yield Button(label, variant=variant, classes="timeframe-btn")
 
             # Selection controls
             with Horizontal(id="selection-controls"):
@@ -412,17 +483,81 @@ class LogPreviewScreen(ModalScreen[dict[str, Any] | None]):
         """Fetch and display logs when screen mounts."""
         self._fetch_and_display_logs()
 
+    def watch_selected_time_frame(self, new_frame: str) -> None:
+        """
+        Refresh logs when time frame selection changes.
+
+        Called automatically by Textual when selected_time_frame changes.
+        Clears current state and triggers a new fetch.
+
+        Args:
+            new_frame: The newly selected time frame label
+        """
+        logger.debug(f"Time frame changed to: {new_frame}")
+
+        # Only refresh if we're already mounted (not during initial compose)
+        if not self.is_mounted:
+            return
+
+        # Update button visual states
+        self._update_timeframe_buttons()
+
+        # Clear current state
+        self._events.clear()
+        self._selected_ids.clear()
+
+        # Trigger refresh (exclusive worker handles concurrency)
+        self._fetch_and_display_logs()
+
+    def _update_timeframe_buttons(self) -> None:
+        """Update time frame button visual states to reflect selection."""
+        try:
+            selector = self.query_one("#timeframe-selector", Horizontal)
+            for button in selector.query(Button):
+                label = str(button.label)
+                if label == self.selected_time_frame:
+                    button.variant = "primary"
+                else:
+                    button.variant = "default"
+        except Exception:
+            pass  # Buttons may not be mounted yet
+
+    @on(Button.Pressed, "#timeframe-selector Button")
+    def on_timeframe_changed(self, event: Button.Pressed) -> None:
+        """
+        Handle time frame button press.
+
+        Updates the selected_time_frame reactive property, which
+        triggers the watcher to refresh the log display.
+
+        Args:
+            event: Button pressed event
+        """
+        button_label = str(event.button.label)
+
+        # Only process valid time frame options
+        if button_label in self.TIME_FRAME_OPTIONS:
+            # Skip if already selected
+            if button_label != self.selected_time_frame:
+                self.selected_time_frame = button_label
+
+        # Stop propagation to prevent other handlers
+        event.stop()
+
     @work(exclusive=True)
     async def _fetch_and_display_logs(self) -> None:
         """Worker to fetch and display logs asynchronously."""
         container = self.query_one("#log-entries", VerticalScroll)
+
+        # Clear existing entries before loading new ones
+        await container.remove_children()
 
         # Show loading state
         loading = Static(
             "Loading recent log entries...",
             classes="loading-state",
         )
-        container.mount(loading)
+        await container.mount(loading)
 
         try:
             # Calculate time range
@@ -446,7 +581,7 @@ class LogPreviewScreen(ModalScreen[dict[str, Any] | None]):
             else:
                 container.mount(
                     Static(
-                        f"No log entries found in the last {self.time_range_minutes} minutes.\n\n"
+                        f"No log entries found in the last {self.selected_time_frame}.\n\n"
                         "The log group may have no recent activity,\n"
                         "or logs may be outside this time window.",
                         classes="empty-state",
