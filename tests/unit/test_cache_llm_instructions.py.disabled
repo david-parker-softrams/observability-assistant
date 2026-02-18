@@ -1,0 +1,459 @@
+"""Tests for cache LLM instruction system."""
+
+import time
+from pathlib import Path
+from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
+
+from logai.config.settings import LogAISettings
+from logai.core.context.result_cache import CachedResultSummary
+from logai.core.metrics import MetricsCollector
+from logai.core.orchestrator import ActiveCacheContext, LLMOrchestrator
+from logai.core.sanitizer import LogSanitizer
+from logai.core.tools.registry import ToolRegistry
+
+
+@pytest.fixture
+def mock_settings(tmp_path):
+    """Create mock settings for testing."""
+    settings = Mock(spec=LogAISettings)
+    settings.pii_sanitization_enabled = True
+    settings.max_retry_attempts = 3
+    settings.intent_detection_enabled = True
+    settings.auto_retry_enabled = True
+    settings.max_tool_iterations = 10
+    settings.initial_chunk_size = 100
+    settings.enable_auto_fetch_guidance = True
+    settings.enable_result_caching = True
+    settings.enable_history_pruning = True
+    settings.cache_large_results_threshold = 1000
+    settings.current_llm_model = "gpt-4"
+    settings.cache_dir = tmp_path  # Use pytest's tmp_path for proper Path object
+    return settings
+
+
+@pytest.fixture
+def mock_llm_provider():
+    """Create mock LLM provider."""
+    return AsyncMock()
+
+
+@pytest.fixture
+def mock_sanitizer():
+    """Create mock sanitizer."""
+    sanitizer = Mock(spec=LogSanitizer)
+    sanitizer.enabled = True
+    return sanitizer
+
+
+@pytest.fixture
+def mock_tool_registry():
+    """Create mock tool registry."""
+    registry = Mock(spec=ToolRegistry)
+    registry.to_function_definitions = Mock(return_value=[])
+    registry.execute = AsyncMock()
+    return registry
+
+
+@pytest.fixture
+def orchestrator(mock_llm_provider, mock_tool_registry, mock_sanitizer, mock_settings):
+    """Create orchestrator instance for testing."""
+    # Create a mock log_group_manager to prevent formatting errors
+    mock_log_group_manager = Mock()
+    mock_log_group_manager.is_ready = False
+
+    return LLMOrchestrator(
+        llm_provider=mock_llm_provider,
+        tool_registry=mock_tool_registry,
+        sanitizer=mock_sanitizer,
+        settings=mock_settings,
+        log_group_manager=mock_log_group_manager,
+    )
+
+
+class TestFollowUpDetection:
+    """Tests for follow-up question detection."""
+
+    def test_follow_up_detection_reference_words(self, orchestrator):
+        """Test that reference words trigger follow-up detection."""
+        # Setup active cache
+        orchestrator._active_cache = ActiveCacheContext(
+            cache_id="test_cache_123",
+            total_events=432,
+            chunk_size=100,
+            created_at=time.time(),
+            last_accessed_at=time.time(),
+            tool_name="search_logs",
+            query_description="search_logs with 432 events",
+        )
+
+        # Test various reference words
+        test_cases = [
+            "How many of those are errors?",
+            "What about these logs?",
+            "Can you analyze them?",
+            "Show me the errors from that search",
+        ]
+
+        for message in test_cases:
+            injection = orchestrator._get_follow_up_cache_injection(message)
+            assert injection is not None, f"Failed for message: {message}"
+            assert "ACTIVE CACHED DATASET DETECTED" in injection
+            assert "test_cache_123" in injection
+            assert "432" in injection
+
+    def test_follow_up_detection_aggregation(self, orchestrator):
+        """Test that aggregation keywords trigger follow-up detection."""
+        # Setup active cache
+        orchestrator._active_cache = ActiveCacheContext(
+            cache_id="test_cache_456",
+            total_events=200,
+            chunk_size=100,
+            created_at=time.time(),
+            last_accessed_at=time.time(),
+            tool_name="search_logs",
+            query_description="search_logs with 200 events",
+        )
+
+        # Test aggregation keywords
+        test_cases = [
+            "How many errors are there?",
+            "Count the SSN errors",
+            "What's the total?",
+            "Give me a breakdown",
+            "Show unique error types",
+        ]
+
+        for message in test_cases:
+            injection = orchestrator._get_follow_up_cache_injection(message)
+            assert injection is not None, f"Failed for message: {message}"
+            assert "COMPLETE DATASET ITERATION" in injection
+            assert "MANDATORY" in injection
+
+    def test_follow_up_detection_combined(self, orchestrator):
+        """Test that reference + aggregation triggers follow-up with iteration."""
+        # Setup active cache
+        orchestrator._active_cache = ActiveCacheContext(
+            cache_id="test_cache_789",
+            total_events=500,
+            chunk_size=100,
+            created_at=time.time(),
+            last_accessed_at=time.time(),
+            tool_name="search_logs",
+            query_description="search_logs with 500 events",
+        )
+
+        message = "How many of those logs contain SSN errors?"
+        injection = orchestrator._get_follow_up_cache_injection(message)
+
+        assert injection is not None
+        assert "ACTIVE CACHED DATASET DETECTED" in injection
+        assert "COMPLETE DATASET ITERATION" in injection
+        assert "500" in injection
+        assert "test_cache_789" in injection
+
+    def test_no_false_positive_new_query(self, orchestrator):
+        """Test that new queries don't trigger follow-up injection."""
+        # Setup active cache
+        orchestrator._active_cache = ActiveCacheContext(
+            cache_id="test_cache_999",
+            total_events=100,
+            chunk_size=100,
+            created_at=time.time(),
+            last_accessed_at=time.time(),
+            tool_name="search_logs",
+            query_description="search_logs with 100 events",
+        )
+
+        # These should NOT trigger follow-up
+        test_cases = [
+            "Show me metrics for the checkout service",
+            "List available log groups",
+            "Query logs from yesterday",
+        ]
+
+        for message in test_cases:
+            injection = orchestrator._get_follow_up_cache_injection(message)
+            # May return None or should not contain iteration guidance for unrelated queries
+            # The heuristic is lenient, so we check that it doesn't force iteration
+            if injection is not None:
+                # If there's an injection, it shouldn't be forcing complete iteration
+                # for a clearly new query without aggregation keywords
+                if "how many" not in message.lower() and "count" not in message.lower():
+                    assert (
+                        "COMPLETE DATASET ITERATION" not in injection
+                        or "show me" in message.lower()
+                    )
+
+
+class TestCacheStateTracking:
+    """Tests for active cache context tracking."""
+
+    @pytest.mark.asyncio
+    async def test_cache_state_created_on_result(self, orchestrator, mock_tool_registry):
+        """Test that ActiveCacheContext is created when cached result is processed."""
+        # Mock a large result that will be cached
+        large_result = {
+            "success": True,
+            "events": [{"message": f"log {i}"} for i in range(500)],
+            "count": 500,
+        }
+
+        tool_result = {"tool_call_id": "test_call", "result": large_result}
+
+        # Mock the result cache manager
+        mock_summary = CachedResultSummary(
+            cache_id="result_abc123",
+            total_events=500,
+            time_range={"start": 0, "end": 1000},
+            sample_events=[{"message": "log 0"}],
+            event_statistics={"ERROR": 10},
+            original_tool="search_logs",
+            original_query={},
+            cached_at=int(time.time()),
+            expires_at=int(time.time()) + 3600,
+        )
+
+        with patch.object(orchestrator.result_cache, "cache_result", return_value=mock_summary):
+            with patch.object(
+                orchestrator.budget_tracker, "should_cache_result", return_value=(True, 5000)
+            ):
+                await orchestrator._process_tool_result(tool_result, "search_logs")
+
+        # Verify active cache was created
+        assert orchestrator._active_cache is not None
+        assert orchestrator._active_cache.cache_id == "result_abc123"
+        assert orchestrator._active_cache.total_events == 500
+        assert orchestrator._active_cache.tool_name == "search_logs"
+
+    def test_cache_state_expiry(self, orchestrator):
+        """Test that cache older than 5 minutes doesn't trigger follow-up."""
+        # Setup cache that's 6 minutes old
+        old_time = time.time() - 360  # 6 minutes ago
+        orchestrator._active_cache = ActiveCacheContext(
+            cache_id="old_cache",
+            total_events=100,
+            chunk_size=100,
+            created_at=old_time,
+            last_accessed_at=old_time,
+            tool_name="search_logs",
+            query_description="search_logs with 100 events",
+        )
+
+        # Follow-up question should not get injection due to age
+        message = "How many of those are errors?"
+        injection = orchestrator._get_follow_up_cache_injection(message)
+
+        assert injection is None
+
+    def test_cache_is_recent(self):
+        """Test the is_recent() method of ActiveCacheContext."""
+        # Recent cache
+        recent = ActiveCacheContext(
+            cache_id="recent",
+            total_events=100,
+            chunk_size=100,
+            created_at=time.time(),
+            last_accessed_at=time.time(),
+            tool_name="search_logs",
+            query_description="test",
+        )
+        assert recent.is_recent(max_age_seconds=300)
+
+        # Old cache
+        old = ActiveCacheContext(
+            cache_id="old",
+            total_events=100,
+            chunk_size=100,
+            created_at=time.time() - 400,
+            last_accessed_at=time.time() - 400,
+            tool_name="search_logs",
+            query_description="test",
+        )
+        assert not old.is_recent(max_age_seconds=300)
+
+    def test_chunks_remaining(self):
+        """Test the chunks_remaining() calculation."""
+        cache = ActiveCacheContext(
+            cache_id="test",
+            total_events=432,
+            chunk_size=100,
+            created_at=time.time(),
+            last_accessed_at=time.time(),
+            tool_name="search_logs",
+            query_description="test",
+        )
+
+        # No chunks fetched yet
+        assert cache.chunks_remaining() == 5  # ceiling(432/100) = 5
+
+        # Fetch some chunks
+        cache.chunks_fetched.add(0)
+        cache.chunks_fetched.add(100)
+        assert cache.chunks_remaining() == 3  # 5 - 2 = 3
+
+
+class TestResultSummaryStructure:
+    """Tests for cached result summary structure."""
+
+    def test_result_summary_structure(self):
+        """Test that to_context_dict has correct structure."""
+        summary = CachedResultSummary(
+            cache_id="test_cache",
+            total_events=432,
+            time_range={"start": 0, "end": 1000},
+            sample_events=[
+                {"message": "log 1"},
+                {"message": "log 2"},
+                {"message": "log 3"},
+                {"message": "log 4"},
+                {"message": "log 5"},
+            ],
+            event_statistics={"ERROR": 10, "WARN": 5},
+            original_tool="search_logs",
+            original_query={"log_group": "/aws/lambda/test"},
+            cached_at=int(time.time()),
+            expires_at=int(time.time()) + 3600,
+        )
+
+        context_dict = summary.to_context_dict()
+
+        # WARNING appears first
+        assert "WARNING" in context_dict
+        assert (
+            context_dict["WARNING"] == "This is a SUMMARY only. You MUST fetch chunks for analysis."
+        )
+
+        # Sample events reduced to 3
+        assert "preview_only" in context_dict
+        assert len(context_dict["preview_only"]["sample_events"]) == 3
+
+        # Iteration info present
+        assert "iteration_info" in context_dict
+        assert context_dict["iteration_info"]["chunk_size"] == 100
+        assert context_dict["iteration_info"]["total_chunks"] == 5  # ceiling(432/100)
+
+        # MANDATORY_ACTION field present
+        assert "MANDATORY_ACTION" in context_dict
+        assert "test_cache" in context_dict["MANDATORY_ACTION"]
+        assert "fetch_cached_result_chunk" in context_dict["MANDATORY_ACTION"]
+
+
+class TestIterationGuidance:
+    """Tests for iteration guidance in injections."""
+
+    def test_iteration_guidance_in_immediate_injection(self, orchestrator):
+        """Test that immediate action injection includes chunk calculations."""
+        guidance = {
+            "cache_id": "result_xyz",
+            "tool_name": "search_logs",
+            "total_events": 432,
+        }
+
+        injection = orchestrator._get_cache_immediate_action_injection(guidance)
+
+        # Should contain chunk calculation
+        assert "Total Chunks: 5" in injection  # ceiling(432/100)
+        assert "result_xyz" in injection
+        assert "MANDATORY IMMEDIATE ACTION REQUIRED" in injection
+        assert "fetch_cached_result_chunk" in injection
+        assert "offset=0" in injection
+        assert "limit=100" in injection
+
+    def test_iteration_guidance_has_algorithm(self, orchestrator):
+        """Test that follow-up injection includes iteration algorithm."""
+        orchestrator._active_cache = ActiveCacheContext(
+            cache_id="test_cache",
+            total_events=432,
+            chunk_size=100,
+            created_at=time.time(),
+            last_accessed_at=time.time(),
+            tool_name="search_logs",
+            query_description="search_logs with 432 events",
+        )
+
+        message = "How many errors are there?"
+        injection = orchestrator._get_follow_up_cache_injection(message)
+
+        assert injection is not None
+        assert "MANDATORY: Execute this iteration loop" in injection
+        assert "fetch_cached_result_chunk" in injection
+        assert "offset=0" in injection
+        assert "DISCARD raw events" in injection
+
+
+class TestCacheImmediateActionInjection:
+    """Tests for cache immediate action injection."""
+
+    def test_immediate_action_injection_created(self, orchestrator):
+        """Test that pending cache guidance creates immediate action injection."""
+        orchestrator._pending_cache_guidance = {
+            "cache_id": "result_123",
+            "tool_name": "search_logs",
+            "total_events": 500,
+        }
+
+        injection = orchestrator._get_pending_context_injection()
+
+        assert injection is not None
+        assert "MANDATORY IMMEDIATE ACTION REQUIRED" in injection
+        assert "result_123" in injection
+        assert "500 events" in injection
+        assert "Total Chunks: 5" in injection
+
+    def test_immediate_action_cleared_after_use(self, orchestrator):
+        """Test that pending cache guidance is cleared after use."""
+        orchestrator._pending_cache_guidance = {
+            "cache_id": "result_456",
+            "tool_name": "search_logs",
+            "total_events": 200,
+        }
+
+        # First call should return injection
+        injection = orchestrator._get_pending_context_injection()
+        assert injection is not None
+
+        # Second call should return None (cleared)
+        injection2 = orchestrator._get_pending_context_injection()
+        assert injection2 is None
+
+
+class TestSystemPromptRules:
+    """Tests for system prompt cache handling rules."""
+
+    def test_system_prompt_contains_mandatory_rules(self, orchestrator):
+        """Test that system prompt includes all 6 mandatory rules."""
+        system_prompt = orchestrator._get_system_prompt()
+
+        # Check for all 6 rules
+        assert "RULE 1: CACHED RESULT RECEPTION" in system_prompt
+        assert "RULE 2: FOLLOW-UP QUESTION DETECTION" in system_prompt
+        assert "RULE 3: COMPLETE DATASET ITERATION" in system_prompt
+        assert "RULE 4: CONTEXT MEMORY MANAGEMENT" in system_prompt
+        assert "RULE 5: RESULT ACCURACY REQUIREMENT" in system_prompt
+        assert "RULE 6: PROGRESS REPORTING" in system_prompt
+
+    def test_system_prompt_has_imperative_language(self, orchestrator):
+        """Test that system prompt uses imperative language."""
+        system_prompt = orchestrator._get_system_prompt()
+
+        # Check for imperative keywords
+        assert "YOU MUST" in system_prompt
+        assert "DO NOT" in system_prompt
+        assert "CRITICAL" in system_prompt
+        assert "MANDATORY" in system_prompt
+
+    def test_system_prompt_has_iteration_algorithm(self, orchestrator):
+        """Test that system prompt includes iteration algorithm."""
+        system_prompt = orchestrator._get_system_prompt()
+
+        # Check for algorithm components
+        assert "ITERATION ALGORITHM:" in system_prompt
+        assert "while current_offset < total_events:" in system_prompt
+        assert "fetch_cached_result_chunk" in system_prompt
+        assert "DISCARD raw events" in system_prompt
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

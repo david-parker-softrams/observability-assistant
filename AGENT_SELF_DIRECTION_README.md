@@ -6,7 +6,7 @@
 
 **Finding**: This is a **system design issue**, not a technical bug
 
-**Root Cause**: 
+**Root Cause**:
 1. System prompt doesn't instruct agent to automatically retry on empty results
 2. Conversation loop exits when agent produces text without tool calls
 
@@ -24,7 +24,7 @@ Start here if you want to understand the issue quickly:
   - Quick fixes with code
   - 5-step implementation plan
 
-### For Comprehensive Analysis  
+### For Comprehensive Analysis
 Read this for complete technical details:
 - **[AGENT_SELF_DIRECTION_INVESTIGATION.md](AGENT_SELF_DIRECTION_INVESTIGATION.md)**
   - Executive summary with ranked root causes
@@ -93,19 +93,19 @@ Result: Nothing happens ❌
 ## 🚀 Implementation Roadmap
 
 ### Phase 1: System Prompt (IMMEDIATE - 5 min)
-**Impact**: HIGH | **Risk**: NONE  
+**Impact**: HIGH | **Risk**: NONE
 Add empty-result handling section to system prompt.
 
 ### Phase 2: Intent Detection (SHORT-TERM - 2 hours)
-**Impact**: MEDIUM | **Risk**: LOW  
+**Impact**: MEDIUM | **Risk**: LOW
 Detect "let me try..." language and continue conversation loop.
 
 ### Phase 3: Retry Logic (MEDIUM-TERM - 4 hours)
-**Impact**: MEDIUM | **Risk**: LOW  
+**Impact**: MEDIUM | **Risk**: LOW
 Analyze tool results and guide agent on retries.
 
 ### Phase 4: Testing (OPTIONAL - 3 hours)
-**Impact**: MEDIUM | **Risk**: NONE  
+**Impact**: MEDIUM | **Risk**: NONE
 Add tests for empty-result scenarios.
 
 ---
@@ -190,27 +190,27 @@ After implementation:
 
 ## 🤔 FAQ
 
-**Q: Is this a bug in the tool execution?**  
+**Q: Is this a bug in the tool execution?**
 A: No. Tool execution works perfectly. The issue is in how the agent is instructed to respond to tool results.
 
-**Q: Why does the agent generate text without tool calls?**  
+**Q: Why does the agent generate text without tool calls?**
 A: The agent is trained to respond/report. Without explicit instruction to retry, it reports its intention rather than executing it.
 
-**Q: Will fixing this break anything?**  
+**Q: Will fixing this break anything?**
 A: No. Changes are to the system prompt, conversation logic, and tests. No changes to tool execution or APIs.
 
-**Q: How long will this take to fix?**  
+**Q: How long will this take to fix?**
 A: 5 minutes for Phase 1 (quick win), 8-12 hours for full fix + testing.
 
-**Q: What's the priority?**  
+**Q: What's the priority?**
 A: HIGH - This is a user-facing issue that makes the agent appear unreliable even though it works correctly.
 
 ---
 
 ## 📞 Investigation Contact
 
-**Investigator**: Hans (Code Librarian)  
-**Investigation Date**: February 11, 2026  
+**Investigator**: Hans (Code Librarian)
+**Investigation Date**: February 11, 2026
 **Status**: ✅ COMPLETE
 
 All investigation documents have been committed to git:
@@ -241,4 +241,3 @@ Read AGENT_SELF_DIRECTION_INVESTIGATION.md thoroughly
 ---
 
 **Next Step**: Review INVESTIGATION_DELIVERY_SUMMARY.md and decide on implementation priority.
-

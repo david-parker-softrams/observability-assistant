@@ -1,8 +1,8 @@
 # Feature Request: AWS Profile Command-Line Argument
 
-**Date:** February 11, 2026  
-**Requested by:** User  
-**Priority:** High  
+**Date:** February 11, 2026
+**Requested by:** User
+**Priority:** High
 **Status:** Ready for Implementation
 
 ---
@@ -193,12 +193,12 @@ logai --help
 
 ## Implementation Assignment
 
-**Assigned to:** Jackie (software-engineer agent)  
-**Estimated effort:** Small feature (1-2 hours)  
+**Assigned to:** Jackie (software-engineer agent)
+**Estimated effort:** Small feature (1-2 hours)
 **Complexity:** Low - straightforward argument parsing and settings override
 
-**Review by:** Billy (code-reviewer agent)  
-**Testing by:** Raoul (qa-engineer agent) - write tests  
+**Review by:** Han-Ron (code-reviewer agent)
+**Testing by:** Raoul (qa-engineer agent) - write tests
 **Documentation by:** Tina (technical-writer agent) - update user docs
 
 ---

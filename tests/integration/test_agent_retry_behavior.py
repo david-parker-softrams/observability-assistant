@@ -8,7 +8,6 @@ import json
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-
 from logai.config.settings import LogAISettings
 from logai.core.orchestrator import LLMOrchestrator, RetryState
 from logai.core.sanitizer import LogSanitizer
@@ -58,7 +57,7 @@ class TestEmptyResultsAutoRetry:
         """Test that empty log results trigger automatic retry with expanded time range."""
         # Setup: Mock LLM provider
         mock_llm = AsyncMock()
-        
+
         # Scenario: First query returns empty, second query (after retry) returns results
         mock_llm.chat.side_effect = [
             # 1. Initial tool call with narrow time range
@@ -70,11 +69,13 @@ class TestEmptyResultsAutoRetry:
                         "type": "function",
                         "function": {
                             "name": "fetch_logs",
-                            "arguments": json.dumps({
-                                "log_group": "/aws/lambda/test",
-                                "start_time": "1h ago",
-                                "filter_pattern": "ERROR"
-                            })
+                            "arguments": json.dumps(
+                                {
+                                    "log_group": "/aws/lambda/test",
+                                    "start_time": "1h ago",
+                                    "filter_pattern": "ERROR",
+                                }
+                            ),
                         },
                     }
                 ],
@@ -89,11 +90,13 @@ class TestEmptyResultsAutoRetry:
                         "type": "function",
                         "function": {
                             "name": "fetch_logs",
-                            "arguments": json.dumps({
-                                "log_group": "/aws/lambda/test",
-                                "start_time": "6h ago",  # Expanded
-                                "filter_pattern": "ERROR"
-                            })
+                            "arguments": json.dumps(
+                                {
+                                    "log_group": "/aws/lambda/test",
+                                    "start_time": "6h ago",  # Expanded
+                                    "filter_pattern": "ERROR",
+                                }
+                            ),
                         },
                     }
                 ],
@@ -102,10 +105,10 @@ class TestEmptyResultsAutoRetry:
             # 3. Final response with results
             LLMResponse(
                 content="I found 5 ERROR entries in the expanded 6-hour time range.",
-                finish_reason="stop"
+                finish_reason="stop",
             ),
         ]
-        
+
         # Setup: Mock tool registry
         mock_tools = Mock(spec=ToolRegistry)
         mock_tools.to_function_definitions = Mock(return_value=[])
@@ -126,7 +129,7 @@ class TestEmptyResultsAutoRetry:
                 ],
             },
         ]
-        
+
         # Create orchestrator
         orchestrator = LLMOrchestrator(
             llm_provider=mock_llm,
@@ -134,21 +137,21 @@ class TestEmptyResultsAutoRetry:
             sanitizer=mock_sanitizer,
             settings=integration_settings,
         )
-        
+
         # Execute
         result = await orchestrator.chat("Find ERROR logs in /aws/lambda/test")
-        
+
         # Verify: Should have called tool twice (initial + retry)
         assert mock_tools.execute.call_count == 2
-        
+
         # Verify: First call had narrow time range
         first_call_args = mock_tools.execute.call_args_list[0][1]
         assert first_call_args["start_time"] == "1h ago"
-        
+
         # Verify: Second call had expanded time range
         second_call_args = mock_tools.execute.call_args_list[1][1]
         assert second_call_args["start_time"] == "6h ago"
-        
+
         # Verify: Final response reports success, not failure
         assert "5 ERROR" in result or "5" in result
         assert "found" in result.lower()
@@ -158,7 +161,7 @@ class TestEmptyResultsAutoRetry:
         """Test that agent respects max retry attempts (3) and gives up gracefully."""
         # Setup: Mock LLM that always tries with empty results
         mock_llm = AsyncMock()
-        
+
         # Create 4 tool call responses (initial + 3 retries)
         tool_responses = []
         for i in range(4):
@@ -171,45 +174,44 @@ class TestEmptyResultsAutoRetry:
                             "type": "function",
                             "function": {
                                 "name": "fetch_logs",
-                                "arguments": json.dumps({
-                                    "log_group": "/aws/lambda/test",
-                                    "start_time": f"{(i+1)*6}h ago",
-                                })
+                                "arguments": json.dumps(
+                                    {
+                                        "log_group": "/aws/lambda/test",
+                                        "start_time": f"{(i+1)*6}h ago",
+                                    }
+                                ),
                             },
                         }
                     ],
                     finish_reason="tool_calls",
                 )
             )
-        
+
         # Final response acknowledging no results
         final_response = LLMResponse(
-            content="No logs were found after trying multiple time ranges.",
-            finish_reason="stop"
+            content="No logs were found after trying multiple time ranges.", finish_reason="stop"
         )
-        
+
         mock_llm.chat.side_effect = tool_responses + [final_response]
-        
+
         # Setup: Mock tools that always return empty
         mock_tools = Mock(spec=ToolRegistry)
         mock_tools.to_function_definitions = Mock(return_value=[])
-        mock_tools.execute = AsyncMock(
-            return_value={"success": True, "count": 0, "events": []}
-        )
-        
+        mock_tools.execute = AsyncMock(return_value={"success": True, "count": 0, "events": []})
+
         orchestrator = LLMOrchestrator(
             llm_provider=mock_llm,
             tool_registry=mock_tools,
             sanitizer=mock_sanitizer,
             settings=integration_settings,
         )
-        
+
         # Execute
         result = await orchestrator.chat("Find logs")
-        
+
         # Verify: Should have attempted initial + 3 retries = 4 tool calls
         assert mock_tools.execute.call_count == 4
-        
+
         # Verify: Final response acknowledges failure gracefully
         assert "no logs" in result.lower() or "not found" in result.lower()
 
@@ -217,7 +219,7 @@ class TestEmptyResultsAutoRetry:
     async def test_successful_retry_after_empty(self, integration_settings, mock_sanitizer):
         """Test that agent reports success when retry finds results."""
         mock_llm = AsyncMock()
-        
+
         mock_llm.chat.side_effect = [
             # Initial query: narrow time range
             LLMResponse(
@@ -228,10 +230,12 @@ class TestEmptyResultsAutoRetry:
                         "type": "function",
                         "function": {
                             "name": "fetch_logs",
-                            "arguments": json.dumps({
-                                "log_group": "/aws/lambda/test",
-                                "start_time": "30m ago",
-                            })
+                            "arguments": json.dumps(
+                                {
+                                    "log_group": "/aws/lambda/test",
+                                    "start_time": "30m ago",
+                                }
+                            ),
                         },
                     }
                 ],
@@ -246,22 +250,21 @@ class TestEmptyResultsAutoRetry:
                         "type": "function",
                         "function": {
                             "name": "fetch_logs",
-                            "arguments": json.dumps({
-                                "log_group": "/aws/lambda/test",
-                                "start_time": "24h ago",
-                            })
+                            "arguments": json.dumps(
+                                {
+                                    "log_group": "/aws/lambda/test",
+                                    "start_time": "24h ago",
+                                }
+                            ),
                         },
                     }
                 ],
                 finish_reason="tool_calls",
             ),
             # Success message
-            LLMResponse(
-                content="Found 12 log entries in the past 24 hours.",
-                finish_reason="stop"
-            ),
+            LLMResponse(content="Found 12 log entries in the past 24 hours.", finish_reason="stop"),
         ]
-        
+
         mock_tools = Mock(spec=ToolRegistry)
         mock_tools.to_function_definitions = Mock(return_value=[])
         mock_tools.execute = AsyncMock()
@@ -273,19 +276,19 @@ class TestEmptyResultsAutoRetry:
                 "events": [{"timestamp": i, "message": f"Log {i}"} for i in range(12)],
             },
         ]
-        
+
         orchestrator = LLMOrchestrator(
             llm_provider=mock_llm,
             tool_registry=mock_tools,
             sanitizer=mock_sanitizer,
             settings=integration_settings,
         )
-        
+
         result = await orchestrator.chat("Get logs")
-        
+
         # Verify: Retried once
         assert mock_tools.execute.call_count == 2
-        
+
         # Verify: Reports success
         assert "12" in result
         assert "found" in result.lower()
@@ -295,18 +298,13 @@ class TestIntentDetectionAndNudging:
     """Test intent detection and nudging behavior."""
 
     @pytest.mark.asyncio
-    async def test_intent_without_action_triggers_nudge(
-        self, integration_settings, mock_sanitizer
-    ):
+    async def test_intent_without_action_triggers_nudge(self, integration_settings, mock_sanitizer):
         """Test that stating intent without tool call triggers a nudge."""
         mock_llm = AsyncMock()
-        
+
         mock_llm.chat.side_effect = [
             # 1. States intent without calling tool
-            LLMResponse(
-                content="I'll search the logs for errors now.",
-                finish_reason="stop"
-            ),
+            LLMResponse(content="I'll search the logs for errors now.", finish_reason="stop"),
             # 2. After nudge, actually calls tool
             LLMResponse(
                 content="",
@@ -316,23 +314,22 @@ class TestIntentDetectionAndNudging:
                         "type": "function",
                         "function": {
                             "name": "fetch_logs",
-                            "arguments": json.dumps({
-                                "log_group": "/aws/lambda/test",
-                                "start_time": "1h ago",
-                                "filter_pattern": "ERROR"
-                            })
+                            "arguments": json.dumps(
+                                {
+                                    "log_group": "/aws/lambda/test",
+                                    "start_time": "1h ago",
+                                    "filter_pattern": "ERROR",
+                                }
+                            ),
                         },
                     }
                 ],
                 finish_reason="tool_calls",
             ),
             # 3. Final response
-            LLMResponse(
-                content="Here are the error logs I found.",
-                finish_reason="stop"
-            ),
+            LLMResponse(content="Here are the error logs I found.", finish_reason="stop"),
         ]
-        
+
         mock_tools = Mock(spec=ToolRegistry)
         mock_tools.to_function_definitions = Mock(return_value=[])
         mock_tools.execute = AsyncMock(
@@ -346,32 +343,30 @@ class TestIntentDetectionAndNudging:
                 ],
             }
         )
-        
+
         orchestrator = LLMOrchestrator(
             llm_provider=mock_llm,
             tool_registry=mock_tools,
             sanitizer=mock_sanitizer,
             settings=integration_settings,
         )
-        
+
         result = await orchestrator.chat("Search for errors")
-        
+
         # Verify: LLM was called at least 3 times (initial + nudge + after tool)
         assert mock_llm.chat.call_count >= 3
-        
+
         # Verify: Tool was eventually called
         assert mock_tools.execute.called
-        
+
         # Verify: Got results
         assert "error" in result.lower()
 
     @pytest.mark.asyncio
-    async def test_premature_giving_up_triggers_retry(
-        self, integration_settings, mock_sanitizer
-    ):
+    async def test_premature_giving_up_triggers_retry(self, integration_settings, mock_sanitizer):
         """Test that agent giving up prematurely triggers retry encouragement."""
         mock_llm = AsyncMock()
-        
+
         mock_llm.chat.side_effect = [
             # 1. Initial tool call
             LLMResponse(
@@ -382,20 +377,19 @@ class TestIntentDetectionAndNudging:
                         "type": "function",
                         "function": {
                             "name": "fetch_logs",
-                            "arguments": json.dumps({
-                                "log_group": "/aws/lambda/test",
-                                "start_time": "1h ago",
-                            })
+                            "arguments": json.dumps(
+                                {
+                                    "log_group": "/aws/lambda/test",
+                                    "start_time": "1h ago",
+                                }
+                            ),
                         },
                     }
                 ],
                 finish_reason="tool_calls",
             ),
             # 2. Gives up after empty result
-            LLMResponse(
-                content="Unfortunately, no logs were found.",
-                finish_reason="stop"
-            ),
+            LLMResponse(content="Unfortunately, no logs were found.", finish_reason="stop"),
             # 3. After nudge, tries expanded range
             LLMResponse(
                 content="",
@@ -405,42 +399,45 @@ class TestIntentDetectionAndNudging:
                         "type": "function",
                         "function": {
                             "name": "fetch_logs",
-                            "arguments": json.dumps({
-                                "log_group": "/aws/lambda/test",
-                                "start_time": "24h ago",
-                            })
+                            "arguments": json.dumps(
+                                {
+                                    "log_group": "/aws/lambda/test",
+                                    "start_time": "24h ago",
+                                }
+                            ),
                         },
                     }
                 ],
                 finish_reason="tool_calls",
             ),
             # 4. Final response
-            LLMResponse(
-                content="Found logs in the expanded time range.",
-                finish_reason="stop"
-            ),
+            LLMResponse(content="Found logs in the expanded time range.", finish_reason="stop"),
         ]
-        
+
         mock_tools = Mock(spec=ToolRegistry)
         mock_tools.to_function_definitions = Mock(return_value=[])
         mock_tools.execute = AsyncMock()
         mock_tools.execute.side_effect = [
             {"success": True, "count": 0, "events": []},  # First: empty
-            {"success": True, "count": 5, "events": [{"timestamp": i, "message": f"Log {i}"} for i in range(5)]},  # Second: found
+            {
+                "success": True,
+                "count": 5,
+                "events": [{"timestamp": i, "message": f"Log {i}"} for i in range(5)],
+            },  # Second: found
         ]
-        
+
         orchestrator = LLMOrchestrator(
             llm_provider=mock_llm,
             tool_registry=mock_tools,
             sanitizer=mock_sanitizer,
             settings=integration_settings,
         )
-        
+
         result = await orchestrator.chat("Get logs")
-        
+
         # Verify: Tool called twice (initial + after nudge)
         assert mock_tools.execute.call_count == 2
-        
+
         # Verify: Final result is positive
         assert "found" in result.lower()
 
@@ -452,7 +449,7 @@ class TestFeatureFlagBehavior:
     async def test_auto_retry_disabled_no_retry(self, disabled_retry_settings, mock_sanitizer):
         """Test that disabling auto_retry_enabled prevents automatic retries."""
         mock_llm = AsyncMock()
-        
+
         mock_llm.chat.side_effect = [
             # Tool call
             LLMResponse(
@@ -463,37 +460,32 @@ class TestFeatureFlagBehavior:
                         "type": "function",
                         "function": {
                             "name": "fetch_logs",
-                            "arguments": json.dumps({"log_group": "/test", "start_time": "1h ago"})
+                            "arguments": json.dumps({"log_group": "/test", "start_time": "1h ago"}),
                         },
                     }
                 ],
                 finish_reason="tool_calls",
             ),
             # Final response (no retry should occur)
-            LLMResponse(
-                content="No logs found in the time range.",
-                finish_reason="stop"
-            ),
+            LLMResponse(content="No logs found in the time range.", finish_reason="stop"),
         ]
-        
+
         mock_tools = Mock(spec=ToolRegistry)
         mock_tools.to_function_definitions = Mock(return_value=[])
-        mock_tools.execute = AsyncMock(
-            return_value={"success": True, "count": 0, "events": []}
-        )
-        
+        mock_tools.execute = AsyncMock(return_value={"success": True, "count": 0, "events": []})
+
         orchestrator = LLMOrchestrator(
             llm_provider=mock_llm,
             tool_registry=mock_tools,
             sanitizer=mock_sanitizer,
             settings=disabled_retry_settings,
         )
-        
+
         result = await orchestrator.chat("Find logs")
-        
+
         # Verify: Only called tool once (no retry)
         assert mock_tools.execute.call_count == 1
-        
+
         # Verify: Original behavior maintained
         assert "no logs" in result.lower()
 
@@ -507,30 +499,27 @@ class TestFeatureFlagBehavior:
         settings.intent_detection_enabled = False  # Disabled
         settings.auto_retry_enabled = True
         settings.time_expansion_factor = 4.0
-        
+
         mock_llm = AsyncMock()
-        
+
         mock_llm.chat.side_effect = [
             # States intent without action
-            LLMResponse(
-                content="I'll search the logs for you.",
-                finish_reason="stop"
-            ),
+            LLMResponse(content="I'll search the logs for you.", finish_reason="stop"),
         ]
-        
+
         mock_tools = Mock(spec=ToolRegistry)
         mock_tools.to_function_definitions = Mock(return_value=[])
         mock_tools.execute = AsyncMock()
-        
+
         orchestrator = LLMOrchestrator(
             llm_provider=mock_llm,
             tool_registry=mock_tools,
             sanitizer=mock_sanitizer,
             settings=settings,
         )
-        
+
         result = await orchestrator.chat("Search logs")
-        
+
         # Verify: No nudge occurred, just returned the response
         assert mock_llm.chat.call_count == 1
         assert "search the logs" in result.lower()
@@ -543,7 +532,7 @@ class TestStrategyTracking:
     async def test_strategies_not_duplicated(self, integration_settings, mock_sanitizer):
         """Test that the same strategy is not tried multiple times."""
         mock_llm = AsyncMock()
-        
+
         # Multiple retry attempts
         tool_responses = []
         for i in range(4):
@@ -556,44 +545,41 @@ class TestStrategyTracking:
                             "type": "function",
                             "function": {
                                 "name": "fetch_logs",
-                                "arguments": json.dumps({
-                                    "log_group": "/test",
-                                    "start_time": f"{(i+1)*6}h ago",
-                                })
+                                "arguments": json.dumps(
+                                    {
+                                        "log_group": "/test",
+                                        "start_time": f"{(i+1)*6}h ago",
+                                    }
+                                ),
                             },
                         }
                     ],
                     finish_reason="tool_calls",
                 )
             )
-        
+
         tool_responses.append(
-            LLMResponse(
-                content="No results found after multiple attempts.",
-                finish_reason="stop"
-            )
+            LLMResponse(content="No results found after multiple attempts.", finish_reason="stop")
         )
-        
+
         mock_llm.chat.side_effect = tool_responses
-        
+
         mock_tools = Mock(spec=ToolRegistry)
         mock_tools.to_function_definitions = Mock(return_value=[])
-        mock_tools.execute = AsyncMock(
-            return_value={"success": True, "count": 0, "events": []}
-        )
-        
+        mock_tools.execute = AsyncMock(return_value={"success": True, "count": 0, "events": []})
+
         orchestrator = LLMOrchestrator(
             llm_provider=mock_llm,
             tool_registry=mock_tools,
             sanitizer=mock_sanitizer,
             settings=integration_settings,
         )
-        
+
         result = await orchestrator.chat("Find logs")
-        
+
         # Verify: Attempted multiple times
         assert mock_tools.execute.call_count == 4
-        
+
         # Verify: Graceful exit after max attempts
         assert "no results" in result.lower() or "not found" in result.lower()
 
@@ -607,7 +593,7 @@ class TestLogGroupNotFound:
     ):
         """Test that log group not found error triggers listing of alternatives."""
         mock_llm = AsyncMock()
-        
+
         mock_llm.chat.side_effect = [
             # 1. Try non-existent log group
             LLMResponse(
@@ -618,10 +604,12 @@ class TestLogGroupNotFound:
                         "type": "function",
                         "function": {
                             "name": "fetch_logs",
-                            "arguments": json.dumps({
-                                "log_group": "/aws/lambda/nonexistent",
-                                "start_time": "1h ago",
-                            })
+                            "arguments": json.dumps(
+                                {
+                                    "log_group": "/aws/lambda/nonexistent",
+                                    "start_time": "1h ago",
+                                }
+                            ),
                         },
                     }
                 ],
@@ -636,7 +624,7 @@ class TestLogGroupNotFound:
                         "type": "function",
                         "function": {
                             "name": "list_log_groups",
-                            "arguments": json.dumps({"prefix": "/aws/lambda/"})
+                            "arguments": json.dumps({"prefix": "/aws/lambda/"}),
                         },
                     }
                 ],
@@ -651,10 +639,12 @@ class TestLogGroupNotFound:
                         "type": "function",
                         "function": {
                             "name": "fetch_logs",
-                            "arguments": json.dumps({
-                                "log_group": "/aws/lambda/actual-service",
-                                "start_time": "1h ago",
-                            })
+                            "arguments": json.dumps(
+                                {
+                                    "log_group": "/aws/lambda/actual-service",
+                                    "start_time": "1h ago",
+                                }
+                            ),
                         },
                     }
                 ],
@@ -662,11 +652,10 @@ class TestLogGroupNotFound:
             ),
             # 4. Final response
             LLMResponse(
-                content="Found logs in /aws/lambda/actual-service instead.",
-                finish_reason="stop"
+                content="Found logs in /aws/lambda/actual-service instead.", finish_reason="stop"
             ),
         ]
-        
+
         mock_tools = Mock(spec=ToolRegistry)
         mock_tools.to_function_definitions = Mock(return_value=[])
         mock_tools.execute = AsyncMock()
@@ -689,19 +678,19 @@ class TestLogGroupNotFound:
                 "events": [{"timestamp": i, "message": f"Log {i}"} for i in range(5)],
             },
         ]
-        
+
         orchestrator = LLMOrchestrator(
             llm_provider=mock_llm,
             tool_registry=mock_tools,
             sanitizer=mock_sanitizer,
             settings=integration_settings,
         )
-        
+
         result = await orchestrator.chat("Get logs from /aws/lambda/nonexistent")
-        
+
         # Verify: Made 3 tool calls (failed fetch, list, successful fetch)
         assert mock_tools.execute.call_count == 3
-        
+
         # Verify: Eventually found the right log group
         assert "actual-service" in result.lower() or "found" in result.lower()
 
@@ -710,12 +699,10 @@ class TestComplexScenarios:
     """Test complex scenarios combining multiple retry behaviors."""
 
     @pytest.mark.asyncio
-    async def test_empty_then_not_found_then_success(
-        self, integration_settings, mock_sanitizer
-    ):
+    async def test_empty_then_not_found_then_success(self, integration_settings, mock_sanitizer):
         """Test handling of multiple failure types before success."""
         mock_llm = AsyncMock()
-        
+
         mock_llm.chat.side_effect = [
             # 1. Try narrow time range
             LLMResponse(
@@ -726,10 +713,12 @@ class TestComplexScenarios:
                         "type": "function",
                         "function": {
                             "name": "fetch_logs",
-                            "arguments": json.dumps({
-                                "log_group": "/test",
-                                "start_time": "30m ago",
-                            })
+                            "arguments": json.dumps(
+                                {
+                                    "log_group": "/test",
+                                    "start_time": "30m ago",
+                                }
+                            ),
                         },
                     }
                 ],
@@ -744,10 +733,12 @@ class TestComplexScenarios:
                         "type": "function",
                         "function": {
                             "name": "fetch_logs",
-                            "arguments": json.dumps({
-                                "log_group": "/test",
-                                "start_time": "24h ago",
-                            })
+                            "arguments": json.dumps(
+                                {
+                                    "log_group": "/test",
+                                    "start_time": "24h ago",
+                                }
+                            ),
                         },
                     }
                 ],
@@ -755,11 +746,10 @@ class TestComplexScenarios:
             ),
             # 3. Final response
             LLMResponse(
-                content="Found 10 log entries in the expanded time range.",
-                finish_reason="stop"
+                content="Found 10 log entries in the expanded time range.", finish_reason="stop"
             ),
         ]
-        
+
         mock_tools = Mock(spec=ToolRegistry)
         mock_tools.to_function_definitions = Mock(return_value=[])
         mock_tools.execute = AsyncMock()
@@ -771,18 +761,18 @@ class TestComplexScenarios:
                 "events": [{"timestamp": i, "message": f"Log {i}"} for i in range(10)],
             },
         ]
-        
+
         orchestrator = LLMOrchestrator(
             llm_provider=mock_llm,
             tool_registry=mock_tools,
             sanitizer=mock_sanitizer,
             settings=integration_settings,
         )
-        
+
         result = await orchestrator.chat("Find logs")
-        
+
         # Verify: Multiple attempts made
         assert mock_tools.execute.call_count == 2
-        
+
         # Verify: Eventually succeeded
         assert "10" in result and "found" in result.lower()

@@ -1,8 +1,8 @@
 # LogAI Agent Self-Direction Investigation
 ## "That didn't produce any output, let me try something similar" - Bug Analysis
 
-**Investigation Date**: February 11, 2026  
-**Investigator**: Hans (Code Librarian)  
+**Investigation Date**: February 11, 2026
+**Investigator**: Hans (Code Librarian)
 **Status**: ✅ Complete - Root Cause Identified
 
 ---
@@ -175,7 +175,7 @@ else:
     return error_msg
 ```
 
-**The Problem**: 
+**The Problem**:
 - When the LLM returns a response with **text but NO tool calls**, the loop exits
 - The orchestrator **never checks** if the agent's text indicates it's about to retry
 - The agent is not instructed to **include a tool call** if it intends to take action
@@ -266,36 +266,36 @@ The LLM does NOT generate a tool call in the response because:
 async def _chat_complete(self, user_message: str) -> str:
     # Add user message to history
     self.conversation_history.append({"role": "user", "content": user_message})
-    
+
     # Get available tools
     tools = self.tool_registry.to_function_definitions()
-    
+
     # Execute conversation loop with tool calling
     iteration = 0
     while iteration < self.MAX_TOOL_ITERATIONS:  # ◄─── MAX = 10
         iteration += 1
-        
+
         try:
             # Get LLM response
             response = await self.llm_provider.chat(
                 messages=messages, tools=tools, stream=False
             )
-            
+
             # Check if LLM wants to use tools
             if response.has_tool_calls():  # ◄─── ONLY if tool calls present
                 # Execute tool calls
                 tool_results = await self._execute_tool_calls(response.tool_calls)
-                
+
                 # Add assistant message with tool calls to history
                 self.conversation_history.append(assistant_message)
-                
+
                 # Add tool results to conversation
                 for tool_result in tool_results:
                     self.conversation_history.append(tool_message)
-                
+
                 # Continue loop - LLM will process tool results
                 continue  # ◄─── LOOP CONTINUES
-            
+
             # No tool calls - we have the final response
             if response.content:
                 self.conversation_history.append(
@@ -304,15 +304,15 @@ async def _chat_complete(self, user_message: str) -> str:
                 return response.content  # ◄─── LOOP EXITS HERE ❌
             else:
                 return "Received empty response from LLM"
-        
+
         except Exception as e:
             raise OrchestratorError(...)
-    
+
     # Hit max iterations
     return f"Maximum tool iterations ({self.MAX_TOOL_ITERATIONS}) exceeded."
 ```
 
-**Key Insight**: 
+**Key Insight**:
 - The loop only continues if `response.has_tool_calls()` is TRUE
 - When the agent produces text without tool calls, the loop exits **immediately**
 - There is NO check to see if the text contains language like "let me try" or "let me attempt"
@@ -392,10 +392,10 @@ Reason: Polite conditional language not interpreted as action directive
 
 3. **User Sees**:
    ```
-   Agent: "No connection errors found in the last 2 hours. 
+   Agent: "No connection errors found in the last 2 hours.
            Let me try searching with a broader filter..."
    ```
-   
+
 4. **Agent Never Executes**:
    - New fetch with broader filter
    - Different time range
@@ -436,10 +436,10 @@ Include the tool call in the same response.
 # After getting response with NO tool_calls but HAS content:
 if not response.has_tool_calls() and response.content:
     # Check if the response contains language indicating intent to retry
-    intent_keywords = ["let me try", "let me attempt", "try a different", 
-                       "let me search", "let me check", "try again", 
+    intent_keywords = ["let me try", "let me attempt", "try a different",
+                       "let me search", "let me check", "try again",
                        "broader", "narrower", "different approach"]
-    
+
     response_lower = response.content.lower()
     if any(keyword in response_lower for keyword in intent_keywords):
         # Agent stated an intention - prompt it to include tool call
@@ -449,7 +449,7 @@ if not response.has_tool_calls() and response.content:
             "content": response.content
         })
         messages.append({
-            "role": "user", 
+            "role": "user",
             "content": "Please execute the tools needed for your stated action now."
         })
         # Continue loop to get tool calls
@@ -462,12 +462,12 @@ if not response.has_tool_calls() and response.content:
 
 ```python
 async def _should_retry_tool_calls(
-    self, 
+    self,
     tool_results: list[dict[str, Any]]
 ) -> bool:
     """
     Analyze tool results to determine if retry is needed.
-    
+
     Returns True if any tool returned zero results.
     """
     for result in tool_results:
@@ -489,7 +489,7 @@ async def _should_retry_tool_calls(
 When a tool returns zero results:
 - NEVER reply to the user about the lack of results immediately
 - INSTEAD, generate a NEW tool call with modified parameters
-- Example: If filter_pattern="ERROR" returns 0 results, 
+- Example: If filter_pattern="ERROR" returns 0 results,
   try filter_pattern="WARN" or remove the filter entirely
 - Keep retrying until you either:
   a) Find results (count > 0), or
@@ -592,4 +592,3 @@ The "That didn't produce any output, let me try something similar" bug is **not 
 4. There's no mechanism to detect and act on the agent's stated intentions
 
 The fix requires **enhancing the system prompt, improving intent detection, and adjusting the conversation loop logic** to support true agent self-direction.
-

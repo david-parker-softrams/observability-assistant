@@ -451,7 +451,7 @@ Use the `/refresh` command to update the list:
 ```
 You: Show me logs from /aws/lambda/new-function
 
-Agent: I don't see that log group in my list. 
+Agent: I don't see that log group in my list.
        You may need to refresh the list.
 
 You: /refresh

@@ -1,6 +1,6 @@
 # Session Notes: Ollama Tool Calling & AWS Credentials Fix
-**Date:** February 10, 2026  
-**TPM:** George  
+**Date:** February 10, 2026
+**TPM:** George
 **Status:** ✅ Successfully Completed
 
 ---
@@ -109,7 +109,7 @@ def _supports_tools(self) -> bool:
             "qwen2.5", "qwen3", "llama3.1", "llama3.2",
             "mistral-nemo", "firefunction"
         ]
-        return any(f"ollama_chat/{family}" in model_name 
+        return any(f"ollama_chat/{family}" in model_name
                    for family in supported_families)
     return False
 ```
@@ -134,7 +134,7 @@ assert provider._get_model_name() == "ollama/llama3.1:8b"
 assert provider._get_model_name() == "ollama_chat/llama3.1:8b"
 ```
 
-**Code Review:** Billy gave 7/10 initially, improved to production-ready after addressing:
+**Code Review:** Han-Ron gave 7/10 initially, improved to production-ready after addressing:
 - Model registration being less version-specific
 - Test expectations updated
 - Validation added for tool support
@@ -217,7 +217,7 @@ Created diagnostic script `test_aws_access.py` (later removed) that verified:
 
 **Before Fix:**
 ```
-✗ Failed to list log groups: UnrecognizedClientException - 
+✗ Failed to list log groups: UnrecognizedClientException -
   The security token included in the request is invalid.
 ```
 
@@ -258,8 +258,8 @@ credential_process = /Users/David.Parker/go/bin/kion credential-process \
   --cloud-access-role bosc-application-admin
 ```
 
-**Role:** `ct-ado-bosc-application-admin`  
-**Account:** 337909760160  
+**Role:** `ct-ado-bosc-application-admin`
+**Account:** 337909760160
 **Region:** us-east-1
 
 ---
@@ -418,13 +418,13 @@ will override them automatically.
 
 ## Session Metrics
 
-**Duration:** ~2 hours  
-**Commits:** 2 (both pushed to GitHub)  
-**Tests:** All passing (16/16 unit tests)  
+**Duration:** ~2 hours
+**Commits:** 2 (both pushed to GitHub)
+**Tests:** All passing (16/16 unit tests)
 **Team Members:**
 - George (TPM) - Coordination & research
 - Jackie (Engineer) - Implementation
-- Billy (Reviewer) - Code review
+- Han-Ron (Reviewer) - Code review
 
 **Outcome:** ✅ Complete Success - All features working
 

@@ -1,7 +1,7 @@
 # Agent Self-Direction Bug - Quick Reference
 
 ## The Problem
-Agent says: "That didn't produce any output, let me try something similar"  
+Agent says: "That didn't produce any output, let me try something similar"
 But then: **Nothing happens** ❌
 
 ## Root Cause (In One Sentence)
@@ -29,7 +29,7 @@ Missing sections:
 ### 3. Empty Results From Tools
 **File**: `src/logai/core/tools/cloudwatch_tools.py`
 
-Tools return: `{"success": true, "count": 0, "events": []}`  
+Tools return: `{"success": true, "count": 0, "events": []}`
 But prompt gives no guidance on what to do with this.
 
 ## Why It Happens
@@ -84,7 +84,7 @@ In orchestrator.py `_chat_complete()`:
 
 ```python
 if not response.has_tool_calls() and response.content:
-    keywords = ["let me try", "let me search", "try again", 
+    keywords = ["let me try", "let me search", "try again",
                 "broader", "try different", "let me attempt"]
     if any(kw in response.content.lower() for kw in keywords):
         # Agent stated intent, ask it to execute
@@ -137,7 +137,7 @@ User should see: Agent eventually returns results or "no logs found after 3 atte
 ## Implementation Order
 
 1. **Step 1** (5 min): Update system prompt with empty-result guidance
-2. **Step 2** (30 min): Add intent keyword detection to conversation loop  
+2. **Step 2** (30 min): Add intent keyword detection to conversation loop
 3. **Step 3** (1 hour): Test with actual queries
 4. **Step 4** (2 hours): Add unit tests for new behavior
 5. **Step 5** (30 min): Add logging and documentation
@@ -163,4 +163,3 @@ After implementing fixes:
 - [ ] Tests added for empty result scenarios
 - [ ] Manual testing confirms behavior
 - [ ] Logging shows retry attempts
-

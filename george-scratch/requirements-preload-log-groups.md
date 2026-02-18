@@ -1,9 +1,9 @@
 # Requirements: Pre-load CloudWatch Log Groups at Startup
 
-**Date:** February 12, 2026  
-**Requested By:** David Parker  
-**TPM:** George  
-**Target:** Sally (Software Architect)
+**Date:** February 12, 2026
+**Requested By:** David Parker
+**TPM:** George
+**Target:** Saanvi (Software Architect)
 
 ---
 
@@ -181,7 +181,7 @@
 
 ---
 
-## Design Questions for Sally
+## Design Questions for Saanvi
 
 1. **System Prompt Strategy:**
    - How should we format the log group list in the system prompt?
@@ -255,4 +255,4 @@
 
 ---
 
-**Ready for Sally's architectural design.**
+**Ready for Saanvi's architectural design.**

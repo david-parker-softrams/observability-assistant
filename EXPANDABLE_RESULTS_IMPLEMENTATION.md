@@ -50,11 +50,11 @@ def _add_log_groups_node(self, parent_node: TreeNode, log_groups: list[dict]) ->
     """Builds expandable tree structure."""
     # Create result summary node
     result_node = parent_node.add(f"Result: Found {len(log_groups)} groups")
-    
+
     # Show first 10
     for group in log_groups[:10]:
         result_node.add_leaf(f"  • {group['name']}")
-    
+
     # Add expandable node for remaining items
     if len(log_groups) > 10:
         more_node = result_node.add(
@@ -237,4 +237,4 @@ The expandable/collapsible results feature is now fully implemented and tested. 
 
 ---
 
-**Ready for code review by Billy!**
+**Ready for code review by Han-Ron!**

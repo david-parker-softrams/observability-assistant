@@ -116,7 +116,7 @@ class TestStartupBehavior:
         # In real scenario, this happens during startup
         import asyncio
 
-        result = asyncio.run(manager.load_all())
+        asyncio.run(manager.load_all())
 
         # Verify manager has log groups
         assert manager.count == 2
@@ -154,7 +154,7 @@ class TestCommandIntegration:
             )
 
         # Create command handler
-        handler = CommandHandler(
+        _handler = CommandHandler(
             orchestrator=mock_orchestrator,
             cache_manager=mock_cache_manager,
             settings=mock_settings,
@@ -589,7 +589,7 @@ class TestUIBehavior:
 
     def test_full_log_group_names_displayed_without_truncation(self):
         """Test full log group names are displayed without ellipsis."""
-        sidebar = LogGroupsSidebar()
+        _sidebar = LogGroupsSidebar()
 
         # Create mock manager with very long log group name
         mock_manager = MagicMock()
@@ -672,7 +672,7 @@ class TestErrorHandling:
             assert True
         except Exception:
             # If exception propagates, test fails
-            assert False, "Exception should have been caught"
+            raise AssertionError("Exception should have been caught") from None
 
     def test_sidebar_works_without_manager(self):
         """Test sidebar works when no manager is provided."""

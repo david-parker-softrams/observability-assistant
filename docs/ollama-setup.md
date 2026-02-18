@@ -177,7 +177,7 @@ LOGAI_OLLAMA_MODEL=mistral
 
 **Symptoms**: `ollama: command not found`
 
-**Solution**: 
+**Solution**:
 - **macOS**: Reinstall with `brew install ollama`
 - **Linux**: Ensure `/usr/local/bin` is in your PATH
 - **Windows**: Restart terminal after installation

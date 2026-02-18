@@ -1,7 +1,7 @@
 # Tool Sidebar - Manual Testing Guide
 
-**For**: George, Jackie, or other team members  
-**Purpose**: Quick manual testing checklist for sidebar functionality  
+**For**: George, Jackie, or other team members
+**Purpose**: Quick manual testing checklist for sidebar functionality
 **Time Required**: 15-20 minutes
 
 ---
@@ -206,7 +206,7 @@ Args: log_group=/aws/lambda/my-func..., start_time=2026-01-...
 
 ### ✅ Test 12: Toggle Preserves History (1 min)
 
-**Action**: 
+**Action**:
 1. Make a query (get some tool calls)
 2. Type `/tools` to hide sidebar
 3. Type `/tools` to show sidebar again

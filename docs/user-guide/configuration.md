@@ -18,9 +18,9 @@ LogAI supports four LLM providers: Anthropic Claude, OpenAI GPT, GitHub Copilot,
 
 ### Provider Selection
 
-**Variable:** `LOGAI_LLM_PROVIDER`  
-**Required:** Yes  
-**Default:** `anthropic`  
+**Variable:** `LOGAI_LLM_PROVIDER`
+**Required:** Yes
+**Default:** `anthropic`
 **Options:** `anthropic`, `openai`, `github-copilot`, `ollama`
 
 ```bash
@@ -33,8 +33,8 @@ LOGAI_LLM_PROVIDER=anthropic
 
 #### API Key
 
-**Variable:** `LOGAI_ANTHROPIC_API_KEY`  
-**Required:** Yes (when using Anthropic)  
+**Variable:** `LOGAI_ANTHROPIC_API_KEY`
+**Required:** Yes (when using Anthropic)
 **Default:** None
 
 Get your API key from: https://console.anthropic.com/
@@ -45,8 +45,8 @@ LOGAI_ANTHROPIC_API_KEY=sk-ant-api03-...
 
 #### Model Selection
 
-**Variable:** `LOGAI_ANTHROPIC_MODEL`  
-**Required:** No  
+**Variable:** `LOGAI_ANTHROPIC_MODEL`
+**Required:** No
 **Default:** `claude-3-5-sonnet-20241022`
 
 ```bash
@@ -65,8 +65,8 @@ LOGAI_ANTHROPIC_MODEL=claude-3-5-sonnet-20241022
 
 #### API Key
 
-**Variable:** `LOGAI_OPENAI_API_KEY`  
-**Required:** Yes (when using OpenAI)  
+**Variable:** `LOGAI_OPENAI_API_KEY`
+**Required:** Yes (when using OpenAI)
 **Default:** None
 
 Get your API key from: https://platform.openai.com/api-keys
@@ -77,8 +77,8 @@ LOGAI_OPENAI_API_KEY=sk-...
 
 #### Model Selection
 
-**Variable:** `LOGAI_OPENAI_MODEL`  
-**Required:** No  
+**Variable:** `LOGAI_OPENAI_MODEL`
+**Required:** No
 **Default:** `gpt-4-turbo-preview`
 
 ```bash
@@ -108,8 +108,8 @@ Follow the browser prompts to authorize LogAI. Your token will be saved to `~/.l
 
 #### Model Selection
 
-**Variable:** `LOGAI_GITHUB_COPILOT_MODEL`  
-**Required:** Yes (when using GitHub Copilot)  
+**Variable:** `LOGAI_GITHUB_COPILOT_MODEL`
+**Required:** Yes (when using GitHub Copilot)
 **Default:** `claude-opus-4.5`
 
 ```bash
@@ -151,8 +151,8 @@ LOGAI_GITHUB_COPILOT_MODEL=gpt-4o-mini
 
 #### API Base URL
 
-**Variable:** `LOGAI_GITHUB_COPILOT_API_BASE`  
-**Required:** No  
+**Variable:** `LOGAI_GITHUB_COPILOT_API_BASE`
+**Required:** No
 **Default:** `https://api.githubcopilot.com`
 
 ```bash
@@ -179,8 +179,8 @@ Run models locally on your machine for privacy or offline usage.
 
 #### Base URL
 
-**Variable:** `LOGAI_OLLAMA_BASE_URL`  
-**Required:** No  
+**Variable:** `LOGAI_OLLAMA_BASE_URL`
+**Required:** No
 **Default:** `http://localhost:11434`
 
 ```bash
@@ -189,8 +189,8 @@ LOGAI_OLLAMA_BASE_URL=http://localhost:11434
 
 #### Model Selection
 
-**Variable:** `LOGAI_OLLAMA_MODEL`  
-**Required:** No  
+**Variable:** `LOGAI_OLLAMA_MODEL`
+**Required:** No
 **Default:** `llama3.1:8b`
 
 ```bash
@@ -210,7 +210,7 @@ LOGAI_OLLAMA_MODEL=llama3.1:8b
    ```bash
    # macOS
    brew install ollama
-   
+
    # Linux
    curl -fsSL https://ollama.com/install.sh | sh
    ```
@@ -233,9 +233,9 @@ Configure AWS credentials and region for CloudWatch Logs access.
 
 ### AWS Region
 
-**Variable:** `AWS_DEFAULT_REGION`  
-**Required:** Yes  
-**Default:** None  
+**Variable:** `AWS_DEFAULT_REGION`
+**Required:** Yes
+**Default:** None
 **Override:** `--aws-region` CLI argument
 
 ```bash
@@ -256,7 +256,7 @@ See [AWS Regions](https://docs.aws.amazon.com/general/latest/gr/rande.html) for 
 - `AWS_ACCESS_KEY_ID`
 - `AWS_SECRET_ACCESS_KEY`
 
-**Required:** Yes (if not using AWS profile)  
+**Required:** Yes (if not using AWS profile)
 **Default:** None
 
 ```bash
@@ -271,9 +271,9 @@ AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
 
 ### AWS Credentials (Method 2: Profile)
 
-**Variable:** `AWS_PROFILE`  
-**Required:** Yes (if not using direct credentials)  
-**Default:** None  
+**Variable:** `AWS_PROFILE`
+**Required:** Yes (if not using direct credentials)
+**Default:** None
 **Override:** `--aws-profile` CLI argument
 
 ```bash
@@ -313,9 +313,9 @@ LogAI checks for AWS credentials in this order:
 
 #### Log Groups Sidebar Visibility
 
-**Variable:** `LOGAI_LOG_GROUPS_SIDEBAR_VISIBLE`  
-**Required:** No  
-**Default:** `true`  
+**Variable:** `LOGAI_LOG_GROUPS_SIDEBAR_VISIBLE`
+**Required:** No
+**Default:** `true`
 **Type:** Boolean (`true` or `false`)
 
 ```bash
@@ -349,9 +349,9 @@ LOGAI_LOG_GROUPS_SIDEBAR_VISIBLE=true
 
 ### PII Sanitization
 
-**Variable:** `LOGAI_PII_SANITIZATION_ENABLED`  
-**Required:** No  
-**Default:** `true`  
+**Variable:** `LOGAI_PII_SANITIZATION_ENABLED`
+**Required:** No
+**Default:** `true`
 **Type:** Boolean (`true` or `false`)
 
 ```bash
@@ -388,9 +388,9 @@ LOGAI_PII_SANITIZATION_ENABLED=true
 
 #### Cache Directory
 
-**Variable:** `LOGAI_CACHE_DIR`  
-**Required:** No  
-**Default:** `~/.logai/cache`  
+**Variable:** `LOGAI_CACHE_DIR`
+**Required:** No
+**Default:** `~/.logai/cache`
 **Type:** Path
 
 ```bash
@@ -406,10 +406,10 @@ LOGAI_CACHE_DIR=/var/cache/logai
 
 #### Cache Maximum Size
 
-**Variable:** `LOGAI_CACHE_MAX_SIZE_MB`  
-**Required:** No  
-**Default:** `500`  
-**Type:** Integer (1-10000)  
+**Variable:** `LOGAI_CACHE_MAX_SIZE_MB`
+**Required:** No
+**Default:** `500`
+**Type:** Integer (1-10000)
 **Unit:** Megabytes
 
 ```bash
@@ -426,10 +426,10 @@ When cache reaches max size, oldest entries are automatically removed.
 
 #### Cache TTL (Time To Live)
 
-**Variable:** `LOGAI_CACHE_TTL_SECONDS`  
-**Required:** No  
-**Default:** `86400` (24 hours)  
-**Type:** Integer  
+**Variable:** `LOGAI_CACHE_TTL_SECONDS`
+**Required:** No
+**Default:** `86400` (24 hours)
+**Type:** Integer
 **Unit:** Seconds
 
 ```bash
@@ -453,9 +453,9 @@ These settings control how the AI agent operates, including retry behavior and t
 
 ### Maximum Tool Iterations
 
-**Variable:** `LOGAI_MAX_TOOL_ITERATIONS`  
-**Required:** No  
-**Default:** `10`  
+**Variable:** `LOGAI_MAX_TOOL_ITERATIONS`
+**Required:** No
+**Default:** `10`
 **Type:** Integer (1-100)
 
 ```bash
@@ -492,9 +492,9 @@ Total: 3-6 iterations (plus potential retries)
 
 ### Automatic Retry
 
-**Variable:** `LOGAI_AUTO_RETRY_ENABLED`  
-**Required:** No  
-**Default:** `true`  
+**Variable:** `LOGAI_AUTO_RETRY_ENABLED`
+**Required:** No
+**Default:** `true`
 **Type:** Boolean
 
 ```bash
@@ -536,9 +536,9 @@ User: "Find errors in the last 5 minutes"
 
 ### Intent Detection
 
-**Variable:** `LOGAI_INTENT_DETECTION_ENABLED`  
-**Required:** No  
-**Default:** `true`  
+**Variable:** `LOGAI_INTENT_DETECTION_ENABLED`
+**Required:** No
+**Default:** `true`
 **Type:** Boolean
 
 ```bash
@@ -571,9 +571,9 @@ Agent: [Actually calls search tool]
 
 ### Maximum Retry Attempts
 
-**Variable:** `LOGAI_MAX_RETRY_ATTEMPTS`  
-**Required:** No  
-**Default:** `3`  
+**Variable:** `LOGAI_MAX_RETRY_ATTEMPTS`
+**Required:** No
+**Default:** `3`
 **Type:** Integer (1-5)
 
 ```bash
@@ -592,9 +592,9 @@ Works in conjunction with `LOGAI_AUTO_RETRY_ENABLED`.
 
 ### Time Expansion Factor
 
-**Variable:** `LOGAI_TIME_EXPANSION_FACTOR`  
-**Required:** No  
-**Default:** `4.0`  
+**Variable:** `LOGAI_TIME_EXPANSION_FACTOR`
+**Required:** No
+**Default:** `4.0`
 **Type:** Float
 
 ```bash
@@ -616,9 +616,9 @@ LOGAI_TIME_EXPANSION_FACTOR=4.0
 
 ### Log Level
 
-**Variable:** `LOGAI_LOG_LEVEL`  
-**Required:** No  
-**Default:** `INFO`  
+**Variable:** `LOGAI_LOG_LEVEL`
+**Required:** No
+**Default:** `INFO`
 **Options:** `DEBUG`, `INFO`, `WARNING`, `ERROR`
 
 ```bash
@@ -653,9 +653,9 @@ LOGAI_LOG_LEVEL=INFO
 
 ### Log File
 
-**Variable:** `LOGAI_LOG_FILE`  
-**Required:** No  
-**Default:** None (logs to stderr only)  
+**Variable:** `LOGAI_LOG_FILE`
+**Required:** No
+**Default:** None (logs to stderr only)
 **Type:** Path
 
 ```bash

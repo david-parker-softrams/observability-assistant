@@ -16,7 +16,7 @@ Welcome to the LogAI user documentation! This guide will help you get the most o
   - `--aws-profile`, `--aws-region`
   - `logai auth` commands
   - Usage examples
-  
+
 - **[Runtime Commands Reference](runtime-commands.md)** - Slash commands available while running
   - `/help`, `/clear`, `/cache`, `/tools`
   - Command usage and examples

@@ -1,7 +1,7 @@
 # LogAI Tools Documentation Index
 
-**Prepared by**: Code Librarian (Hans)  
-**Date**: 2026-02-11  
+**Prepared by**: Code Librarian (Hans)
+**Date**: 2026-02-11
 **Status**: Complete
 
 ## 📚 Documentation Set

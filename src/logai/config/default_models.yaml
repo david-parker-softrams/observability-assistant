@@ -91,6 +91,23 @@ models:
     context_window: 16384
     encoding: cl100k_base
 
+  # Reasoning models with extended context
+  openthinker:32b:
+    context_window: 131072
+    encoding: cl100k_base
+
+  openthinker:
+    context_window: 131072
+    encoding: cl100k_base
+
+  deepseek-r1:32b:
+    context_window: 131072
+    encoding: cl100k_base
+
+  deepseek-r1:
+    context_window: 131072
+    encoding: cl100k_base
+
 # Default values for unknown models
 # These are used when no model pattern matches
 defaults:

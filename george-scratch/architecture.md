@@ -1,8 +1,8 @@
 # AI-Powered Observability Assistant - Architecture Design Document
 
-**Document Version:** 1.1  
-**Date:** February 6, 2026  
-**Author:** Sally (Senior Software Architect)  
+**Document Version:** 1.1
+**Date:** February 6, 2026
+**Author:** Saanvi (Senior Software Architect)
 **Status:** APPROVED - Ready for Implementation
 
 ---
@@ -205,28 +205,28 @@ dependencies = [
     # Core
     "textual>=0.47.0",          # TUI framework
     "rich>=13.7.0",              # Rich text formatting
-    
+
     # LLM Integration
     "litellm>=1.30.0",           # Unified LLM interface
     "anthropic>=0.18.0",         # Anthropic SDK (direct access if needed)
     "openai>=1.12.0",            # OpenAI SDK (direct access if needed)
-    
+
     # AWS
     "boto3>=1.34.0",             # AWS SDK
     "botocore>=1.34.0",          # AWS low-level SDK
-    
+
     # Configuration & Validation
     "pydantic>=2.6.0",           # Configuration validation
     "pydantic-settings>=2.2.0",  # Environment variable parsing
     "python-dotenv>=1.0.0",      # .env file support
-    
+
     # Utilities
     "structlog>=24.1.0",         # Structured logging
     "tenacity>=8.2.0",           # Retry logic
     "aiosqlite>=0.19.0",         # Async SQLite for caching
     "aiofiles>=23.2.0",          # Async file operations
     "httpx>=0.27.0",             # Async HTTP client
-    
+
     # Date/Time
     "python-dateutil>=2.8.0",    # Date parsing
     "pendulum>=3.0.0",           # Better datetime handling
@@ -593,13 +593,13 @@ class ToolDefinition(BaseModel):
 
 class BaseTool(ABC):
     """Abstract base class for all LLM tools."""
-    
+
     @property
     @abstractmethod
     def definition(self) -> ToolDefinition:
         """Return tool definition for LLM."""
         pass
-    
+
     @abstractmethod
     async def execute(self, **kwargs) -> dict[str, Any]:
         """Execute the tool with given parameters."""
@@ -788,26 +788,26 @@ from .base import BaseTool
 
 class ToolRegistry:
     """Registry for managing available tools."""
-    
+
     _tools: dict[str, BaseTool] = {}
-    
+
     @classmethod
     def register(cls, tool_class: Type[BaseTool]) -> Type[BaseTool]:
         """Decorator to register a tool."""
         instance = tool_class()
         cls._tools[instance.definition.name] = instance
         return tool_class
-    
+
     @classmethod
     def get_tool(cls, name: str) -> BaseTool | None:
         """Get a tool by name."""
         return cls._tools.get(name)
-    
+
     @classmethod
     def get_all_definitions(cls) -> list[dict]:
         """Get all tool definitions for LLM."""
         return [tool.definition.model_dump() for tool in cls._tools.values()]
-    
+
     @classmethod
     async def execute(cls, name: str, **kwargs) -> dict:
         """Execute a tool by name."""
@@ -824,47 +824,47 @@ class ToolRegistry:
 
 class LLMOrchestrator:
     """Coordinates LLM interactions with tool execution."""
-    
+
     MAX_TOOL_ITERATIONS = 10  # Prevent infinite loops
-    
+
     async def process_message(
-        self, 
+        self,
         user_message: str,
         conversation_history: list[dict]
     ) -> AsyncGenerator[str, None]:
         """Process a user message, handling tool calls."""
-        
+
         messages = conversation_history + [
             {"role": "user", "content": user_message}
         ]
-        
+
         iteration = 0
         while iteration < self.MAX_TOOL_ITERATIONS:
             iteration += 1
-            
+
             # Get LLM response (streaming)
             response = await self.llm_provider.chat(
                 messages=messages,
                 tools=ToolRegistry.get_all_definitions(),
                 stream=True
             )
-            
+
             # Check for tool calls
             if response.tool_calls:
                 # Execute tools
                 tool_results = await self._execute_tool_calls(response.tool_calls)
-                
+
                 # Add assistant message and tool results to conversation
                 messages.append({"role": "assistant", "content": response.content, "tool_calls": response.tool_calls})
                 messages.extend(tool_results)
-                
+
                 # Continue loop - LLM will process tool results
                 continue
-            
+
             # No tool calls - stream final response
             async for chunk in response.stream():
                 yield chunk
-            
+
             break
 ```
 
@@ -975,12 +975,12 @@ def generate_cache_key(
     **kwargs
 ) -> str:
     """Generate deterministic cache key."""
-    
+
     # Normalize time to minute boundaries for better hit rate
     # (logs don't change that fast)
     start_normalized = (start_time // 60000) * 60000
     end_normalized = (end_time // 60000) * 60000
-    
+
     key_parts = {
         "type": query_type,
         "log_group": log_group,
@@ -989,7 +989,7 @@ def generate_cache_key(
         "filter": filter_pattern,
         **{k: v for k, v in sorted(kwargs.items())}
     }
-    
+
     key_string = json.dumps(key_parts, sort_keys=True)
     return hashlib.sha256(key_string.encode()).hexdigest()
 ```
@@ -1006,22 +1006,22 @@ def generate_cache_key(
 ```python
 def calculate_ttl(query_type: str, end_time: int) -> int:
     """Calculate TTL based on query type and recency."""
-    
+
     now = int(time.time() * 1000)
     age_minutes = (now - end_time) / 60000
-    
+
     if query_type == "list_log_groups":
         return 15 * 60  # 15 minutes
-    
+
     if query_type in ("fetch_logs", "search_logs"):
         if age_minutes < 5:
             return 60  # 1 minute for very recent data
         else:
             return 24 * 60 * 60  # 24 hours for historical
-    
+
     if query_type == "get_log_statistics":
         return 5 * 60  # 5 minutes
-    
+
     return 60 * 60  # 1 hour default
 ```
 
@@ -1040,16 +1040,16 @@ CACHE_CLEANUP_INTERVAL = 300     # Seconds between cleanup runs
 ```python
 async def evict_if_needed(self):
     """Evict entries if cache exceeds limits."""
-    
+
     current_size = await self.get_cache_size()
     entry_count = await self.get_entry_count()
-    
+
     if current_size <= CACHE_MAX_SIZE_MB * 1024 * 1024 and entry_count <= CACHE_MAX_ENTRIES:
         return
-    
+
     # Delete expired entries first
     await self.delete_expired()
-    
+
     # If still over limit, evict by LRU
     while await self.get_cache_size() > CACHE_MAX_SIZE_MB * 1024 * 1024 * 0.9:  # Target 90%
         entries = await self.get_lru_entries(CACHE_EVICTION_BATCH)
@@ -1085,7 +1085,7 @@ from botocore.config import Config
 
 class CloudWatchSource:
     """AWS CloudWatch data source implementation."""
-    
+
     def __init__(self, settings: CloudWatchSettings):
         self.config = Config(
             retries={
@@ -1095,7 +1095,7 @@ class CloudWatchSource:
             connect_timeout=5,
             read_timeout=30
         )
-        
+
         # boto3 will use standard credential chain:
         # 1. Environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
         # 2. Shared credential file (~/.aws/credentials)
@@ -1141,7 +1141,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 class CloudWatchSource(BaseDataSource):
     """CloudWatch Logs data source."""
-    
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=10)
@@ -1152,12 +1152,12 @@ class CloudWatchSource(BaseDataSource):
         limit: int = 50
     ) -> list[dict]:
         """List available log groups."""
-        
+
         paginator = self.client.get_paginator('describe_log_groups')
         params = {}
         if prefix:
             params['logGroupNamePrefix'] = prefix
-        
+
         log_groups = []
         async for page in paginator.paginate(**params):
             for lg in page['logGroups']:
@@ -1169,9 +1169,9 @@ class CloudWatchSource(BaseDataSource):
                 })
                 if len(log_groups) >= limit:
                     return log_groups
-        
+
         return log_groups
-    
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=10)
@@ -1186,22 +1186,22 @@ class CloudWatchSource(BaseDataSource):
         limit: int = 1000
     ) -> list[dict]:
         """Fetch log events from CloudWatch."""
-        
+
         params = {
             'logGroupName': log_group,
             'startTime': start_time,
             'endTime': end_time,
             'limit': min(limit, 10000),  # API max
         }
-        
+
         if filter_pattern:
             params['filterPattern'] = filter_pattern
         if log_stream_prefix:
             params['logStreamNamePrefix'] = log_stream_prefix
-        
+
         events = []
         paginator = self.client.get_paginator('filter_log_events')
-        
+
         try:
             for page in paginator.paginate(**params):
                 for event in page['events']:
@@ -1220,7 +1220,7 @@ class CloudWatchSource(BaseDataSource):
             elif error_code == 'ThrottlingException':
                 raise RateLimitError("CloudWatch rate limit exceeded")
             raise
-        
+
         return events
 ```
 
@@ -1336,7 +1336,7 @@ class SanitizationResult:
 
 class LogSanitizer:
     """Sanitizes log data before sending to LLM."""
-    
+
     DEFAULT_PATTERNS: list[SanitizationPattern] = [
         SanitizationPattern(
             name="email",
@@ -1389,22 +1389,22 @@ class LogSanitizer:
             replacement="[PRIVATE_KEY_REDACTED]"
         ),
     ]
-    
+
     def __init__(self, settings: SanitizationSettings):
         self.enabled = settings.enabled
         self.patterns = self._build_patterns(settings)
         self.log_redactions = settings.log_redactions
-    
+
     def _build_patterns(self, settings: SanitizationSettings) -> list[SanitizationPattern]:
         """Build pattern list based on settings."""
         patterns = []
-        
+
         for pattern in self.DEFAULT_PATTERNS:
             # Check if pattern is disabled in settings
             if pattern.name in settings.disabled_patterns:
                 continue
             patterns.append(pattern)
-        
+
         # Add custom patterns from settings
         for custom in settings.custom_patterns:
             patterns.append(SanitizationPattern(
@@ -1412,9 +1412,9 @@ class LogSanitizer:
                 pattern=re.compile(custom.pattern),
                 replacement=custom.replacement
             ))
-        
+
         return patterns
-    
+
     def sanitize(self, text: str) -> SanitizationResult:
         """Sanitize text, removing PII and sensitive data."""
         if not self.enabled:
@@ -1423,31 +1423,31 @@ class LogSanitizer:
                 redaction_count=0,
                 redactions={}
             )
-        
+
         redactions: dict[str, int] = {}
         result = text
-        
+
         for pattern in self.patterns:
             matches = pattern.pattern.findall(result)
             if matches:
                 redactions[pattern.name] = len(matches)
                 result = pattern.pattern.sub(pattern.replacement, result)
-        
+
         total_redactions = sum(redactions.values())
-        
+
         if self.log_redactions and total_redactions > 0:
             logger.info(
                 "Sanitization complete",
                 total_redactions=total_redactions,
                 by_type=redactions
             )
-        
+
         return SanitizationResult(
             sanitized_text=result,
             redaction_count=total_redactions,
             redactions=redactions
         )
-    
+
     def sanitize_log_events(self, events: list[dict]) -> list[dict]:
         """Sanitize a list of log events."""
         sanitized = []
@@ -1474,19 +1474,19 @@ class CustomPattern(BaseModel):
 class SanitizationSettings(BaseSettings):
     """PII Sanitization configuration."""
     model_config = SettingsConfigDict(env_prefix='LOGAI_SANITIZATION_')
-    
+
     # Master toggle - DEFAULT IS ENABLED
     enabled: bool = True
-    
+
     # Patterns to disable (by name)
     disabled_patterns: list[str] = []
-    
+
     # Custom patterns to add
     custom_patterns: list[CustomPattern] = []
-    
+
     # Log redaction statistics
     log_redactions: bool = True
-    
+
     # Show redaction summary to user
     show_summary: bool = True
 ```
@@ -1504,7 +1504,7 @@ class SanitizationSettings(BaseSettings):
 LOGAI_SANITIZATION_ENABLED=true
 
 # Disable specific patterns (comma-separated)
-# Options: email, ipv4, credit_card, ssn, phone_us, aws_access_key, 
+# Options: email, ipv4, credit_card, ssn, phone_us, aws_access_key,
 #          aws_secret_key, generic_api_key, bearer_token, private_key
 LOGAI_SANITIZATION_DISABLED_PATTERNS=
 
@@ -1522,19 +1522,19 @@ LOGAI_SANITIZATION_SHOW_SUMMARY=true
 
 class LLMOrchestrator:
     """Coordinates LLM interactions with tool execution."""
-    
+
     def __init__(self, settings: Settings):
         self.sanitizer = LogSanitizer(settings.sanitization)
         # ...
-    
+
     async def _execute_tool_calls(self, tool_calls: list[dict]) -> list[dict]:
         """Execute tools and sanitize results before returning to LLM."""
         results = []
-        
+
         for call in tool_calls:
             # Execute the tool
             raw_result = await ToolRegistry.execute(call['name'], **call['arguments'])
-            
+
             # Sanitize log data in results
             if 'events' in raw_result:
                 raw_result['events'] = self.sanitizer.sanitize_log_events(
@@ -1544,13 +1544,13 @@ class LLMOrchestrator:
                 raw_result['logs'] = self.sanitizer.sanitize_log_events(
                     raw_result['logs']
                 )
-            
+
             results.append({
                 "role": "tool",
                 "tool_call_id": call['id'],
                 "content": json.dumps(raw_result)
             })
-        
+
         return results
 ```
 
@@ -1570,13 +1570,13 @@ When sanitization is enabled and redactions occur, the TUI shows a brief summary
 # tests/unit/test_sanitizer.py
 
 class TestLogSanitizer:
-    
+
     def test_sanitizes_email(self):
         sanitizer = LogSanitizer(SanitizationSettings())
         result = sanitizer.sanitize("Contact user@example.com for help")
         assert result.sanitized_text == "Contact [EMAIL_REDACTED] for help"
         assert result.redactions == {"email": 1}
-    
+
     def test_sanitizes_multiple_patterns(self):
         sanitizer = LogSanitizer(SanitizationSettings())
         text = "User user@test.com from 192.168.1.1 with key AKIAIOSFODNN7EXAMPLE"
@@ -1585,7 +1585,7 @@ class TestLogSanitizer:
         assert "[IP_REDACTED]" in result.sanitized_text
         assert "[AWS_KEY_REDACTED]" in result.sanitized_text
         assert result.redaction_count == 3
-    
+
     def test_disabled_sanitization(self):
         settings = SanitizationSettings(enabled=False)
         sanitizer = LogSanitizer(settings)
@@ -1593,14 +1593,14 @@ class TestLogSanitizer:
         result = sanitizer.sanitize(text)
         assert result.sanitized_text == text
         assert result.redaction_count == 0
-    
+
     def test_disabled_pattern(self):
         settings = SanitizationSettings(disabled_patterns=["email"])
         sanitizer = LogSanitizer(settings)
         result = sanitizer.sanitize("user@example.com from 192.168.1.1")
         assert "user@example.com" in result.sanitized_text  # Not redacted
         assert "[IP_REDACTED]" in result.sanitized_text      # Still redacted
-    
+
     def test_custom_pattern(self):
         settings = SanitizationSettings(
             custom_patterns=[
@@ -1648,19 +1648,19 @@ class DataSourceCapabilities(BaseModel):
 
 class BaseDataSource(ABC):
     """Abstract base class for all data sources."""
-    
+
     @property
     @abstractmethod
     def name(self) -> str:
         """Unique identifier for this source."""
         pass
-    
+
     @property
     @abstractmethod
     def capabilities(self) -> DataSourceCapabilities:
         """Declare source capabilities."""
         pass
-    
+
     @abstractmethod
     async def list_log_groups(
         self,
@@ -1669,7 +1669,7 @@ class BaseDataSource(ABC):
     ) -> list[dict]:
         """List available log groups/sources."""
         pass
-    
+
     @abstractmethod
     async def fetch_logs(
         self,
@@ -1681,7 +1681,7 @@ class BaseDataSource(ABC):
     ) -> list[LogEvent]:
         """Fetch log events."""
         pass
-    
+
     @abstractmethod
     async def health_check(self) -> bool:
         """Check if source is accessible."""
@@ -1695,10 +1695,10 @@ class BaseDataSource(ABC):
 
 class DataSourceRegistry:
     """Registry for managing data sources."""
-    
+
     _sources: dict[str, type[BaseDataSource]] = {}
     _instances: dict[str, BaseDataSource] = {}
-    
+
     @classmethod
     def register(cls, name: str):
         """Decorator to register a data source class."""
@@ -1706,7 +1706,7 @@ class DataSourceRegistry:
             cls._sources[name] = source_class
             return source_class
         return decorator
-    
+
     @classmethod
     def get(cls, name: str, settings: Any) -> BaseDataSource:
         """Get or create a data source instance."""
@@ -1715,7 +1715,7 @@ class DataSourceRegistry:
                 raise ValueError(f"Unknown data source: {name}")
             cls._instances[name] = cls._sources[name](settings)
         return cls._instances[name]
-    
+
     @classmethod
     def available_sources(cls) -> list[str]:
         """List registered data source names."""
@@ -1737,11 +1737,11 @@ To add Splunk support:
 
 @DataSourceRegistry.register("splunk")
 class SplunkSource(BaseDataSource):
-    
+
     @property
     def name(self) -> str:
         return "splunk"
-    
+
     @property
     def capabilities(self) -> DataSourceCapabilities:
         return DataSourceCapabilities(
@@ -1749,7 +1749,7 @@ class SplunkSource(BaseDataSource):
             supports_insights_queries=True,
             max_time_range_hours=24 * 30  # 30 days
         )
-    
+
     async def fetch_logs(self, ...) -> list[LogEvent]:
         # Splunk-specific implementation
         # Translate filter_pattern to Splunk SPL
@@ -1773,22 +1773,22 @@ class LLMResponse(BaseModel):
 
 class BaseLLMProvider(ABC):
     """Abstract base class for LLM providers."""
-    
+
     @property
     @abstractmethod
     def name(self) -> str:
         pass
-    
+
     @property
     @abstractmethod
     def supports_streaming(self) -> bool:
         pass
-    
+
     @property
     @abstractmethod
     def supports_function_calling(self) -> bool:
         pass
-    
+
     @abstractmethod
     async def chat(
         self,
@@ -1803,7 +1803,7 @@ class BaseLLMProvider(ABC):
 class LLMProviderRegistry:
     """Registry for LLM providers."""
     _providers: dict[str, type[BaseLLMProvider]] = {}
-    
+
     @classmethod
     def register(cls, name: str):
         def decorator(provider_class: type[BaseLLMProvider]):
@@ -1828,7 +1828,7 @@ class Settings(BaseSettings):
     data_sources: dict[str, DataSourceSettings] = {
         "cloudwatch": DataSourceSettings(type="cloudwatch")
     }
-    
+
     # Active sources for queries
     active_sources: list[str] = ["cloudwatch"]
 ```
@@ -1921,11 +1921,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class LLMSettings(BaseSettings):
     """LLM provider configuration."""
     model_config = SettingsConfigDict(env_prefix='LOGAI_LLM_')
-    
+
     provider: str = "anthropic"  # MVP: Anthropic only
     max_tokens: int = 4096
     temperature: float = 0.1
-    
+
     @field_validator('provider')
     @classmethod
     def validate_provider(cls, v: str) -> str:
@@ -1937,26 +1937,26 @@ class LLMSettings(BaseSettings):
 class AnthropicSettings(BaseSettings):
     """Anthropic-specific settings."""
     model_config = SettingsConfigDict(env_prefix='ANTHROPIC_')
-    
+
     api_key: str = Field(..., description="Anthropic API key")
     model: str = "claude-sonnet-4-20250514"
 
 class CloudWatchSettings(BaseSettings):
     """CloudWatch configuration."""
     model_config = SettingsConfigDict(env_prefix='LOGAI_CLOUDWATCH_')
-    
+
     default_limit: int = 100
     max_results: int = 10000
 
 class CacheSettings(BaseSettings):
     """Cache configuration."""
     model_config = SettingsConfigDict(env_prefix='LOGAI_CACHE_')
-    
+
     dir: str = "~/.logai/cache"
     max_size_mb: int = 500
     ttl_hours: int = 24
     enabled: bool = True
-    
+
     @field_validator('dir')
     @classmethod
     def expand_path(cls, v: str) -> str:
@@ -1965,7 +1965,7 @@ class CacheSettings(BaseSettings):
 class AppSettings(BaseSettings):
     """Application-wide settings."""
     model_config = SettingsConfigDict(env_prefix='LOGAI_')
-    
+
     log_level: str = "INFO"
     log_file: str = "~/.logai/logs/app.log"
     theme: str = "dark"
@@ -1974,14 +1974,14 @@ class AppSettings(BaseSettings):
 
 class Settings(BaseSettings):
     """Root settings aggregating all configuration."""
-    
+
     llm: LLMSettings = Field(default_factory=LLMSettings)
     anthropic: AnthropicSettings = Field(default_factory=AnthropicSettings)
     cloudwatch: CloudWatchSettings = Field(default_factory=CloudWatchSettings)
     cache: CacheSettings = Field(default_factory=CacheSettings)
     sanitization: SanitizationSettings = Field(default_factory=SanitizationSettings)
     app: AppSettings = Field(default_factory=AppSettings)
-    
+
     @classmethod
     def load(cls) -> "Settings":
         """Load settings from environment and .env file."""
@@ -1997,12 +1997,12 @@ class Settings(BaseSettings):
 
 class ConfigValidator:
     """Validates configuration at startup."""
-    
+
     def __init__(self, settings: Settings):
         self.settings = settings
         self.errors: list[str] = []
         self.warnings: list[str] = []
-    
+
     def validate(self) -> bool:
         """Run all validations. Returns True if valid."""
         self._validate_llm()
@@ -2010,12 +2010,12 @@ class ConfigValidator:
         self._validate_cache()
         self._validate_sanitization()
         return len(self.errors) == 0
-    
+
     def _validate_llm(self):
         """Validate LLM configuration."""
         if not self.settings.anthropic.api_key:
             self.errors.append("ANTHROPIC_API_KEY is required")
-    
+
     def _validate_aws(self):
         """Validate AWS configuration."""
         # boto3 handles credential chain, just warn if none found
@@ -2027,7 +2027,7 @@ class ConfigValidator:
                 "No AWS credentials found. Set AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY "
                 "or AWS_PROFILE, or configure ~/.aws/credentials"
             )
-    
+
     def _validate_cache(self):
         """Validate cache directory."""
         cache_dir = Path(self.settings.cache.dir)
@@ -2035,7 +2035,7 @@ class ConfigValidator:
             cache_dir.mkdir(parents=True, exist_ok=True)
         except PermissionError:
             self.errors.append(f"Cannot create cache directory: {cache_dir}")
-    
+
     def _validate_sanitization(self):
         """Validate sanitization settings."""
         if not self.settings.sanitization.enabled:
@@ -2057,7 +2057,7 @@ llm:
 
 cloudwatch:
   default_limit: 200
-  
+
 cache:
   max_size_mb: 1000
 
@@ -2065,7 +2065,7 @@ sanitization:
   enabled: true
   disabled_patterns:
     - phone_us  # Don't redact phone numbers
-  
+
 # Custom log group aliases for convenience
 aliases:
   auth: /aws/lambda/auth-service-prod
@@ -2083,7 +2083,7 @@ aliases:
 
 class LogAIError(Exception):
     """Base exception for all LogAI errors."""
-    
+
     def __init__(self, message: str, user_message: str | None = None):
         super().__init__(message)
         self.user_message = user_message or message
@@ -2140,7 +2140,7 @@ class CacheError(LogAIError):
 
 class ErrorHandler:
     """Centralized error handling with user-friendly messages."""
-    
+
     ERROR_MESSAGES = {
         LLMAuthenticationError: "Authentication failed. Please check your API key.",
         LLMRateLimitError: "Rate limit reached. Waiting before retry...",
@@ -2148,29 +2148,29 @@ class ErrorHandler:
         AccessDeniedError: "Access denied. Please check your AWS permissions.",
         RateLimitError: "AWS rate limit reached. Retrying with backoff...",
     }
-    
+
     async def handle(
-        self, 
-        error: Exception, 
+        self,
+        error: Exception,
         context: dict | None = None
     ) -> str:
         """Handle error and return user-friendly message."""
-        
+
         # Log full error for debugging
         logger.exception("Error occurred", extra={
             "error_type": type(error).__name__,
             "context": context
         })
-        
+
         # Get user-friendly message
         for error_type, message in self.ERROR_MESSAGES.items():
             if isinstance(error, error_type):
                 return message
-        
+
         # Generic fallback
         if isinstance(error, LogAIError):
             return error.user_message
-        
+
         return "An unexpected error occurred. Check logs for details."
 ```
 
@@ -2184,11 +2184,11 @@ from pathlib import Path
 
 def setup_logging(settings: AppSettings) -> None:
     """Configure structured logging."""
-    
+
     # Ensure log directory exists
     log_file = Path(settings.log_file).expanduser()
     log_file.parent.mkdir(parents=True, exist_ok=True)
-    
+
     # Configure structlog
     structlog.configure(
         processors=[
@@ -2197,7 +2197,7 @@ def setup_logging(settings: AppSettings) -> None:
             structlog.processors.TimeStamper(fmt="iso"),
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
-            structlog.processors.JSONRenderer() if not settings.debug else 
+            structlog.processors.JSONRenderer() if not settings.debug else
                 structlog.dev.ConsoleRenderer()
         ],
         wrapper_class=structlog.make_filtering_bound_logger(
@@ -2207,7 +2207,7 @@ def setup_logging(settings: AppSettings) -> None:
         logger_factory=structlog.PrintLoggerFactory(),
         cache_logger_on_first_use=True,
     )
-    
+
     # File handler for JSON logs
     file_handler = logging.FileHandler(log_file)
     file_handler.setFormatter(logging.Formatter('%(message)s'))
@@ -2238,18 +2238,18 @@ async def fetch_logs(...):
 ```python
 # In TUI application
 class ChatScreen(Screen):
-    
+
     async def handle_error(self, error: Exception):
         """Display error to user in chat."""
         message = await self.error_handler.handle(error)
-        
+
         # Show error in chat with appropriate styling
         self.add_message(
             role="system",
             content=f"**Error:** {message}",
             style="error"  # Red/warning styling
         )
-        
+
         # If recoverable, suggest next steps
         if isinstance(error, LogGroupNotFoundError):
             self.add_message(
@@ -2301,16 +2301,16 @@ async def cache_manager(tmp_path):
     return CacheManager(store)
 
 class TestCacheManager:
-    
+
     async def test_cache_miss_returns_none(self, cache_manager):
         result = await cache_manager.get("nonexistent-key")
         assert result is None
-    
+
     async def test_cache_hit_returns_data(self, cache_manager):
         await cache_manager.set("test-key", {"data": "value"}, ttl=3600)
         result = await cache_manager.get("test-key")
         assert result == {"data": "value"}
-    
+
     async def test_expired_entry_returns_none(self, cache_manager, freezer):
         await cache_manager.set("test-key", {"data": "value"}, ttl=60)
         freezer.tick(delta=timedelta(seconds=120))
@@ -2321,23 +2321,23 @@ class TestCacheManager:
 # tests/unit/test_tools.py
 
 class TestCloudWatchTool:
-    
+
     async def test_fetch_logs_validates_log_group(self):
         tool = FetchLogsTool(mock_cloudwatch)
-        
+
         with pytest.raises(ValidationError) as exc:
             await tool.execute(log_group="", start_time="1h ago")
-        
+
         assert "log_group" in str(exc.value)
-    
+
     async def test_fetch_logs_parses_relative_time(self):
         tool = FetchLogsTool(mock_cloudwatch)
-        
+
         result = await tool.execute(
             log_group="/aws/test",
             start_time="1h ago"
         )
-        
+
         # Verify correct epoch calculation
         mock_cloudwatch.fetch_logs.assert_called_once()
         call_args = mock_cloudwatch.fetch_logs.call_args
@@ -2372,14 +2372,14 @@ def aws_credentials():
 def cloudwatch_with_data(aws_credentials):
     """Create CloudWatch with test data."""
     client = boto3.client('logs', region_name='us-east-1')
-    
+
     # Create test log group and stream
     client.create_log_group(logGroupName='/aws/test/myapp')
     client.create_log_stream(
         logGroupName='/aws/test/myapp',
         logStreamName='test-stream'
     )
-    
+
     # Add test log events
     client.put_log_events(
         logGroupName='/aws/test/myapp',
@@ -2389,34 +2389,34 @@ def cloudwatch_with_data(aws_credentials):
             {'timestamp': 2000, 'message': 'ERROR: Test error'},
         ]
     )
-    
+
     return client
 
 @mock_logs
 class TestCloudWatchIntegration:
-    
+
     async def test_fetch_logs_returns_events(self, cloudwatch_with_data):
         source = CloudWatchSource(CloudWatchSettings())
-        
+
         events = await source.fetch_logs(
             log_group='/aws/test/myapp',
             start_time=0,
             end_time=10000
         )
-        
+
         assert len(events) == 2
         assert events[0].message == 'INFO: Test message'
-    
+
     async def test_filter_pattern_works(self, cloudwatch_with_data):
         source = CloudWatchSource(CloudWatchSettings())
-        
+
         events = await source.fetch_logs(
             log_group='/aws/test/myapp',
             start_time=0,
             end_time=10000,
             filter_pattern='ERROR'
         )
-        
+
         assert len(events) == 1
         assert 'ERROR' in events[0].message
 
@@ -2440,14 +2440,14 @@ def mock_anthropic():
         yield respx_mock
 
 class TestLLMIntegration:
-    
+
     async def test_chat_returns_response(self, mock_anthropic):
         provider = AnthropicProvider(AnthropicSettings(api_key="test"))
-        
+
         response = await provider.chat(
             messages=[{"role": "user", "content": "Hello"}]
         )
-        
+
         assert "analysis" in response.content.lower()
 ```
 
@@ -2594,13 +2594,13 @@ class Logai < Formula
   url "https://github.com/yourorg/logai/archive/v0.1.0.tar.gz"
   sha256 "..."
   license "MIT"
-  
+
   depends_on "python@3.11"
-  
+
   def install
     virtualenv_install_with_resources
   end
-  
+
   test do
     system "#{bin}/logai", "--version"
   end
@@ -2635,18 +2635,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      
+
       - name: Install build tools
         run: pip install build twine
-      
+
       - name: Build package
         run: python -m build
-      
+
       - name: Publish to PyPI
         env:
           TWINE_USERNAME: __token__
@@ -2733,8 +2733,8 @@ This section addresses the open questions from the requirements document.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 1.0 | 2026-02-06 | Sally (Architect) | Initial architecture document |
-| 1.1 | 2026-02-06 | Sally (Architect) | Updated per stakeholder decisions: renamed to LogAI, added PII sanitization layer, clarified MVP scope, confirmed LiteLLM |
+| 1.0 | 2026-02-06 | Saanvi (Architect) | Initial architecture document |
+| 1.1 | 2026-02-06 | Saanvi (Architect) | Updated per stakeholder decisions: renamed to LogAI, added PII sanitization layer, clarified MVP scope, confirmed LiteLLM |
 
 ---
 
@@ -2747,4 +2747,4 @@ This section addresses the open questions from the requirements document.
 
 ---
 
-*Document prepared by Sally, Senior Software Architect*
+*Document prepared by Saanvi, Senior Software Architect*

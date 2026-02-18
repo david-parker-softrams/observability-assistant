@@ -1,16 +1,16 @@
 # GitHub Copilot 403 Error - Investigation & Fix
 
-**Date:** February 11, 2026  
-**Engineer:** Jackie (Senior Software Engineer)  
+**Date:** February 11, 2026
+**Engineer:** Jackie (Senior Software Engineer)
 **Status:** ✅ FIXED - Ready for Review
 
 ---
 
 ## Executive Summary
 
-**Problem:** Intermittent 403 Forbidden errors when calling GitHub Copilot API  
-**Root Cause:** Sending `stream: false` parameter in request body  
-**Solution:** Omit `stream` parameter for non-streaming requests; only send `stream: true` for streaming  
+**Problem:** Intermittent 403 Forbidden errors when calling GitHub Copilot API
+**Root Cause:** Sending `stream: false` parameter in request body
+**Solution:** Omit `stream` parameter for non-streaming requests; only send `stream: true` for streaming
 **Result:** Tests now pass consistently (3/5 passed, 2 failed due to rate limiting only)
 
 ---
@@ -164,7 +164,7 @@ self._http_client = httpx.AsyncClient(
 - **Option C:** Document they're present and harmless → ✅ **CHOSEN**
 - **Option D:** Use different HTTP library → Overkill (httpx works great)
 
-**Recommendation:** 
+**Recommendation:**
 1. Remove misleading comment on line 142 about headers causing 403
 2. Keep `headers={}` (harmless) or remove it (also harmless)
 3. Add comment explaining httpx default headers are acceptable
@@ -229,7 +229,7 @@ GitHub's API uses 403 Forbidden for rate limiting instead of 429 Too Many Reques
 
 Several common OpenAI parameters are rejected:
 - ❌ `temperature` → 403 Forbidden
-- ❌ `max_tokens` → 403 Forbidden  
+- ❌ `max_tokens` → 403 Forbidden
 - ✅ `top_p` → Accepted
 - ✅ `stream` (when true) → Accepted
 
@@ -452,15 +452,15 @@ My testing shows:
 ## Questions for George
 
 ### About OpenCode Discrepancy
-**Q:** Should I ask Hans to re-investigate OpenCode using network traffic inspection?  
+**Q:** Should I ask Hans to re-investigate OpenCode using network traffic inspection?
 **Context:** His documentation shows parameters that cause 403 errors in my testing.
 
 ### About Rate Limiting
-**Q:** Should I implement retry logic with exponential backoff for 403 errors?  
+**Q:** Should I implement retry logic with exponential backoff for 403 errors?
 **Context:** Some 403s are rate limits, not auth errors. Current code treats all 403s as auth failures.
 
 ### About Temperature Parameter
-**Q:** Should we expose `temperature` in the provider __init__ at all?  
+**Q:** Should we expose `temperature` in the provider __init__ at all?
 **Context:** We accept it as a parameter but never use it. This is confusing for users.
 
 **Current code:**
@@ -472,7 +472,7 @@ def __init__(self, temperature: float = 0.7, ...):
 **Recommendation:** Remove it entirely or document that it's ignored.
 
 ### About Max Tokens
-**Q:** Same question for `max_tokens` - should we remove it from the API?  
+**Q:** Same question for `max_tokens` - should we remove it from the API?
 **Context:** Same issue - we accept it but can't use it.
 
 ---
@@ -502,10 +502,10 @@ def __init__(self, temperature: float = 0.7, ...):
 3. OpenCode documentation may not reflect actual API behavior (Hans should re-investigate)
 4. Rate limiting causes intermittent failures (not a code issue)
 
-**Ready for code review by Billy.**
+**Ready for code review by Han-Ron.**
 
 ---
 
-**Prepared by:** Jackie (Senior Software Engineer)  
-**Date:** February 11, 2026  
+**Prepared by:** Jackie (Senior Software Engineer)
+**Date:** February 11, 2026
 **Status:** Ready for Review

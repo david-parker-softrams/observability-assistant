@@ -23,7 +23,7 @@ I've successfully implemented expandable/collapsible results in the tool sidebar
 ### New Methods
 - `_add_result_node()` - Routes to appropriate formatter
 - `_add_log_groups_node()` - Creates expandable log group lists
-- `_add_log_events_node()` - Creates expandable log event lists  
+- `_add_log_events_node()` - Creates expandable log event lists
 - `_add_single_event()` - Formats individual log events
 
 ### Removed Methods
@@ -145,7 +145,7 @@ The implementation is complete and tested. All success criteria met:
 - ✅ Performance is good with 50+ items
 - ✅ No breaking changes to existing code
 
-**George**: This is ready for Billy's code review whenever you'd like!
+**George**: This is ready for Han-Ron's code review whenever you'd like!
 
 ## Files to Review
 

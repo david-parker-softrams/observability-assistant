@@ -25,7 +25,7 @@ class ToolCallsSidebar(Static):
     ToolCallsSidebar {
         width: 28;
         min-width: 24;
-        max-width: 35;
+        max-width: 70;
         height: 1fr;
         background: $panel;
         border-left: solid $primary;
@@ -83,7 +83,7 @@ class ToolCallsSidebar(Static):
 
     def on_mount(self) -> None:
         """Set up the sidebar when mounted."""
-        self._tree = self.query_one("#tool-tree", Tree[Any])
+        self._tree = self.query_one("#tool-tree", Tree)
         self._tree.show_root = False
         self._update_empty_state()
 
@@ -126,7 +126,6 @@ class ToolCallsSidebar(Static):
             node = self._tree.root.add(label, expand=False)
 
             # Add status
-            status_class = f"status-{record.status}"
             node.add_leaf(f"Status: {record.status}")
 
             # Add timestamp
@@ -167,15 +166,13 @@ class ToolCallsSidebar(Static):
         if not args:
             return "{}"
 
-        # Show key names and full values without truncation
+        # Show all arguments with full values without truncation
         parts = []
-        for key, value in list(args.items())[:3]:  # Max 3 args shown
+        for key, value in args.items():
             val_str = str(value)
             parts.append(f"{key}={val_str}")
 
         result = ", ".join(parts)
-        if len(args) > 3:
-            result += f", +{len(args) - 3} more"
 
         return result
 

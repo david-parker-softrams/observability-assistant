@@ -1,9 +1,8 @@
 """Tests for time parsing and conversion utilities."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
-
 from logai.utils import (
     TimeParseError,
     calculate_time_range,
@@ -23,7 +22,7 @@ class TestParseRelativeTime:
     def test_parse_now(self) -> None:
         """Test parsing 'now'."""
         result = parse_relative_time("now")
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Should be within 1 second of current time
         assert abs((result - now).total_seconds()) < 1
@@ -31,7 +30,7 @@ class TestParseRelativeTime:
     def test_parse_yesterday(self) -> None:
         """Test parsing 'yesterday'."""
         result = parse_relative_time("yesterday")
-        expected = datetime.now(timezone.utc) - timedelta(days=1)
+        expected = datetime.now(UTC) - timedelta(days=1)
 
         # Should be within 1 second
         assert abs((result - expected).total_seconds()) < 1
@@ -39,35 +38,35 @@ class TestParseRelativeTime:
     def test_parse_minutes_ago(self) -> None:
         """Test parsing minutes ago."""
         result = parse_relative_time("30m ago")
-        expected = datetime.now(timezone.utc) - timedelta(minutes=30)
+        expected = datetime.now(UTC) - timedelta(minutes=30)
 
         assert abs((result - expected).total_seconds()) < 1
 
     def test_parse_hours_ago(self) -> None:
         """Test parsing hours ago."""
         result = parse_relative_time("2h ago")
-        expected = datetime.now(timezone.utc) - timedelta(hours=2)
+        expected = datetime.now(UTC) - timedelta(hours=2)
 
         assert abs((result - expected).total_seconds()) < 1
 
     def test_parse_days_ago(self) -> None:
         """Test parsing days ago."""
         result = parse_relative_time("3d ago")
-        expected = datetime.now(timezone.utc) - timedelta(days=3)
+        expected = datetime.now(UTC) - timedelta(days=3)
 
         assert abs((result - expected).total_seconds()) < 1
 
     def test_parse_weeks_ago(self) -> None:
         """Test parsing weeks ago."""
         result = parse_relative_time("1w ago")
-        expected = datetime.now(timezone.utc) - timedelta(weeks=1)
+        expected = datetime.now(UTC) - timedelta(weeks=1)
 
         assert abs((result - expected).total_seconds()) < 1
 
     def test_parse_with_whitespace(self) -> None:
         """Test parsing with extra whitespace."""
         result = parse_relative_time("  5m  ago  ")
-        expected = datetime.now(timezone.utc) - timedelta(minutes=5)
+        expected = datetime.now(UTC) - timedelta(minutes=5)
 
         assert abs((result - expected).total_seconds()) < 1
 
@@ -97,7 +96,7 @@ class TestParseISO8601:
         assert result.minute == 30
         assert result.second == 0
         # Check it's UTC (pendulum may use its own timezone class)
-        assert result.utcoffset() == timezone.utc.utcoffset(None)
+        assert result.utcoffset() == UTC.utcoffset(None)
 
     def test_parse_iso8601_with_timezone(self) -> None:
         """Test parsing ISO 8601 with timezone offset."""
@@ -109,7 +108,7 @@ class TestParseISO8601:
         assert result.hour == 10
         assert result.minute == 30
         # Check it's UTC
-        assert result.utcoffset() == timezone.utc.utcoffset(None)
+        assert result.utcoffset() == UTC.utcoffset(None)
 
     def test_parse_iso8601_with_milliseconds(self) -> None:
         """Test parsing ISO 8601 with milliseconds."""
@@ -156,7 +155,7 @@ class TestParseEpochMilliseconds:
         assert result.hour == 10
         assert result.minute == 0
         assert result.second == 0
-        assert result.tzinfo == timezone.utc
+        assert result.tzinfo == UTC
 
     def test_parse_epoch_milliseconds_string(self) -> None:
         """Test parsing epoch milliseconds as string."""
@@ -176,7 +175,7 @@ class TestParseTime:
 
     def test_parse_time_datetime(self) -> None:
         """Test parsing datetime object."""
-        dt = datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
+        dt = datetime(2024, 1, 15, 10, 0, 0, tzinfo=UTC)
         result = parse_time(dt)
 
         assert result == dt
@@ -186,7 +185,7 @@ class TestParseTime:
         dt = datetime(2024, 1, 15, 10, 0, 0)
         result = parse_time(dt)
 
-        assert result.tzinfo == timezone.utc
+        assert result.tzinfo == UTC
         assert result.year == 2024
         assert result.month == 1
 
@@ -201,7 +200,7 @@ class TestParseTime:
     def test_parse_time_relative(self) -> None:
         """Test parsing relative time string."""
         result = parse_time("1h ago")
-        expected = datetime.now(timezone.utc) - timedelta(hours=1)
+        expected = datetime.now(UTC) - timedelta(hours=1)
 
         assert abs((result - expected).total_seconds()) < 1
 
@@ -227,7 +226,7 @@ class TestToCloudWatchTimestamp:
 
     def test_to_cloudwatch_timestamp_datetime(self) -> None:
         """Test converting datetime to CloudWatch timestamp."""
-        dt = datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
+        dt = datetime(2024, 1, 15, 10, 0, 0, tzinfo=UTC)
         result = to_cloudwatch_timestamp(dt)
 
         assert result == 1705312800000
@@ -269,7 +268,7 @@ class TestCalculateTimeRange:
         """Test with only start time (end defaults to now)."""
         start, end = calculate_time_range(start_time="1h ago")
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         expected_start = now - timedelta(hours=1)
 
         # Should be close to expected (within 1 second)
@@ -288,7 +287,7 @@ class TestCalculateTimeRange:
         """Test with no times provided (defaults to last hour)."""
         start, end = calculate_time_range()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         expected_start = now - timedelta(minutes=60)
 
         # Should be close to expected
@@ -299,7 +298,7 @@ class TestCalculateTimeRange:
         """Test with custom default range."""
         start, end = calculate_time_range(default_range_minutes=30)
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         expected_start = now - timedelta(minutes=30)
 
         assert abs(start - to_cloudwatch_timestamp(expected_start)) < 1000
@@ -331,7 +330,7 @@ class TestTimeAgo:
 
     def test_time_ago_seconds(self) -> None:
         """Test time ago for seconds."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         timestamp = to_cloudwatch_timestamp(now - timedelta(seconds=30))
 
         result = time_ago(timestamp)
@@ -340,7 +339,7 @@ class TestTimeAgo:
 
     def test_time_ago_minutes(self) -> None:
         """Test time ago for minutes."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         timestamp = to_cloudwatch_timestamp(now - timedelta(minutes=5))
 
         result = time_ago(timestamp)
@@ -349,7 +348,7 @@ class TestTimeAgo:
 
     def test_time_ago_hours(self) -> None:
         """Test time ago for hours."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         timestamp = to_cloudwatch_timestamp(now - timedelta(hours=3))
 
         result = time_ago(timestamp)
@@ -358,7 +357,7 @@ class TestTimeAgo:
 
     def test_time_ago_days(self) -> None:
         """Test time ago for days."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         timestamp = to_cloudwatch_timestamp(now - timedelta(days=2))
 
         result = time_ago(timestamp)
@@ -367,7 +366,7 @@ class TestTimeAgo:
 
     def test_time_ago_singular(self) -> None:
         """Test singular forms."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # 1 second ago
         timestamp = to_cloudwatch_timestamp(now - timedelta(seconds=1))

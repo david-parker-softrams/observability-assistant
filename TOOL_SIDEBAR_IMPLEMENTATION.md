@@ -1,17 +1,17 @@
 # Tool Calls Sidebar - Implementation Summary
 
-**Date:** February 11, 2026  
-**Implementer:** Jackie (Senior Software Engineer)  
+**Date:** February 11, 2026
+**Implementer:** Jackie (Senior Software Engineer)
 **Status:** ✅ Complete - Ready for Testing
 
 ---
 
 ## Overview
 
-Successfully implemented the Tool Calls Sidebar feature for LogAI's TUI according to Sally's comprehensive design document. The implementation includes all three phases requested:
+Successfully implemented the Tool Calls Sidebar feature for LogAI's TUI according to Saanvi's comprehensive design document. The implementation includes all three phases requested:
 
 - **Phase 1**: Basic sidebar structure ✅
-- **Phase 2**: Orchestrator integration ✅  
+- **Phase 2**: Orchestrator integration ✅
 - **Phase 3**: Polish & UX ✅
 
 **Total Implementation Time:** ~6 hours
@@ -82,7 +82,7 @@ Successfully implemented the Tool Calls Sidebar feature for LogAI's TUI accordin
 ```
 Header
 ├── Horizontal (main-content)
-│   ├── VerticalScroll (messages-container)  
+│   ├── VerticalScroll (messages-container)
 │   └── ToolCallsSidebar (tools-sidebar) [optional]
 ├── Container (input-container)
 └── StatusBar
@@ -121,7 +121,7 @@ Used callback pattern rather than Textual messages:
 - Simpler implementation
 - Direct communication path
 - Thread-safe with `call_from_thread()`
-- Aligns with Sally's design
+- Aligns with Saanvi's design
 
 ### 3. **History Management**
 Maintain history in both:
@@ -148,7 +148,7 @@ Full lifecycle tracking with 4 states:
 - [x] Toggleable with `/tools` command
 - [x] Users can sanity-check agent behavior
 
-### ✅ Design Requirements (from Sally)
+### ✅ Design Requirements (from Saanvi)
 - [x] Right sidebar, 28 columns wide
 - [x] Max 20 tool calls in history
 - [x] Command: `/tools` to toggle
@@ -281,15 +281,15 @@ timeout 3 logai
 
 Per design document and user requirements:
 
-✅ **Sidebar visible by default** when TUI launches  
-✅ **`/tools` command toggles sidebar** on/off  
-✅ **Tool calls appear in real-time** as agent executes them  
-✅ **Tool parameters are visible** (with intelligent truncation)  
-✅ **Tool results are visible** (with intelligent truncation)  
-✅ **Status indicators show progress** (◯ → ⏳ → ✓ or ✗)  
-✅ **Timestamps show when each tool was called**  
-✅ **Handles errors gracefully** (clear ✗ indicator)  
-✅ **Works on normal terminal windows** (28 column sidebar)  
+✅ **Sidebar visible by default** when TUI launches
+✅ **`/tools` command toggles sidebar** on/off
+✅ **Tool calls appear in real-time** as agent executes them
+✅ **Tool parameters are visible** (with intelligent truncation)
+✅ **Tool results are visible** (with intelligent truncation)
+✅ **Status indicators show progress** (◯ → ⏳ → ✓ or ✗)
+✅ **Timestamps show when each tool was called**
+✅ **Handles errors gracefully** (clear ✗ indicator)
+✅ **Works on normal terminal windows** (28 column sidebar)
 ✅ **No performance issues** (fixed 20-entry history)
 
 ---
@@ -420,12 +420,12 @@ If you find bugs, please note:
 
 ## Sign-off
 
-**Implementation Status**: ✅ Complete  
-**Testing Status**: Unit tests pass, ready for integration testing  
-**Code Review Status**: Ready for Billy's review
+**Implementation Status**: ✅ Complete
+**Testing Status**: Unit tests pass, ready for integration testing
+**Code Review Status**: Ready for Han-Ron's review
 
-**Implementer:** Jackie (Senior Software Engineer)  
-**Date:** February 11, 2026  
+**Implementer:** Jackie (Senior Software Engineer)
+**Date:** February 11, 2026
 **Time Invested:** ~6 hours (on schedule)
 
 Ready for code review and QA testing! 🎉

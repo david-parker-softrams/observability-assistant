@@ -112,7 +112,7 @@ For privacy-focused or offline usage:
    ```bash
    # macOS
    brew install ollama
-   
+
    # Linux
    curl -fsSL https://ollama.com/install.sh | sh
    ```

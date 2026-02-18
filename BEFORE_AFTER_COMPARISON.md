@@ -166,7 +166,7 @@
 ## Interaction Methods
 
 1. **Mouse**: Click on "▶ Show X more" or "▼ Show X more"
-2. **Keyboard**: 
+2. **Keyboard**:
    - Navigate with ↑↓ arrows
    - Press Enter to expand/collapse
    - Tab to move between sections
@@ -197,11 +197,11 @@ node.add_leaf(f"Result: {result_text}")  # All as text
 def _add_log_groups_node(self, parent_node: TreeNode, log_groups: list) -> None:
     """Builds expandable tree structure."""
     result_node = parent_node.add(f"Result: Found {len(log_groups)} groups")
-    
+
     # First 10 always visible
     for group in log_groups[:10]:
         result_node.add_leaf(f"  • {group['name']}")
-    
+
     # Remaining 40 hidden but accessible
     if len(log_groups) > 10:
         more_node = result_node.add("▶ Show 40 more", expand=False)

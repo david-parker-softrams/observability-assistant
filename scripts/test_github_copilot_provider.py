@@ -14,8 +14,8 @@ from pathlib import Path
 # Add src to path for testing
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from logai.auth import get_github_copilot_token
-from logai.providers.llm import GitHubCopilotProvider, get_available_models
+from logai.auth import get_github_copilot_token  # noqa: E402
+from logai.providers.llm import GitHubCopilotProvider, get_available_models  # noqa: E402
 
 
 async def test_authentication():
@@ -64,7 +64,7 @@ async def test_basic_chat():
         print("  Sending request...")
         response = await provider.chat(messages)
 
-        print(f"✓ Response received!")
+        print("✓ Response received!")
         print(f"  Content: {response.content}")
         print(f"  Finish reason: {response.finish_reason}")
         print(f"  Usage: {response.usage}")
@@ -156,13 +156,13 @@ async def test_tool_calling():
         print("  Sending request with tools...")
         response = await provider.chat(messages, tools=tools)
 
-        print(f"✓ Response received!")
+        print("✓ Response received!")
         print(f"  Content: {response.content}")
         print(f"  Finish reason: {response.finish_reason}")
         print(f"  Has tool calls: {response.has_tool_calls()}")
 
         if response.has_tool_calls():
-            print(f"  Tool calls:")
+            print("  Tool calls:")
             for tc in response.tool_calls:
                 print(f"    - {tc['function']['name']}: {tc['function']['arguments']}")
         else:

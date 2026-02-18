@@ -355,6 +355,7 @@ For more information, visit: https://github.com/logai/logai
             cache_dir=settings.cache_dir / "results",
             ttl_seconds=getattr(settings, "cache_ttl_seconds", 3600),
             max_size_mb=100,
+            sample_event_count=settings.cache_sample_event_count,
             metrics_collector=metrics_collector,
         )
 
@@ -394,7 +395,7 @@ For more information, visit: https://github.com/logai/logai
         # Initialize orchestrator with context management
         orchestrator = LLMOrchestrator(
             llm_provider=llm_provider,
-            tool_registry=ToolRegistry,  # type: ignore[arg-type]
+            tool_registry=ToolRegistry,
             sanitizer=sanitizer,
             settings=settings,
             cache=cache_manager,

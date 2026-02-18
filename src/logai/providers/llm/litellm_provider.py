@@ -3,9 +3,10 @@
 import asyncio
 import logging
 from collections.abc import AsyncGenerator
-from typing import Any, NoReturn
+from typing import Any, NoReturn, cast
 
 import litellm
+from litellm.types.utils import Choices, ModelResponse
 
 from logai.config.settings import LogAISettings
 
@@ -29,12 +30,21 @@ for logger_name in ["LiteLLM", "LiteLLM Router", "LiteLLM Proxy"]:
 # Use LiteLLM's built-in suppression for extra safety
 litellm.suppress_debug_info = True
 
-# Register Ollama models that support function calling
+# Register Ollama models with their tool calling capabilities
 # Based on LiteLLM documentation: https://docs.litellm.ai/docs/providers/ollama
 #
-# Supported model families (as of Feb 2026):
-# - Qwen 2.5/3 series: Native tool calling support
-# - Llama 3.1+: Native tool calling support
+# Models WITH native tool calling support (as of Feb 2026):
+# - Qwen 2.5/3 series: Native function calling support
+# - Llama 3.1+: Native function calling support
+# - Command-R (Cohere): Native function calling support
+#
+# Reasoning models WITHOUT native tool calling support:
+# - OpenThinker: O1-style reasoning model (no native tool support)
+# - DeepSeek-R1: O1-style reasoning model (no native tool support)
+#
+# Usage guidance:
+# - For agentic tasks requiring tools: Use Qwen3, Llama 3.1, or Command-R
+# - For pure reasoning tasks: Use DeepSeek-R1 or OpenThinker
 #
 # Note: If your model isn't listed, LiteLLM will fall back to JSON mode
 # for tool calling, which may have reduced accuracy.
@@ -44,6 +54,9 @@ litellm.register_model(
         "ollama_chat/qwen3": {"supports_function_calling": True},
         "ollama_chat/llama3.1": {"supports_function_calling": True},
         "ollama_chat/llama3.2": {"supports_function_calling": True},
+        "ollama_chat/command-r": {"supports_function_calling": True},
+        "ollama_chat/openthinker": {"supports_function_calling": False},
+        "ollama_chat/deepseek-r1": {"supports_function_calling": False},
     }
 )
 
@@ -139,6 +152,8 @@ class LiteLLMProvider(BaseLLMProvider):
         if self.provider == "ollama":
             # Check if model family is registered as supporting tools
             model_name = self._get_model_name()
+            # Only models with native tool calling support
+            # Reasoning models (openthinker, deepseek-r1) are excluded
             supported_families = [
                 "qwen2.5",
                 "qwen3",
@@ -146,6 +161,7 @@ class LiteLLMProvider(BaseLLMProvider):
                 "llama3.2",
                 "mistral-nemo",
                 "firefunction",
+                "command-r",
             ]
             return any(f"ollama_chat/{family}" in model_name for family in supported_families)
         return False
@@ -202,8 +218,11 @@ class LiteLLMProvider(BaseLLMProvider):
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(None, lambda: litellm.completion(**params))
 
+            # Cast to ModelResponse for type checking
+            response = cast(ModelResponse, response)
+
             # Extract response data
-            choice = response.choices[0]
+            choice = cast(Choices, response.choices[0])
             content = choice.message.content if hasattr(choice.message, "content") else None
             finish_reason = choice.finish_reason
 
@@ -224,11 +243,13 @@ class LiteLLMProvider(BaseLLMProvider):
 
             # Extract usage information
             usage = {}
-            if hasattr(response, "usage") and response.usage:
+            # Type cast needed because usage attribute may not be in type stubs
+            usage_data = getattr(response, "usage", None)
+            if usage_data:
                 usage = {
-                    "prompt_tokens": response.usage.prompt_tokens,
-                    "completion_tokens": response.usage.completion_tokens,
-                    "total_tokens": response.usage.total_tokens,
+                    "prompt_tokens": usage_data.prompt_tokens,
+                    "completion_tokens": usage_data.completion_tokens,
+                    "total_tokens": usage_data.total_tokens,
                 }
 
             return LLMResponse(
@@ -289,8 +310,10 @@ class LiteLLMProvider(BaseLLMProvider):
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(None, lambda: litellm.completion(**params))
 
-            # Stream tokens
-            for chunk in response:
+            # Stream tokens - response is a generator
+            # Type cast needed because litellm.completion with stream=True returns a generator
+            for chunk in cast(Any, response):
+                # chunk is a ModelResponse with StreamingChoices
                 if chunk.choices and len(chunk.choices) > 0:
                     delta = chunk.choices[0].delta
                     if hasattr(delta, "content") and delta.content:

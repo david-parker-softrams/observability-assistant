@@ -4,7 +4,6 @@ import time
 from pathlib import Path
 
 import pytest
-
 from logai.cache.sqlite_store import CacheEntry, SQLiteStore
 
 
@@ -257,8 +256,8 @@ class TestSQLiteStore:
         await cache_store.set(entry)
 
         # Access multiple times
-        result1 = await cache_store.get("hitcount")
-        result2 = await cache_store.get("hitcount")
+        await cache_store.get("hitcount")
+        await cache_store.get("hitcount")
         result3 = await cache_store.get("hitcount")
 
         assert result3 is not None

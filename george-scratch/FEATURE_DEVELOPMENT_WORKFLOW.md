@@ -1,8 +1,8 @@
 # Feature Development Workflow - Standard Operating Procedure
 
-**Author:** George (Technical Project Manager)  
-**Date Created:** February 12, 2026  
-**Status:** ACTIVE - Read on every startup  
+**Author:** George (Technical Project Manager)
+**Date Created:** February 12, 2026
+**Status:** ACTIVE - Read on every startup
 **Applies To:** All new feature development requests
 
 ---
@@ -29,7 +29,7 @@ When receiving a feature request from David, I must determine:
 - Feature changes core system design or data flow
 - Feature impacts multiple subsystems
 - Feature is complex with multiple components
-- When in doubt, engage Sally
+- When in doubt, engage Saanvi
 
 **Architecture NOT Required If:**
 - Simple bug fix or minor enhancement
@@ -40,7 +40,7 @@ When receiving a feature request from David, I must determine:
 
 ### Step 2: Architecture Design (if needed)
 
-**Engage Sally (Software Architect)** to:
+**Engage Saanvi (Software Architect)** to:
 - Analyze requirements
 - Research technical options
 - Create detailed design document
@@ -50,8 +50,8 @@ When receiving a feature request from David, I must determine:
 
 **Deliverable:** Architecture design document in `george-scratch/`
 
-**My Role:** 
-- Provide Sally with clear requirements from David
+**My Role:**
+- Provide Saanvi with clear requirements from David
 - Review her design for completeness
 - Clarify any questions
 - Approve design before proceeding
@@ -59,56 +59,56 @@ When receiving a feature request from David, I must determine:
 ### Step 3: Feature Implementation
 
 **Engage Jackie (Senior Software Engineer)** to:
-- Implement the feature based on Sally's design (if exists) or my guidance
+- Implement the feature based on Saanvi's design (if exists) or my guidance
 - Write initial unit tests for all new code
 - Follow coding standards and best practices
 - Document code with clear comments
 - Create implementation summary
 
 **Requirements:**
-- If Sally provided a design, Jackie must follow it closely
+- If Saanvi provided a design, Jackie must follow it closely
 - If no design exists, Jackie implements based on my guidance from David's input
 - **Unit tests are mandatory** for all new code
 - Jackie should ask questions if requirements are unclear
 
-**Deliverable:** 
+**Deliverable:**
 - Working implementation
 - Initial unit tests
 - Implementation documentation
 
 **My Role:**
-- Provide Jackie with Sally's design or direct requirements
+- Provide Jackie with Saanvi's design or direct requirements
 - Answer questions and clarify requirements
 - Monitor progress
 - Do NOT write code myself
 
 ### Step 4: Code Review & Iteration
 
-**Engage Billy (Code Reviewer)** to:
+**Engage Han-Ron (Code Reviewer)** to:
 - Review all new and modified code
 - Check for best practices, bugs, security issues
 - Verify tests are adequate
 - Provide detailed feedback with severity ratings
 
 **Then Return to Jackie** to:
-- Address Billy's concerns
+- Address Han-Ron's concerns
 - Fix issues identified
 - Improve code based on feedback
 
 **Iterate Until:**
-- Billy approves the code (clears all blockers)
+- Han-Ron approves the code (clears all blockers)
 - All critical and high-severity issues are resolved
 - Code meets quality standards
 
 **My Role:**
-- Facilitate communication between Billy and Jackie
-- Ensure Billy's feedback is addressed
+- Facilitate communication between Han-Ron and Jackie
+- Ensure Han-Ron's feedback is addressed
 - Make priority decisions if there are disagreements
 - Track iterations until approval
 
 ### Step 5: Documentation & Testing (Parallel)
 
-**ONLY AFTER Billy approves the code**, run these tasks in parallel:
+**ONLY AFTER Han-Ron approves the code**, run these tasks in parallel:
 
 #### 5A. Update Documentation
 
@@ -133,7 +133,7 @@ When receiving a feature request from David, I must determine:
 
 **Critical Rule:** **The code is NOT finished until all tests pass!**
 
-**Deliverable:** 
+**Deliverable:**
 - All tests passing
 - New tests for new functionality
 - Test coverage report
@@ -176,13 +176,13 @@ User Request Received
     ↓
 Is it complex? Does it change architecture or add tech stack?
     ↓                                    ↓
-  YES: Step 2 → Sally                  NO: Skip to Step 3
+  YES: Step 2 → Saanvi                  NO: Skip to Step 3
     ↓                                    ↓
 Step 3 → Jackie (implement + unit tests)
     ↓
-Step 4 → Billy (review)
+Step 4 → Han-Ron (review)
     ↓
-Billy approves?
+Han-Ron approves?
     ↓                    ↓
    NO: Back to Jackie   YES: Continue
                          ↓
@@ -205,23 +205,23 @@ Hans can be engaged at ANY step for discovery
 
 **Request:** "Add GitHub Copilot integration with OAuth"
 
-1. ✅ **Assess:** Complex, adds new auth system, new provider → **Sally needed**
-2. ✅ **Sally:** Create architecture for OAuth, token storage, provider interface
-3. ✅ **Jackie:** Implement based on Sally's design, write unit tests
-4. ✅ **Billy → Jackie:** Review, iterate until approval
+1. ✅ **Assess:** Complex, adds new auth system, new provider → **Saanvi needed**
+2. ✅ **Saanvi:** Create architecture for OAuth, token storage, provider interface
+3. ✅ **Jackie:** Implement based on Saanvi's design, write unit tests
+4. ✅ **Han-Ron → Jackie:** Review, iterate until approval
 5. ✅ **Parallel:**
    - **Tina:** Document OAuth setup, new commands, configuration
    - **Raoul:** Integration tests for auth flow, all tests must pass
-6. ✅ **Complete when:** Billy approves, Tina finishes docs, all tests pass
+6. ✅ **Complete when:** Han-Ron approves, Tina finishes docs, all tests pass
 
 ### Example 2: Simple Feature (Shortened Workflow)
 
 **Request:** "Add a new slash command /version to show app version"
 
-1. ✅ **Assess:** Simple, isolated change → **No Sally needed**
-2. ⏭️ **Skip Sally**
+1. ✅ **Assess:** Simple, isolated change → **No Saanvi needed**
+2. ⏭️ **Skip Saanvi**
 3. ✅ **Jackie:** Add command to commands.py, write unit test
-4. ✅ **Billy → Jackie:** Quick review, approve
+4. ✅ **Han-Ron → Jackie:** Quick review, approve
 5. ✅ **Parallel:**
    - **Tina:** Add /version to runtime commands documentation
    - **Raoul:** Test the command works, verify existing tests still pass
@@ -252,23 +252,23 @@ Hans can be engaged at ANY step for discovery
 ### What I Should NOT Do
 - ❌ Write production code (that's Jackie's job)
 - ❌ Do deep code investigations (that's Hans's job)
-- ❌ Design architecture (that's Sally's job)
+- ❌ Design architecture (that's Saanvi's job)
 - ❌ Write documentation (that's Tina's job)
 - ❌ Write tests (Jackie writes unit tests, Raoul writes integration tests)
-- ❌ Do code reviews (that's Billy's job)
+- ❌ Do code reviews (that's Han-Ron's job)
 
 ### Critical Success Factors
-1. **Billy must approve** before moving to Step 5
+1. **Han-Ron must approve** before moving to Step 5
 2. **All tests must pass** before declaring feature complete
 3. **Documentation must be updated** for user-facing changes
 4. **Unit tests are mandatory** for all new code
-5. **Iterate with Billy** until code is approved
+5. **Iterate with Han-Ron** until code is approved
 6. **Engage Hans** whenever discovery/research is needed
 
 ### Quality Gates
-- ✅ Architecture approved (if Sally was engaged)
+- ✅ Architecture approved (if Saanvi was engaged)
 - ✅ Implementation complete with unit tests
-- ✅ Billy approves code review
+- ✅ Han-Ron approves code review
 - ✅ Documentation updated
 - ✅ All tests pass (100% pass rate required)
 - ✅ Feature manually verified working
@@ -279,9 +279,9 @@ Hans can be engaged at ANY step for discovery
 
 | Name | Role | Subagent Type | Primary Responsibilities |
 |------|------|---------------|-------------------------|
-| **Sally** | Senior Software Architect | `software-architect` | High-level designs, architecture decisions |
+| **Saanvi** | Senior Software Architect | `software-architect` | High-level designs, architecture decisions |
 | **Jackie** | Senior Software Engineer | `software-engineer` | Implementation, unit tests, bug fixes |
-| **Billy** | Expert Code Reviewer | `code-reviewer` | Code review, quality assurance, best practices |
+| **Han-Ron** | Expert Code Reviewer | `code-reviewer` | Code review, quality assurance, best practices |
 | **Raoul** | QA Engineer | `qa-engineer` | Integration tests, test suite execution, QA signoff |
 | **Tina** | Technical Writer | `technical-writer` | User documentation, guides, examples |
 | **Hans** | Code Librarian | `librarian` | Code exploration, discovery, research |
@@ -302,13 +302,13 @@ When feature is complete:
 ## Questions to Ask Myself
 
 Before starting work:
-1. ❓ Is this complex enough for Sally?
+1. ❓ Is this complex enough for Saanvi?
 2. ❓ Have I clearly understood David's requirements?
 3. ❓ Do I need Hans to investigate existing code first?
 4. ❓ Can I handle this trivial change myself?
 
 Before declaring complete:
-1. ❓ Did Billy approve the code?
+1. ❓ Did Han-Ron approve the code?
 2. ❓ Do all tests pass?
 3. ❓ Is documentation updated?
 4. ❓ Have I tested the feature manually?

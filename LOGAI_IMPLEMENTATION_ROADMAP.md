@@ -123,7 +123,7 @@ export class AuthManager {
   // Save credentials to disk with restricted permissions
   saveCredentials(provider: string, config: AuthConfig): void {
     this.credentials[provider] = config;
-    
+
     // Create directory if it doesn't exist
     const dir = path.dirname(this.authFilePath);
     if (!fs.existsSync(dir)) {
@@ -480,17 +480,17 @@ describe('AuthManager', () => {
       type: 'oauth' as const,
       access: 'test-token'
     };
-    
+
     manager.saveCredentials('github-copilot', config);
     manager.loadCredentials();
-    
+
     expect(manager.getToken('github-copilot')).toBe('test-token');
   });
 
   it('should handle missing credentials gracefully', () => {
     const manager = new AuthManager();
     manager.loadCredentials();
-    
+
     expect(manager.isAuthenticated('unknown')).toBe(false);
   });
 });
@@ -560,10 +560,10 @@ describe('AuthManager', () => {
    ```typescript
    // On macOS, use Keychain for token storage
    import keytar from 'keytar';
-   
+
    // Store token in keychain
    await keytar.setPassword('logai', 'github-copilot', token);
-   
+
    // Retrieve token from keychain
    const token = await keytar.getPassword('logai', 'github-copilot');
    ```

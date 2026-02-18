@@ -1,9 +1,9 @@
 """Tests for LLM providers."""
 
+from typing import cast
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-
 from logai.config.settings import LogAISettings
 from logai.providers.llm.base import (
     AuthenticationError,
@@ -70,7 +70,7 @@ class TestLiteLLMProvider:
 
     def test_from_settings(self, mock_settings):
         """Test creating provider from settings."""
-        provider = LiteLLMProvider.from_settings(mock_settings)
+        provider = cast(LiteLLMProvider, LiteLLMProvider.from_settings(mock_settings))
 
         assert provider.provider == "anthropic"
         assert provider.model == "claude-3-5-sonnet-20241022"
@@ -131,18 +131,21 @@ class TestLiteLLMProvider:
         mock_response.usage = None
 
         with patch("litellm.completion", return_value=mock_response):
-            response = await provider.chat(
-                messages=[{"role": "user", "content": "List log groups"}],
-                tools=[
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": "test_tool",
-                            "description": "Test",
-                            "parameters": {},
-                        },
-                    }
-                ],
+            response = cast(
+                LLMResponse,
+                await provider.chat(
+                    messages=[{"role": "user", "content": "List log groups"}],
+                    tools=[
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "test_tool",
+                                "description": "Test",
+                                "parameters": {},
+                            },
+                        }
+                    ],
+                ),
             )
 
             assert response.has_tool_calls()
@@ -272,7 +275,7 @@ class TestLiteLLMProvider:
         settings.ollama_base_url = "http://localhost:11434"
         settings.ollama_model = "llama3.1:8b"
 
-        provider = LiteLLMProvider.from_settings(settings)
+        provider = cast(LiteLLMProvider, LiteLLMProvider.from_settings(settings))
 
         assert provider.provider == "ollama"
         assert provider.model == "llama3.1:8b"
@@ -309,3 +312,89 @@ class TestLiteLLMProvider:
         )
 
         assert provider._get_model_name() == "openai/gpt-4-turbo-preview"
+
+    def test_anthropic_supports_tools(self):
+        """Test Anthropic models support tool calling."""
+        provider = LiteLLMProvider(
+            provider="anthropic",
+            api_key="test-key",
+            model="claude-3-5-sonnet-20241022",
+        )
+
+        assert provider._supports_tools() is True
+
+    def test_openai_supports_tools(self):
+        """Test OpenAI models support tool calling."""
+        provider = LiteLLMProvider(
+            provider="openai",
+            api_key="test-key",
+            model="gpt-4-turbo-preview",
+        )
+
+        assert provider._supports_tools() is True
+
+    def test_ollama_qwen_supports_tools(self):
+        """Test Ollama Qwen models support tool calling."""
+        provider = LiteLLMProvider(
+            provider="ollama",
+            api_key="",
+            model="qwen3",
+            api_base="http://localhost:11434",
+        )
+
+        assert provider._supports_tools() is True
+
+    def test_ollama_llama_supports_tools(self):
+        """Test Ollama Llama 3.1+ models support tool calling."""
+        provider = LiteLLMProvider(
+            provider="ollama",
+            api_key="",
+            model="llama3.1:8b",
+            api_base="http://localhost:11434",
+        )
+
+        assert provider._supports_tools() is True
+
+    def test_ollama_command_r_supports_tools(self):
+        """Test Ollama Command-R models support tool calling."""
+        provider = LiteLLMProvider(
+            provider="ollama",
+            api_key="",
+            model="command-r",
+            api_base="http://localhost:11434",
+        )
+
+        assert provider._supports_tools() is True
+
+    def test_ollama_deepseek_r1_no_tool_support(self):
+        """Test Ollama DeepSeek-R1 does NOT support tool calling."""
+        provider = LiteLLMProvider(
+            provider="ollama",
+            api_key="",
+            model="deepseek-r1",
+            api_base="http://localhost:11434",
+        )
+
+        assert provider._supports_tools() is False
+
+    def test_ollama_openthinker_no_tool_support(self):
+        """Test Ollama OpenThinker does NOT support tool calling."""
+        provider = LiteLLMProvider(
+            provider="ollama",
+            api_key="",
+            model="openthinker",
+            api_base="http://localhost:11434",
+        )
+
+        assert provider._supports_tools() is False
+
+    def test_ollama_unsupported_model_no_tool_support(self):
+        """Test unsupported Ollama models do NOT support tool calling."""
+        provider = LiteLLMProvider(
+            provider="ollama",
+            api_key="",
+            model="some-unknown-model",
+            api_base="http://localhost:11434",
+        )
+
+        assert provider._supports_tools() is False

@@ -426,6 +426,13 @@ class LogAISettings(BaseSettings):
         le=500,
     )
 
+    cache_sample_event_count: int = Field(
+        default=5,
+        description="Number of sample events to include in cached result summary (range: 3-10)",
+        ge=3,
+        le=10,
+    )
+
     # === History Management ===
     enable_history_pruning: bool = Field(
         default=True,

@@ -3,8 +3,7 @@
 import time
 
 import pytest
-
-from logai.core.metrics import MetricType, MetricsCollector, MetricsTimer
+from logai.core.metrics import MetricsCollector, MetricsTimer, MetricType
 
 
 class TestMetricsCollector:

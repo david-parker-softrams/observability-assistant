@@ -17,7 +17,9 @@ class ChatInput(Input):
 
     def __init__(self) -> None:
         """Initialize chat input."""
-        super().__init__(placeholder="Type your message (Enter to send, Ctrl+C to quit)...")
+        super().__init__(
+            placeholder="Type your question... (Ctrl+Q to quit, Cmd+V/Ctrl+Shift+V to paste)"
+        )
         self._history: list[str] = []
         self._history_index: int = -1
         self._current_input: str = ""

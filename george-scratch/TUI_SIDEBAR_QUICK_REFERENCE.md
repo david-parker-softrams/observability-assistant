@@ -1,7 +1,7 @@
 # Tool Calls Sidebar - Quick Reference
 
-**Investigation By**: Hans, Code Librarian  
-**Date**: February 11, 2026  
+**Investigation By**: Hans, Code Librarian
+**Date**: February 11, 2026
 **Status**: Ready for Implementation
 
 ---
@@ -51,19 +51,19 @@ class ToolCallsSidebar(Static):
         border: solid $primary;
     }
     """
-    
+
     tool_calls: reactive[list] = reactive([])
-    
+
     def on_mount(self) -> None:
         self.tree = Tree("Tools")
         self.mount(self.tree)
-    
+
     def watch_tool_calls(self, new_calls: list) -> None:
         self.tree.clear()
         for call in new_calls[:10]:
             node = self.tree.root.add(f"📞 {call['name']}")
             node.add(f"Status: {call.get('status', 'pending')}")
-    
+
     def add_tool_call(self, tool_call: dict) -> None:
         self.tool_calls = [tool_call] + self.tool_calls[:9]
 ```
@@ -98,7 +98,7 @@ def compose(self) -> ComposeResult:
 def _toggle_tools_sidebar(self) -> None:
     """Toggle the tools sidebar visibility."""
     self._show_tools_sidebar = not self._show_tools_sidebar
-    
+
     try:
         sidebar = self.query_one("#tools-sidebar", ToolCallsSidebar)
         sidebar.remove()
@@ -246,6 +246,5 @@ self._notify_tool_call(function_name, function_args, result)
 
 ---
 
-**Document**: Full details in `TUI_ARCHITECTURE_INVESTIGATION.md`  
+**Document**: Full details in `TUI_ARCHITECTURE_INVESTIGATION.md`
 **Status**: Ready to implement - awaiting George's approval
-

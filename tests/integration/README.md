@@ -116,14 +116,14 @@ async def test_scenario(self, integration_settings, mock_sanitizer):
         LLMResponse(...),  # First response
         LLMResponse(...),  # Second response
     ]
-    
+
     mock_tools = Mock(spec=ToolRegistry)
     mock_tools.execute = AsyncMock()
     mock_tools.execute.side_effect = [
         {...},  # First tool result
         {...},  # Second tool result
     ]
-    
+
     # Create orchestrator
     orchestrator = LLMOrchestrator(
         llm_provider=mock_llm,
@@ -131,10 +131,10 @@ async def test_scenario(self, integration_settings, mock_sanitizer):
         sanitizer=mock_sanitizer,
         settings=integration_settings,
     )
-    
+
     # Execute
     result = await orchestrator.chat("Test query")
-    
+
     # Verify
     assert mock_tools.execute.call_count == 2
     assert "expected" in result
@@ -202,15 +202,15 @@ When adding new integration tests:
 ## Common Issues
 
 ### Issue: Test hangs
-**Cause**: LLM mock not providing enough responses for conversation loop  
+**Cause**: LLM mock not providing enough responses for conversation loop
 **Fix**: Add more responses to `mock_llm.chat.side_effect` list
 
 ### Issue: Assertion error on call count
-**Cause**: Retry logic behavior changed  
+**Cause**: Retry logic behavior changed
 **Fix**: Review orchestrator changes and update expected call counts
 
 ### Issue: "AttributeError: AsyncMock object has no attribute 'X'"
-**Cause**: Mock not properly configured  
+**Cause**: Mock not properly configured
 **Fix**: Use `Mock(spec=ClassName)` to ensure proper interface
 
 ## Related Documentation

@@ -180,6 +180,13 @@ class ChatScreen(Screen[None]):
             chat_input = self.query_one(ChatInput)
             chat_input.focus()
 
+            # Show paste tip on startup
+            self.notify(
+                "💡 Tip: Use Cmd+V (Mac) or Ctrl+Shift+V (Linux) to paste. Press Ctrl+Q to quit.",
+                severity="information",
+                timeout=5,
+            )
+
             logger.info("ChatScreen mounted successfully")
 
         except Exception as e:
@@ -320,6 +327,7 @@ class ChatScreen(Screen[None]):
         """
         try:
             # Map level to Textual severity with configurable timeouts
+            severity: Literal["error", "warning", "information"]
             if level == "error":
                 severity = "error"
                 timeout = self.settings.ui_tool_timeout_initial
@@ -387,7 +395,7 @@ class ChatScreen(Screen[None]):
         # Get current state
         if sidebar_id == "left":
             current_index = self._left_sidebar_width_index
-            sidebar = self._log_groups_sidebar
+            sidebar: LogGroupsSidebar | ToolCallsSidebar | None = self._log_groups_sidebar
         else:
             current_index = self._right_sidebar_width_index
             sidebar = self._tool_sidebar

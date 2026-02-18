@@ -1,8 +1,8 @@
 # Architecture Design: Pre-load CloudWatch Log Groups at Startup
 
-**Author:** Sally (Senior Software Architect)  
-**Date:** February 12, 2026  
-**Version:** 1.0  
+**Author:** Saanvi (Senior Software Architect)
+**Date:** February 12, 2026
+**Version:** 1.0
 **Status:** Ready for Implementation
 
 ---
@@ -157,14 +157,14 @@ class LogGroupManagerState(Enum):
 class LogGroupInfo:
     """
     Lightweight representation of a CloudWatch log group.
-    
+
     Stores only essential information to minimize memory footprint.
     """
     name: str
     created: int | None = None  # Epoch milliseconds
     stored_bytes: int = 0
     retention_days: int | None = None
-    
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "LogGroupInfo":
         """Create LogGroupInfo from CloudWatch API response dict."""
@@ -193,26 +193,26 @@ ProgressCallback = Callable[[int, str], None]  # (count, message)
 class LogGroupManager:
     """
     Manages pre-loaded CloudWatch log groups.
-    
+
     This class handles fetching all log groups at startup and provides
     methods for refreshing and formatting the list for LLM consumption.
-    
+
     Example:
         manager = LogGroupManager(datasource)
         await manager.load_all(progress_callback=lambda c, m: print(f"{m}: {c}"))
         prompt_section = manager.format_for_prompt()
     """
-    
+
     # Threshold for switching from full list to summary in prompt
     FULL_LIST_THRESHOLD = 500
-    
+
     # Maximum log groups to sample in summary mode
     SUMMARY_SAMPLE_SIZE = 100
-    
+
     def __init__(self, datasource: CloudWatchDataSource) -> None:
         """
         Initialize LogGroupManager.
-        
+
         Args:
             datasource: CloudWatch data source for API calls
         """
@@ -221,65 +221,65 @@ class LogGroupManager:
         self._state = LogGroupManagerState.UNINITIALIZED
         self._last_refresh: datetime | None = None
         self._last_error: str | None = None
-    
+
     @property
     def state(self) -> LogGroupManagerState:
         """Get current manager state."""
         return self._state
-    
+
     @property
     def log_groups(self) -> list[LogGroupInfo]:
         """Get current log groups list (read-only copy)."""
         return self._log_groups.copy()
-    
+
     @property
     def count(self) -> int:
         """Get count of loaded log groups."""
         return len(self._log_groups)
-    
+
     @property
     def last_refresh(self) -> datetime | None:
         """Get timestamp of last successful refresh."""
         return self._last_refresh
-    
+
     @property
     def is_ready(self) -> bool:
         """Check if log groups are loaded and ready."""
         return self._state == LogGroupManagerState.READY
-    
+
     async def load_all(
         self,
         progress_callback: ProgressCallback | None = None,
     ) -> LogGroupManagerResult:
         """
         Load all log groups from CloudWatch with full pagination.
-        
+
         This method fetches ALL log groups without any limit, handling
         pagination automatically. Progress updates are provided via callback.
-        
+
         Args:
             progress_callback: Optional callback for progress updates.
                               Called with (count, message) during loading.
-        
+
         Returns:
             LogGroupManagerResult with success status and loaded groups
-        
+
         Note:
             This method is safe to call multiple times - it will replace
             the existing list with fresh data.
         """
         import time
         start_time = time.monotonic()
-        
+
         self._state = LogGroupManagerState.LOADING
         self._last_error = None
-        
+
         if progress_callback:
             progress_callback(0, "Starting log group discovery...")
-        
+
         try:
             all_groups: list[LogGroupInfo] = []
-            
+
             # Use the datasource's internal sync method for full pagination
             # We need to bypass the limit parameter to get ALL groups
             loop = asyncio.get_event_loop()
@@ -288,53 +288,53 @@ class LogGroupManager:
                 self._fetch_all_log_groups_sync,
                 progress_callback,
             )
-            
+
             # Convert to LogGroupInfo objects
             for raw in raw_groups:
                 all_groups.append(LogGroupInfo.from_dict(raw))
-            
+
             # Update state
             self._log_groups = all_groups
             self._state = LogGroupManagerState.READY
             self._last_refresh = datetime.now(timezone.utc)
-            
+
             duration_ms = int((time.monotonic() - start_time) * 1000)
-            
+
             if progress_callback:
                 progress_callback(len(all_groups), "Log group discovery complete")
-            
+
             return LogGroupManagerResult(
                 success=True,
                 log_groups=all_groups,
                 count=len(all_groups),
                 duration_ms=duration_ms,
             )
-            
+
         except Exception as e:
             self._state = LogGroupManagerState.ERROR
             self._last_error = str(e)
-            
+
             duration_ms = int((time.monotonic() - start_time) * 1000)
-            
+
             return LogGroupManagerResult(
                 success=False,
                 error_message=str(e),
                 duration_ms=duration_ms,
             )
-    
+
     def _fetch_all_log_groups_sync(
         self,
         progress_callback: ProgressCallback | None = None,
     ) -> list[dict[str, Any]]:
         """
         Synchronous implementation that fetches ALL log groups.
-        
+
         This bypasses the limit parameter in the datasource to get
         complete pagination.
         """
         paginator = self.datasource.client.get_paginator("describe_log_groups")
         log_groups: list[dict[str, Any]] = []
-        
+
         for page in paginator.paginate():
             for lg in page["logGroups"]:
                 log_groups.append({
@@ -343,56 +343,56 @@ class LogGroupManager:
                     "stored_bytes": lg.get("storedBytes", 0),
                     "retention_days": lg.get("retentionInDays"),
                 })
-            
+
             # Progress update after each page
             if progress_callback:
                 # Use call_soon_threadsafe if we need thread safety
                 progress_callback(len(log_groups), f"Loading... ({len(log_groups)} found)")
-        
+
         return log_groups
-    
+
     async def refresh(
         self,
         progress_callback: ProgressCallback | None = None,
     ) -> LogGroupManagerResult:
         """
         Refresh the log groups list.
-        
+
         This is an alias for load_all() - it performs a complete refresh
         of all log groups.
-        
+
         Args:
             progress_callback: Optional callback for progress updates
-        
+
         Returns:
             LogGroupManagerResult with refresh results
         """
         return await self.load_all(progress_callback=progress_callback)
-    
+
     def format_for_prompt(self) -> str:
         """
         Format log groups for inclusion in LLM system prompt.
-        
+
         Uses a tiered strategy based on the number of log groups:
         - Small lists (<=500): Include full list with names only
         - Large lists (>500): Include summary with sample and categories
-        
+
         Returns:
             Formatted string for system prompt injection
         """
         if not self._log_groups:
             return self._format_empty_state()
-        
+
         if len(self._log_groups) <= self.FULL_LIST_THRESHOLD:
             return self._format_full_list()
         else:
             return self._format_summary()
-    
+
     def _format_empty_state(self) -> str:
         """Format message when no log groups are loaded."""
         if self._state == LogGroupManagerState.ERROR:
             return f"""## Log Groups Status
-            
+
 **Status:** Failed to load log groups at startup
 **Error:** {self._last_error}
 
@@ -410,20 +410,20 @@ Use the `list_log_groups` tool to discover available log groups.
 
 **Status:** No log groups found in this AWS account/region
 
-The AWS account appears to have no CloudWatch log groups, or you may not have 
+The AWS account appears to have no CloudWatch log groups, or you may not have
 permission to list them. Verify your AWS credentials and permissions.
 """
-    
+
     def _format_full_list(self) -> str:
         """Format complete list of log groups for small accounts."""
         # Sort alphabetically for easier scanning
         sorted_groups = sorted(self._log_groups, key=lambda g: g.name)
-        
+
         # Build the list - names only to save tokens
         group_list = "\n".join(f"- {g.name}" for g in sorted_groups)
-        
+
         refresh_time = self._last_refresh.strftime("%Y-%m-%d %H:%M:%S UTC") if self._last_refresh else "Unknown"
-        
+
         return f"""## Available Log Groups
 
 **Total:** {len(self._log_groups)} log groups
@@ -437,27 +437,27 @@ permission to list them. Verify your AWS credentials and permissions.
 - If a log group name doesn't match exactly, suggest the closest match from this list
 - User can refresh this list with the `/refresh` command
 """
-    
+
     def _format_summary(self) -> str:
         """Format summary for large accounts with many log groups."""
         # Categorize by common prefixes
         categories = self._categorize_log_groups()
-        
+
         # Get a representative sample
         sample = self._get_representative_sample()
-        
+
         refresh_time = self._last_refresh.strftime("%Y-%m-%d %H:%M:%S UTC") if self._last_refresh else "Unknown"
-        
+
         # Build categories summary
         category_lines = []
         for prefix, count in sorted(categories.items(), key=lambda x: -x[1])[:15]:
             category_lines.append(f"- `{prefix}*`: {count} log groups")
-        
+
         categories_text = "\n".join(category_lines)
-        
+
         # Build sample list
         sample_text = "\n".join(f"- {g.name}" for g in sample)
-        
+
         return f"""## Available Log Groups
 
 **Total:** {len(self._log_groups)} log groups
@@ -477,11 +477,11 @@ permission to list them. Verify your AWS credentials and permissions.
 - User can refresh this list with the `/refresh` command
 - When user mentions a service, match it to the appropriate prefix category
 """
-    
+
     def _categorize_log_groups(self) -> dict[str, int]:
         """Categorize log groups by common prefixes."""
         categories: dict[str, int] = {}
-        
+
         # Common AWS prefixes to look for
         known_prefixes = [
             "/aws/lambda/",
@@ -495,7 +495,7 @@ permission to list them. Verify your AWS credentials and permissions.
             "/aws/kinesisfirehose/",
             "/aws/vendedlogs/",
         ]
-        
+
         for group in self._log_groups:
             matched = False
             for prefix in known_prefixes:
@@ -503,7 +503,7 @@ permission to list them. Verify your AWS credentials and permissions.
                     categories[prefix] = categories.get(prefix, 0) + 1
                     matched = True
                     break
-            
+
             if not matched:
                 # Try to extract a meaningful prefix
                 parts = group.name.split("/")
@@ -514,58 +514,58 @@ permission to list them. Verify your AWS credentials and permissions.
                 else:
                     prefix = "(other)"
                 categories[prefix] = categories.get(prefix, 0) + 1
-        
+
         return categories
-    
+
     def _get_representative_sample(self) -> list[LogGroupInfo]:
         """Get a representative sample of log groups for display."""
         if len(self._log_groups) <= self.SUMMARY_SAMPLE_SIZE:
             return sorted(self._log_groups, key=lambda g: g.name)
-        
+
         # Get samples from each category to ensure diversity
         categories = self._categorize_log_groups()
         sample: list[LogGroupInfo] = []
-        
+
         # Allocate samples proportionally to category size
         total = len(self._log_groups)
         for prefix, count in sorted(categories.items(), key=lambda x: -x[1]):
             # How many from this category?
             allocation = max(1, int(self.SUMMARY_SAMPLE_SIZE * count / total))
-            
+
             # Get groups matching this prefix
             matching = [g for g in self._log_groups if g.name.startswith(prefix)]
-            
+
             # Take first N (sorted)
             matching.sort(key=lambda g: g.name)
             sample.extend(matching[:allocation])
-            
+
             if len(sample) >= self.SUMMARY_SAMPLE_SIZE:
                 break
-        
+
         # Sort final sample
         sample.sort(key=lambda g: g.name)
         return sample[:self.SUMMARY_SAMPLE_SIZE]
-    
+
     def get_log_group_names(self) -> list[str]:
         """Get list of log group names only."""
         return [g.name for g in self._log_groups]
-    
+
     def find_matching_groups(self, pattern: str) -> list[LogGroupInfo]:
         """
         Find log groups matching a pattern (prefix or substring).
-        
+
         Args:
             pattern: Pattern to match (case-insensitive)
-        
+
         Returns:
             List of matching LogGroupInfo objects
         """
         pattern_lower = pattern.lower()
         return [
-            g for g in self._log_groups 
+            g for g in self._log_groups
             if pattern_lower in g.name.lower()
         ]
-    
+
     def get_stats(self) -> dict[str, Any]:
         """Get statistics about loaded log groups."""
         if not self._log_groups:
@@ -576,7 +576,7 @@ permission to list them. Verify your AWS credentials and permissions.
                 "total_bytes": 0,
                 "categories": {},
             }
-        
+
         return {
             "count": len(self._log_groups),
             "state": self._state.value,
@@ -680,7 +680,7 @@ Current time: {current_time}
 
         # Tool call listeners for sidebar integration
         self.tool_call_listeners: list[Callable[[Any], None]] = []
-        
+
         # Runtime context injections (for /refresh updates)
         self._pending_context_injection: str | None = None  # NEW
 
@@ -692,16 +692,16 @@ Current time: {current_time}
             Formatted system prompt including log group context
         """
         now = datetime.now(timezone.utc)
-        
+
         # Get log groups context from manager if available
         if self.log_group_manager and self.log_group_manager.is_ready:
             log_groups_context = self.log_group_manager.format_for_prompt()
         else:
             log_groups_context = """## Log Groups
-            
+
 Log groups will be discovered via the `list_log_groups` tool.
 Use this tool to find available log groups before querying logs."""
-        
+
         return self.SYSTEM_PROMPT.format(
             current_time=now.strftime("%Y-%m-%d %H:%M:%S UTC"),
             log_groups_context=log_groups_context,
@@ -710,10 +710,10 @@ Use this tool to find available log groups before querying logs."""
     def inject_context_update(self, context_message: str) -> None:
         """
         Inject a context update to be included in the next LLM call.
-        
+
         This is used to update the agent's knowledge mid-conversation,
         such as after a /refresh command updates the log group list.
-        
+
         Args:
             context_message: Message to inject as system context
         """
@@ -724,7 +724,7 @@ Use this tool to find available log groups before querying logs."""
         injection = self._pending_context_injection
         self._pending_context_injection = None
         return injection
-    
+
     # In _chat_complete and _chat_stream, add context injection handling:
     # After building messages list, before LLM call:
     #
@@ -732,7 +732,7 @@ Use this tool to find available log groups before querying logs."""
     # pending_injection = self._get_pending_context_injection()
     # if pending_injection:
     #     messages.append({
-    #         "role": "system", 
+    #         "role": "system",
     #         "content": pending_injection
     #     })
 ```
@@ -804,16 +804,16 @@ class CommandHandler:
     async def _refresh_log_groups(self, args: str) -> str:  # NEW
         """
         Refresh the pre-loaded log groups list.
-        
+
         Args:
             args: Optional arguments (e.g., "--prefix /aws/lambda/")
-        
+
         Returns:
             Status message
         """
         if not self.log_group_manager:
             return "[red]Error:[/red] Log group manager not initialized."
-        
+
         # Parse optional prefix argument
         prefix = None
         if args:
@@ -823,28 +823,28 @@ class CommandHandler:
                 prefix = args[3:].strip()
             else:
                 return f"[red]Unknown argument:[/red] {args}\nUsage: /refresh [--prefix <prefix>]"
-        
+
         # Track progress - we'll update via callback
         progress_messages: list[str] = []
-        
+
         def progress_callback(count: int, message: str) -> None:
             progress_messages.append(f"{message}")
-        
+
         # Show initial message
         if self.chat_screen:
             # We'll handle progress display via the chat screen
             pass
-        
+
         # Perform refresh
         result = await self.log_group_manager.refresh(
             progress_callback=progress_callback
         )
-        
+
         if result.success:
             # Calculate diff if we had previous data
             count = result.count
             duration_sec = result.duration_ms / 1000
-            
+
             # Inject context update to orchestrator
             refresh_notice = f"""## Log Groups Updated
 
@@ -854,7 +854,7 @@ Please use this updated list for subsequent queries. The previous list is now ou
 {self.log_group_manager.format_for_prompt()}
 """
             self.orchestrator.inject_context_update(refresh_notice)
-            
+
             return f"""[green]Log groups refreshed successfully![/green]
 
 [bold]Found:[/bold] {count} log groups
@@ -928,20 +928,20 @@ def main() -> int:
 
         # === NEW: Pre-load log groups ===
         from logai.core.log_group_manager import LogGroupManager
-        
+
         log_group_manager = LogGroupManager(datasource)
-        
+
         # Define progress callback for CLI output
         def show_progress(count: int, message: str) -> None:
             # Use carriage return to update in place
             print(f"\r  {message}", end="", flush=True)
-        
+
         print("  Loading log groups from AWS...", end="", flush=True)
-        
+
         # Run async load synchronously
         import asyncio
         result = asyncio.run(log_group_manager.load_all(progress_callback=show_progress))
-        
+
         if result.success:
             print(f"\r✓ Found {result.count} log groups ({result.duration_ms}ms)          ")
         else:
@@ -1144,14 +1144,14 @@ Build messages:
 LLM Response:
    "I can see several payment-related log groups in the list:
     - /aws/lambda/payment-service
-    - /aws/lambda/payment-processor  
+    - /aws/lambda/payment-processor
     - /ecs/payment-api
-    
+
     Let me search for errors in these log groups..."
    │
    ▼
-LLM calls: fetch_logs(log_group="/aws/lambda/payment-service", 
-                      start_time="1h ago", 
+LLM calls: fetch_logs(log_group="/aws/lambda/payment-service",
+                      start_time="1h ago",
                       filter_pattern="ERROR")
    │
    ▼
@@ -1175,14 +1175,14 @@ It used the pre-loaded list to identify relevant log groups immediately.
 class LogGroupManager:
     """
     Manager for pre-loaded CloudWatch log groups.
-    
+
     Properties:
         state: LogGroupManagerState - Current state of the manager
         log_groups: list[LogGroupInfo] - Read-only copy of loaded groups
         count: int - Number of loaded log groups
         last_refresh: datetime | None - When groups were last loaded
         is_ready: bool - Whether groups are loaded and ready
-    
+
     Methods:
         async load_all(progress_callback) -> LogGroupManagerResult
         async refresh(progress_callback) -> LogGroupManagerResult
@@ -1200,7 +1200,7 @@ class LogGroupManager:
 class LogGroupInfo:
     """
     Lightweight representation of a CloudWatch log group.
-    
+
     Attributes:
         name: str - Log group name (e.g., "/aws/lambda/my-function")
         created: int | None - Creation timestamp in epoch milliseconds
@@ -1220,7 +1220,7 @@ class LogGroupInfo:
 class LogGroupManagerResult:
     """
     Result of a log group fetch/refresh operation.
-    
+
     Attributes:
         success: bool - Whether the operation succeeded
         log_groups: list[LogGroupInfo] - Loaded log groups (empty on failure)
@@ -1242,13 +1242,13 @@ class LLMOrchestrator:
     def inject_context_update(self, context_message: str) -> None:
         """
         Inject a context update to be included in the next LLM call.
-        
+
         The injected message will be added as a system message after the
         main system prompt but before the conversation continues.
-        
+
         Args:
             context_message: Message to inject (typically a context update)
-        
+
         Note:
             Only one injection can be pending at a time. New injections
             overwrite previous pending injections.
@@ -1263,13 +1263,13 @@ class CommandHandler:
     async def _refresh_log_groups(self, args: str) -> str:
         """
         Handle the /refresh command.
-        
+
         Args:
             args: Command arguments (supports "--prefix <prefix>")
-        
+
         Returns:
             Status message with rich formatting
-        
+
         Side Effects:
             - Refreshes log groups in LogGroupManager
             - Injects context update into orchestrator
@@ -1563,7 +1563,7 @@ class LogGroupInfo:
     created: int | None = None  # Optional, useful for sorting
     stored_bytes: int = 0  # Optional, can be useful
     retention_days: int | None = None  # Optional
-    
+
     # NOT storing: arn, kmsKeyId, logGroupClass, dataProtectionStatus
     # These can be fetched via tool if needed
 ```
@@ -1575,7 +1575,7 @@ def _format_full_list(self) -> str:
     """Use minimal formatting to save tokens."""
     # Names only, no metadata
     group_list = "\n".join(f"- {g.name}" for g in sorted_groups)
-    
+
     # Compact instructions
     # Each instruction is necessary but concise
 ```
@@ -1610,7 +1610,7 @@ For the paginator in LogGroupManager, boto3's built-in retry handles most cases.
 # Add small delay between pages for very large accounts
 for page in paginator.paginate():
     # Process page...
-    
+
     if len(log_groups) > 1000:
         # Slow down to avoid rate limits
         await asyncio.sleep(0.1)
@@ -1635,7 +1635,7 @@ Phase 2: Orchestrator Integration
 ├── Step 5: Update orchestrator tests
 └── Step 6: Test system prompt generation
 
-Phase 3: CLI Integration  
+Phase 3: CLI Integration
 ├── Step 7: Modify cli.py
 ├── Step 8: Test startup flow end-to-end
 └── Step 9: Verify graceful degradation
@@ -1686,7 +1686,7 @@ class LogGroupInfo:
     created: int | None = None
     stored_bytes: int = 0
     retention_days: int | None = None
-    
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "LogGroupInfo":
         return cls(
@@ -1712,50 +1712,50 @@ ProgressCallback = Callable[[int, str], None]
 
 class LogGroupManager:
     """Manages pre-loaded CloudWatch log groups."""
-    
+
     FULL_LIST_THRESHOLD = 500
     SUMMARY_SAMPLE_SIZE = 100
-    
+
     def __init__(self, datasource: CloudWatchDataSource) -> None:
         self.datasource = datasource
         self._log_groups: list[LogGroupInfo] = []
         self._state = LogGroupManagerState.UNINITIALIZED
         self._last_refresh: datetime | None = None
         self._last_error: str | None = None
-    
+
     @property
     def state(self) -> LogGroupManagerState:
         return self._state
-    
+
     @property
     def log_groups(self) -> list[LogGroupInfo]:
         return self._log_groups.copy()
-    
+
     @property
     def count(self) -> int:
         return len(self._log_groups)
-    
+
     @property
     def last_refresh(self) -> datetime | None:
         return self._last_refresh
-    
+
     @property
     def is_ready(self) -> bool:
         return self._state == LogGroupManagerState.READY
-    
+
     async def load_all(
         self,
         progress_callback: ProgressCallback | None = None,
     ) -> LogGroupManagerResult:
         """Load all log groups from CloudWatch with full pagination."""
         start_time = time.monotonic()
-        
+
         self._state = LogGroupManagerState.LOADING
         self._last_error = None
-        
+
         if progress_callback:
             progress_callback(0, "Starting log group discovery...")
-        
+
         try:
             loop = asyncio.get_event_loop()
             raw_groups = await loop.run_in_executor(
@@ -1763,36 +1763,36 @@ class LogGroupManager:
                 self._fetch_all_log_groups_sync,
                 progress_callback,
             )
-            
+
             all_groups = [LogGroupInfo.from_dict(raw) for raw in raw_groups]
-            
+
             self._log_groups = all_groups
             self._state = LogGroupManagerState.READY
             self._last_refresh = datetime.now(timezone.utc)
-            
+
             duration_ms = int((time.monotonic() - start_time) * 1000)
-            
+
             if progress_callback:
                 progress_callback(len(all_groups), "Log group discovery complete")
-            
+
             return LogGroupManagerResult(
                 success=True,
                 log_groups=all_groups,
                 count=len(all_groups),
                 duration_ms=duration_ms,
             )
-            
+
         except Exception as e:
             self._state = LogGroupManagerState.ERROR
             self._last_error = str(e)
             duration_ms = int((time.monotonic() - start_time) * 1000)
-            
+
             return LogGroupManagerResult(
                 success=False,
                 error_message=str(e),
                 duration_ms=duration_ms,
             )
-    
+
     def _fetch_all_log_groups_sync(
         self,
         progress_callback: ProgressCallback | None = None,
@@ -1800,7 +1800,7 @@ class LogGroupManager:
         """Synchronous fetch of all log groups with pagination."""
         paginator = self.datasource.client.get_paginator("describe_log_groups")
         log_groups: list[dict[str, Any]] = []
-        
+
         for page in paginator.paginate():
             for lg in page["logGroups"]:
                 log_groups.append({
@@ -1809,29 +1809,29 @@ class LogGroupManager:
                     "stored_bytes": lg.get("storedBytes", 0),
                     "retention_days": lg.get("retentionInDays"),
                 })
-            
+
             if progress_callback:
                 progress_callback(len(log_groups), f"Loading... ({len(log_groups)} found)")
-        
+
         return log_groups
-    
+
     async def refresh(
         self,
         progress_callback: ProgressCallback | None = None,
     ) -> LogGroupManagerResult:
         """Refresh the log groups list."""
         return await self.load_all(progress_callback=progress_callback)
-    
+
     def format_for_prompt(self) -> str:
         """Format log groups for inclusion in LLM system prompt."""
         if not self._log_groups:
             return self._format_empty_state()
-        
+
         if len(self._log_groups) <= self.FULL_LIST_THRESHOLD:
             return self._format_full_list()
         else:
             return self._format_summary()
-    
+
     def _format_empty_state(self) -> str:
         """Format message when no log groups are loaded."""
         if self._state == LogGroupManagerState.ERROR:
@@ -1841,32 +1841,32 @@ class LogGroupManager:
 **Error:** {self._last_error}
 
 You should use the `list_log_groups` tool to discover available log groups."""
-        
+
         elif self._state == LogGroupManagerState.UNINITIALIZED:
             return """## Log Groups Status
 
 **Status:** Log groups not yet loaded
 
 Use the `list_log_groups` tool to discover available log groups."""
-        
+
         else:
             return """## Log Groups Status
 
 **Status:** No log groups found in this AWS account/region
 
-The AWS account appears to have no CloudWatch log groups, or you may not have 
+The AWS account appears to have no CloudWatch log groups, or you may not have
 permission to list them. Verify your AWS credentials and permissions."""
-    
+
     def _format_full_list(self) -> str:
         """Format complete list of log groups."""
         sorted_groups = sorted(self._log_groups, key=lambda g: g.name)
         group_list = "\n".join(f"- {g.name}" for g in sorted_groups)
-        
+
         refresh_time = (
-            self._last_refresh.strftime("%Y-%m-%d %H:%M:%S UTC") 
+            self._last_refresh.strftime("%Y-%m-%d %H:%M:%S UTC")
             if self._last_refresh else "Unknown"
         )
-        
+
         return f"""## Available Log Groups
 
 **Total:** {len(self._log_groups)} log groups
@@ -1879,24 +1879,24 @@ permission to list them. Verify your AWS credentials and permissions."""
 - This list is your primary reference - no need to call `list_log_groups` unless user requests fresh lookup
 - If a log group name doesn't match exactly, suggest the closest match from this list
 - User can refresh this list with the `/refresh` command"""
-    
+
     def _format_summary(self) -> str:
         """Format summary for large accounts."""
         categories = self._categorize_log_groups()
         sample = self._get_representative_sample()
-        
+
         refresh_time = (
             self._last_refresh.strftime("%Y-%m-%d %H:%M:%S UTC")
             if self._last_refresh else "Unknown"
         )
-        
+
         category_lines = []
         for prefix, count in sorted(categories.items(), key=lambda x: -x[1])[:15]:
             category_lines.append(f"- `{prefix}*`: {count} log groups")
         categories_text = "\n".join(category_lines)
-        
+
         sample_text = "\n".join(f"- {g.name}" for g in sample)
-        
+
         return f"""## Available Log Groups
 
 **Total:** {len(self._log_groups)} log groups
@@ -1915,11 +1915,11 @@ permission to list them. Verify your AWS credentials and permissions."""
 - Common prefixes: `/aws/lambda/`, `/aws/apigateway/`, `/ecs/`, `/aws/rds/`
 - User can refresh this list with the `/refresh` command
 - When user mentions a service, match it to the appropriate prefix category"""
-    
+
     def _categorize_log_groups(self) -> dict[str, int]:
         """Categorize log groups by common prefixes."""
         categories: dict[str, int] = {}
-        
+
         known_prefixes = [
             "/aws/lambda/",
             "/aws/apigateway/",
@@ -1932,7 +1932,7 @@ permission to list them. Verify your AWS credentials and permissions."""
             "/aws/kinesisfirehose/",
             "/aws/vendedlogs/",
         ]
-        
+
         for group in self._log_groups:
             matched = False
             for prefix in known_prefixes:
@@ -1940,7 +1940,7 @@ permission to list them. Verify your AWS credentials and permissions."""
                     categories[prefix] = categories.get(prefix, 0) + 1
                     matched = True
                     break
-            
+
             if not matched:
                 parts = group.name.split("/")
                 if len(parts) >= 3:
@@ -1950,42 +1950,42 @@ permission to list them. Verify your AWS credentials and permissions."""
                 else:
                     prefix = "(other)"
                 categories[prefix] = categories.get(prefix, 0) + 1
-        
+
         return categories
-    
+
     def _get_representative_sample(self) -> list[LogGroupInfo]:
         """Get a representative sample of log groups."""
         if len(self._log_groups) <= self.SUMMARY_SAMPLE_SIZE:
             return sorted(self._log_groups, key=lambda g: g.name)
-        
+
         categories = self._categorize_log_groups()
         sample: list[LogGroupInfo] = []
-        
+
         total = len(self._log_groups)
         for prefix, count in sorted(categories.items(), key=lambda x: -x[1]):
             allocation = max(1, int(self.SUMMARY_SAMPLE_SIZE * count / total))
             matching = [g for g in self._log_groups if g.name.startswith(prefix)]
             matching.sort(key=lambda g: g.name)
             sample.extend(matching[:allocation])
-            
+
             if len(sample) >= self.SUMMARY_SAMPLE_SIZE:
                 break
-        
+
         sample.sort(key=lambda g: g.name)
         return sample[:self.SUMMARY_SAMPLE_SIZE]
-    
+
     def get_log_group_names(self) -> list[str]:
         """Get list of log group names only."""
         return [g.name for g in self._log_groups]
-    
+
     def find_matching_groups(self, pattern: str) -> list[LogGroupInfo]:
         """Find log groups matching a pattern."""
         pattern_lower = pattern.lower()
         return [
-            g for g in self._log_groups 
+            g for g in self._log_groups
             if pattern_lower in g.name.lower()
         ]
-    
+
     def get_stats(self) -> dict[str, Any]:
         """Get statistics about loaded log groups."""
         if not self._log_groups:
@@ -1996,7 +1996,7 @@ permission to list them. Verify your AWS credentials and permissions."""
                 "total_bytes": 0,
                 "categories": {},
             }
-        
+
         return {
             "count": len(self._log_groups),
             "state": self._state.value,
@@ -2055,8 +2055,8 @@ See Section 3.4 for full details. Key changes:
 **app.py:**
 ```python
 def __init__(
-    self, 
-    orchestrator: LLMOrchestrator, 
+    self,
+    orchestrator: LLMOrchestrator,
     cache_manager: CacheManager,
     log_group_manager: "LogGroupManager | None" = None,  # NEW
 ) -> None:
@@ -2070,11 +2070,11 @@ def __init__(self, orchestrator: LLMOrchestrator, cache_manager: CacheManager) -
     # ... existing code ...
     # Get log_group_manager from app if available
     self.log_group_manager = getattr(self.app, 'log_group_manager', None)
-    
+
     self.command_handler = CommandHandler(
-        orchestrator, 
-        cache_manager, 
-        self.settings, 
+        orchestrator,
+        cache_manager,
+        self.settings,
         self,
         self.log_group_manager,  # NEW
     )
@@ -2119,7 +2119,7 @@ from logai.core.log_group_manager import (
 def mock_datasource():
     """Create a mock CloudWatch data source."""
     datasource = MagicMock()
-    
+
     # Mock the boto3 client and paginator
     mock_paginator = MagicMock()
     mock_paginator.paginate.return_value = [
@@ -2135,7 +2135,7 @@ def mock_datasource():
             ]
         },
     ]
-    
+
     datasource.client.get_paginator.return_value = mock_paginator
     return datasource
 
@@ -2152,35 +2152,35 @@ class TestLogGroupManagerLoadAll:
     @pytest.mark.asyncio
     async def test_load_all_success(self, mock_datasource):
         manager = LogGroupManager(mock_datasource)
-        
+
         result = await manager.load_all()
-        
+
         assert result.success is True
         assert result.count == 3
         assert manager.state == LogGroupManagerState.READY
         assert manager.is_ready is True
         assert manager.last_refresh is not None
-    
+
     @pytest.mark.asyncio
     async def test_load_all_with_progress_callback(self, mock_datasource):
         manager = LogGroupManager(mock_datasource)
         progress_calls = []
-        
+
         def callback(count, msg):
             progress_calls.append((count, msg))
-        
+
         await manager.load_all(progress_callback=callback)
-        
+
         assert len(progress_calls) >= 2  # At least start and end
         assert progress_calls[-1][1] == "Log group discovery complete"
-    
+
     @pytest.mark.asyncio
     async def test_load_all_handles_error(self, mock_datasource):
         mock_datasource.client.get_paginator.side_effect = Exception("AWS Error")
         manager = LogGroupManager(mock_datasource)
-        
+
         result = await manager.load_all()
-        
+
         assert result.success is False
         assert "AWS Error" in result.error_message
         assert manager.state == LogGroupManagerState.ERROR
@@ -2191,22 +2191,22 @@ class TestLogGroupManagerFormatForPrompt:
     async def test_format_full_list_under_threshold(self, mock_datasource):
         manager = LogGroupManager(mock_datasource)
         await manager.load_all()
-        
+
         prompt = manager.format_for_prompt()
-        
+
         assert "## Available Log Groups" in prompt
         assert "3 log groups" in prompt
         assert "/aws/lambda/func-1" in prompt
         assert "/ecs/service-1" in prompt
-    
+
     def test_format_empty_state_uninitialized(self, mock_datasource):
         manager = LogGroupManager(mock_datasource)
-        
+
         prompt = manager.format_for_prompt()
-        
+
         assert "not yet loaded" in prompt
         assert "list_log_groups" in prompt
-    
+
     @pytest.mark.asyncio
     async def test_format_summary_over_threshold(self, mock_datasource):
         """Test summary format when over 500 log groups."""
@@ -2218,12 +2218,12 @@ class TestLogGroupManagerFormatForPrompt:
             ]
         }
         mock_datasource.client.get_paginator.return_value.paginate.return_value = [large_page]
-        
+
         manager = LogGroupManager(mock_datasource)
         await manager.load_all()
-        
+
         prompt = manager.format_for_prompt()
-        
+
         assert "600 log groups" in prompt
         assert "Log Group Categories" in prompt
         assert "Sample Log Groups" in prompt
@@ -2233,21 +2233,21 @@ class TestLogGroupManagerRefresh:
     @pytest.mark.asyncio
     async def test_refresh_updates_data(self, mock_datasource):
         manager = LogGroupManager(mock_datasource)
-        
+
         # Initial load
         await manager.load_all()
         initial_refresh = manager.last_refresh
-        
+
         # Add more log groups
         mock_datasource.client.get_paginator.return_value.paginate.return_value = [
             {"logGroups": [{"logGroupName": "/new/group"}]}
         ]
-        
+
         # Refresh
         import asyncio
         await asyncio.sleep(0.01)  # Small delay to ensure different timestamp
         result = await manager.refresh()
-        
+
         assert result.success is True
         assert result.count == 1
         assert manager.last_refresh > initial_refresh
@@ -2261,19 +2261,19 @@ class TestLogGroupInfo:
             "stored_bytes": 5000,
             "retention_days": 30,
         }
-        
+
         info = LogGroupInfo.from_dict(data)
-        
+
         assert info.name == "/aws/lambda/test"
         assert info.created == 1234567890000
         assert info.stored_bytes == 5000
         assert info.retention_days == 30
-    
+
     def test_from_dict_with_minimal_fields(self):
         data = {"name": "/test"}
-        
+
         info = LogGroupInfo.from_dict(data)
-        
+
         assert info.name == "/test"
         assert info.created is None
         assert info.stored_bytes == 0
@@ -2292,40 +2292,40 @@ class TestOrchestratorWithLogGroupManager:
         manager.is_ready = True
         manager.format_for_prompt.return_value = "## Available Log Groups\n- /test/group"
         return manager
-    
+
     def test_system_prompt_includes_log_groups(self, mock_log_group_manager, ...):
         orchestrator = LLMOrchestrator(
             ...,
             log_group_manager=mock_log_group_manager,
         )
-        
+
         prompt = orchestrator._get_system_prompt()
-        
+
         assert "## Available Log Groups" in prompt
         assert "/test/group" in prompt
-    
+
     def test_system_prompt_without_log_group_manager(self, ...):
         orchestrator = LLMOrchestrator(
             ...,
             log_group_manager=None,
         )
-        
+
         prompt = orchestrator._get_system_prompt()
-        
+
         assert "discovered via" in prompt.lower() or "list_log_groups" in prompt
-    
+
     def test_inject_context_update(self, mock_log_group_manager, ...):
         orchestrator = LLMOrchestrator(
             ...,
             log_group_manager=mock_log_group_manager,
         )
-        
+
         orchestrator.inject_context_update("New context here")
-        
+
         # Verify it's retrievable
         injection = orchestrator._get_pending_context_injection()
         assert injection == "New context here"
-        
+
         # Verify it's cleared after retrieval
         injection2 = orchestrator._get_pending_context_injection()
         assert injection2 is None
@@ -2343,7 +2343,7 @@ from unittest.mock import MagicMock, patch
 @pytest.mark.integration
 class TestLogGroupPreloadIntegration:
     """Integration tests for log group pre-loading feature."""
-    
+
     @pytest.fixture
     def mock_aws_environment(self):
         """Set up mock AWS environment."""
@@ -2358,44 +2358,44 @@ class TestLogGroupPreloadIntegration:
             ]
             mock_client.return_value.get_paginator.return_value = mock_paginator
             yield mock_client
-    
+
     @pytest.mark.asyncio
     async def test_full_startup_flow(self, mock_aws_environment):
         """Test that log groups are loaded during startup."""
         from logai.core.log_group_manager import LogGroupManager
         from logai.providers.datasources.cloudwatch import CloudWatchDataSource
         from logai.config.settings import LogAISettings
-        
+
         # Create settings with mock values
         settings = LogAISettings(
             aws_region="us-east-1",
             aws_profile="test",
         )
-        
+
         # Initialize components
         datasource = CloudWatchDataSource(settings)
         manager = LogGroupManager(datasource)
-        
+
         # Load log groups
         result = await manager.load_all()
-        
+
         # Verify
         assert result.success is True
         assert result.count == 2
         assert manager.is_ready
-    
+
     @pytest.mark.asyncio
     async def test_orchestrator_includes_preloaded_groups(self, mock_aws_environment, ...):
         """Test that orchestrator includes preloaded groups in prompt."""
         # ... setup ...
-        
+
         orchestrator = LLMOrchestrator(
             ...,
             log_group_manager=manager,
         )
-        
+
         prompt = orchestrator._get_system_prompt()
-        
+
         assert "/aws/lambda/test-function" in prompt
         assert "/ecs/test-service" in prompt
 ```
@@ -2413,7 +2413,7 @@ class TestLogGroupPreloadIntegration:
 - [ ] Time startup with ~100 log groups (should be <5s)
 - [ ] Time startup with ~1000 log groups (should be <30s)
 
-### System Prompt Tests  
+### System Prompt Tests
 - [ ] First query shows agent using pre-loaded list
 - [ ] Agent doesn't call list_log_groups for initial queries
 - [ ] Large account shows summary instead of full list
@@ -2539,7 +2539,7 @@ After implementation, measure:
 - Add `log_group_manager` parameter to `__init__`
 - Add `_pending_context_injection` attribute
 - Update `SYSTEM_PROMPT` with `{log_groups_context}` placeholder
-- Modify `_get_system_prompt()` 
+- Modify `_get_system_prompt()`
 - Add `inject_context_update()` and `_get_pending_context_injection()` methods
 - Update `_chat_complete()` and `_chat_stream()` to check for injections
 
@@ -2576,4 +2576,4 @@ After implementation, measure:
 
 **Document End**
 
-*Ready for implementation by Jackie. Questions should be directed to Sally via George (TPM).*
+*Ready for implementation by Jackie. Questions should be directed to Saanvi via George (TPM).*

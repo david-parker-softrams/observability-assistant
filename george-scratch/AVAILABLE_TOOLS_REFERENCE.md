@@ -1,6 +1,6 @@
 # LogAI Available Tools Reference
 
-**Last Updated**: 2026-02-11  
+**Last Updated**: 2026-02-11
 **Documentation Version**: 1.0
 
 ## Overview
@@ -29,11 +29,11 @@ This document provides a complete inventory of all tools/functions available to 
 ## Tool Categories
 
 ### Category 1: Inventory & Discovery
-**Purpose**: Discover what data is available before querying  
+**Purpose**: Discover what data is available before querying
 **Tools**: `list_log_groups`
 
 ### Category 2: Search & Fetch
-**Purpose**: Retrieve and search log data across time ranges  
+**Purpose**: Retrieve and search log data across time ranges
 **Tools**: `fetch_logs`, `search_logs`
 
 ---
@@ -82,7 +82,7 @@ Lists all available CloudWatch log groups in the current AWS region. This is the
   - Maximum: 100
   - Minimum: 1
 
-**Return Type**: 
+**Return Type**:
 ```json
 {
   "success": true,
@@ -124,11 +124,11 @@ Lists all available CloudWatch log groups in the current AWS region. This is the
 - Returns empty `log_groups` array if no matches found
 - Handles rate limiting gracefully with built-in retries
 
-**Caching**: Enabled  
+**Caching**: Enabled
 - Cache key: `query_type`, `prefix`, `limit`
 - TTL: Configured in settings
 
-**File Location**: 
+**File Location**:
 - Implementation: `src/logai/core/tools/cloudwatch_tools.py` (lines 13-125)
 - Tests: `tests/unit/test_cloudwatch_tools.py`
 
@@ -775,15 +775,15 @@ All tools inherit from `BaseTool`:
 class BaseTool(ABC):
     @property
     def name(self) -> str: ...
-    
+
     @property
     def description(self) -> str: ...
-    
+
     @property
     def parameters(self) -> dict: ...
-    
+
     async def execute(self, **kwargs) -> dict: ...
-    
+
     def to_function_definition(self) -> dict: ...
 ```
 
@@ -795,13 +795,13 @@ Central registry for managing tools:
 class ToolRegistry:
     @classmethod
     def register(cls, tool: BaseTool) -> None: ...
-    
+
     @classmethod
     def get(cls, tool_name: str) -> BaseTool: ...
-    
+
     @classmethod
     def execute(cls, tool_name: str, **kwargs) -> dict: ...
-    
+
     @classmethod
     def to_function_definitions(cls) -> list[dict]: ...
 ```
@@ -809,7 +809,7 @@ class ToolRegistry:
 ### Tool Execution Flow
 
 ```
-LLM generates tool call → Parse tool name & args → Registry lookup 
+LLM generates tool call → Parse tool name & args → Registry lookup
 → Tool.execute() → Return result → Parse result → Return to LLM
 ```
 
@@ -952,15 +952,15 @@ class MyNewTool(BaseTool):
     @property
     def name(self) -> str:
         return "my_tool_name"
-    
+
     @property
     def description(self) -> str:
         return "What this tool does"
-    
+
     @property
     def parameters(self) -> dict:
         return {"type": "object", "properties": {...}}
-    
+
     async def execute(self, **kwargs) -> dict:
         # Implementation
         return {"success": True, ...}

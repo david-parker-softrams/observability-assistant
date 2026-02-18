@@ -8,9 +8,9 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from logai.config.settings import LogAISettings
-from logai.providers.llm.litellm_provider import LiteLLMProvider
-from logai.auth import get_github_copilot_token
+from logai.auth import get_github_copilot_token  # noqa: E402
+from logai.config.settings import LogAISettings  # noqa: E402
+from logai.providers.llm.litellm_provider import LiteLLMProvider  # noqa: E402
 
 
 async def test_github_copilot():
@@ -35,7 +35,7 @@ async def test_github_copilot():
         llm_provider="github-copilot",
         github_copilot_model="gpt-4o-mini",
     )
-    print(f"✓ Settings created")
+    print("✓ Settings created")
     print(f"  Provider: {settings.llm_provider}")
     print(f"  Model: {settings.github_copilot_model}")
 
@@ -57,7 +57,7 @@ async def test_github_copilot():
 
         print("  Sending request...")
         response = await provider.chat(messages)
-        print(f"✓ Response received!")
+        print("✓ Response received!")
         print(f"  Content: {response.content}")
         print(f"  Finish reason: {response.finish_reason}")
         print(f"  Tokens: {response.usage}")

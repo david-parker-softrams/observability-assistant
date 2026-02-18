@@ -8,8 +8,8 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-import httpx
-from logai.auth import get_github_copilot_token
+import httpx  # noqa: E402
+from logai.auth import get_github_copilot_token  # noqa: E402
 
 
 async def test_parameter(name: str, body: dict) -> tuple[str, int, str]:
@@ -87,12 +87,12 @@ async def main():
     rejected = [r for r in results if "❌" in r[2]]
 
     print(f"✅ ACCEPTED PARAMETERS ({len(accepted)}):")
-    for name, status, msg in accepted:
+    for name, _status, _msg in accepted:
         print(f"   - {name}")
 
     print()
     print(f"❌ REJECTED PARAMETERS ({len(rejected)}):")
-    for name, status, msg in rejected:
+    for name, status, _msg in rejected:
         print(f"   - {name} (HTTP {status})")
 
     print()

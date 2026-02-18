@@ -4,9 +4,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from botocore.exceptions import ClientError
-from moto import mock_aws
-
+from botocore.exceptions import ClientError, ProfileNotFound
 from logai.config.settings import LogAISettings
 from logai.providers.datasources import (
     AuthenticationError,
@@ -15,6 +13,7 @@ from logai.providers.datasources import (
     LogGroupNotFoundError,
     RateLimitError,
 )
+from moto import mock_aws
 
 
 @pytest.fixture
@@ -48,7 +47,7 @@ def test_init_with_profile(clean_env: None) -> None:
 
     # This will fail if profile doesn't exist, but that's expected
     # We just want to verify the code path
-    with pytest.raises(Exception):
+    with pytest.raises((ClientError, DataSourceError, AuthenticationError, ProfileNotFound)):
         CloudWatchDataSource(settings)
 
 

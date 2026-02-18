@@ -1,8 +1,8 @@
 # TUI Architecture Investigation: Tool Calls Sidebar Implementation
 
-**Investigator**: Hans  
-**Date**: February 11, 2026  
-**Status**: Complete  
+**Investigator**: Hans
+**Date**: February 11, 2026
+**Status**: Complete
 **Objective**: Understand current TUI architecture and plan tool calls sidebar addition
 
 ---
@@ -46,10 +46,10 @@ Textual provides:
 ```python
 class LogAIApp(App[None]):
     """LogAI Terminal User Interface application."""
-    
+
     TITLE = "LogAI - CloudWatch Assistant"
     CSS_PATH = Path(__file__).parent / "styles" / "app.tcss"
-    
+
     def on_mount(self) -> None:
         """Mount the chat screen when app starts."""
         await self.push_screen(
@@ -102,20 +102,20 @@ The `LLMOrchestrator` class manages the conversation loop:
 ```python
 class LLMOrchestrator:
     """Coordinates LLM interactions with tool execution."""
-    
+
     async def chat_stream(self, user_message: str) -> AsyncGenerator[str, None]:
         """Stream response with automatic tool calling."""
-        
+
         # Main loop (up to max_tool_iterations times)
         while iteration < max_iterations:
             # 1. Get LLM response
             response = await self.llm_provider.chat(messages=messages, tools=tools)
-            
+
             # 2. Check if LLM wants tools
             if response.has_tool_calls():
                 # 3. Execute tools
                 tool_results = await self._execute_tool_calls(response.tool_calls)
-                
+
                 # 4. Add results to conversation
                 self.conversation_history.append({
                     "role": "assistant",
@@ -175,17 +175,17 @@ tool_results = [
 ```python
 class CommandHandler:
     """Handles special slash commands in the chat."""
-    
+
     def is_command(self, message: str) -> bool:
         """Check if a message is a command."""
         return message.strip().startswith("/")
-    
+
     async def handle_command(self, command: str) -> str:
         """Handle a special command."""
         command = command.strip()
         parts = command.split(maxsplit=1)
         cmd = parts[0].lower()
-        
+
         if cmd == "/help":
             return self._show_help()
         elif cmd == "/clear":
@@ -262,7 +262,7 @@ class StatusBar(Static):
     status: reactive[str] = reactive("Ready")
     cache_hits: reactive[int] = reactive(0)
     cache_misses: reactive[int] = reactive(0)
-    
+
     def watch_status(self, new_status: str) -> None:
         """Called automatically when status changes."""
         self.update_display()
@@ -277,7 +277,7 @@ class ChatScreen(Screen[None]):
         super().__init__()
         self._show_tools_sidebar = False  # <-- Add here
         # ...
-    
+
     def _toggle_tools_sidebar(self) -> None:
         self._show_tools_sidebar = not self._show_tools_sidebar
         # Update layout
@@ -497,10 +497,10 @@ while processing:
 class LLMOrchestrator:
     def __init__(self, ...):
         self.tool_call_listeners: list[Callable] = []
-    
+
     def register_tool_listener(self, callback: Callable) -> None:
         self.tool_call_listeners.append(callback)
-    
+
     async def _execute_tool_calls(self, tool_calls):
         for tool_call in tool_calls:
             # ... execute ...
@@ -513,11 +513,11 @@ class LLMOrchestrator:
 # In ChatScreen - use reactive source of truth
 class ChatScreen(Screen[None]):
     recent_tool_calls: reactive[list] = reactive([])
-    
+
     def on_mount(self):
         # Subscribe to orchestrator updates
         self.orchestrator.subscribe_to_tools(self._on_tool_call)
-    
+
     def _on_tool_call(self, tool_call_data):
         self.recent_tool_calls = [tool_call_data] + self.recent_tool_calls[:10]
 ```
@@ -534,10 +534,10 @@ class ChatScreen(Screen[None]):
 class ChatScreen(Screen[None]):
     def __init__(self, ...):
         self._show_sidebar = False
-    
+
     def compose(self) -> ComposeResult:
         yield Header()
-        
+
         # Conditional layout based on state
         if self._show_sidebar:
             # Horizontal layout: messages + sidebar
@@ -547,10 +547,10 @@ class ChatScreen(Screen[None]):
         else:
             # Just messages
             yield VerticalScroll(id="messages-container")
-        
+
         yield Container(ChatInput(), id="input-container")
         yield StatusBar(...)
-    
+
     def _toggle_sidebar(self) -> None:
         self._show_sidebar = not self._show_sidebar
         self.recompose()  # Rebuild layout
@@ -581,11 +581,11 @@ def _toggle_sidebar(self) -> None:
 class LLMOrchestrator:
     def __init__(self, ...):
         self.recent_tool_calls: asyncio.Queue = asyncio.Queue(maxsize=50)
-    
+
     async def _execute_tool_calls(self, tool_calls):
         for tool_call in tool_calls:
             result = await self.tool_registry.execute(...)
-            
+
             # Add to queue for UI
             await self.recent_tool_calls.put({
                 'name': tool_call['function']['name'],
@@ -676,7 +676,7 @@ from textual.reactive import reactive
 
 class ToolCallsSidebar(Static):
     """Sidebar showing recent tool calls and their results."""
-    
+
     DEFAULT_CSS = """
     ToolCallsSidebar {
         width: 25;
@@ -684,24 +684,24 @@ class ToolCallsSidebar(Static):
         border: solid $primary;
         padding: 0 1;
     }
-    
+
     ToolCallsSidebar > Tree {
         width: 100%;
         height: 100%;
     }
     """
-    
+
     # Reactive list of tool calls
     tool_calls: reactive[list] = reactive([])
-    
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.tree = Tree("Tools", data=None)
-    
+
     def on_mount(self) -> None:
         """Mount the tree widget."""
         self.mount(self.tree)
-    
+
     def watch_tool_calls(self, new_calls: list) -> None:
         """Update tree when tool calls change."""
         self.tree.clear()
@@ -711,7 +711,7 @@ class ToolCallsSidebar(Static):
             # Add details as children
             node.add(f"Args: {call['args']}")
             node.add(f"Status: {call.get('status', 'pending')}")
-    
+
     def add_tool_call(self, tool_call: dict) -> None:
         """Add a tool call to the sidebar."""
         self.tool_calls = [tool_call] + self.tool_calls[:9]
@@ -725,32 +725,32 @@ class ChatScreen(Screen[None]):
         # ...
         self._show_tools_sidebar = False
         self._tools_sidebar = None
-    
+
     def on_mount(self) -> None:
         # Register to receive tool call updates
         self.orchestrator.register_tool_listener(self._on_tool_call)
-    
+
     def _on_tool_call(self, tool_call_info: dict) -> None:
         """Callback when a tool is called."""
         if self._tools_sidebar:
             self._tools_sidebar.add_tool_call(tool_call_info)
-    
+
     async def _handle_toggle_tools_command(self) -> str:
         """Toggle tools sidebar visibility."""
         self._show_tools_sidebar = not self._show_tools_sidebar
-        
+
         if self._show_tools_sidebar and not self._tools_sidebar:
             # Mount sidebar
             self._tools_sidebar = ToolCallsSidebar(id="tools-sidebar")
             messages = self.query_one("#messages-container")
             # Mount after header, before messages
             messages.parent.mount(self._tools_sidebar, before=messages)
-        
+
         elif not self._show_tools_sidebar and self._tools_sidebar:
             # Unmount sidebar
             self._tools_sidebar.remove()
             self._tools_sidebar = None
-        
+
         return f"Tools sidebar {'shown' if self._show_tools_sidebar else 'hidden'}."
 ```
 
@@ -827,7 +827,7 @@ The LogAI TUI is well-architected for adding a tool calls sidebar:
 
 The main implementation challenge is connecting the async tool execution to the UI layer, but this can be solved cleanly with a callback/observer pattern.
 
-**Recommended approach**: 
+**Recommended approach**:
 - Add callback mechanism to orchestrator
 - Create ToolCallsSidebar widget
 - Integrate into ChatScreen layout
@@ -842,4 +842,3 @@ This maintains the current clean architecture while adding valuable observabilit
 - Textual Documentation: https://textual.textualize.io/
 - Current implementation: `src/logai/ui/` directory
 - Tool execution: `src/logai/core/orchestrator.py`
-

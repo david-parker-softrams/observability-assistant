@@ -33,32 +33,44 @@ class CachedResultSummary:
         """
         Convert to dict suitable for LLM context.
 
-        This is what the agent sees instead of the full result.
+        Returns a simplified structure that's easy for agents to work with:
+        - Maximum 5 top-level keys
+        - Single clear guidance field (no conflicting instructions)
+        - Consistent, intuitive field names
 
         Returns:
             Dictionary suitable for LLM context
         """
+        total_chunks = (self.total_events + 99) // 100  # ceiling division with chunk_size=100
+
         return {
+            # Boolean flag indicating this is cached data
             "cached": True,
+            # Unique identifier for fetching data
             "cache_id": self.cache_id,
+            # Summary of the dataset
             "summary": {
                 "total_events": self.total_events,
                 "time_range": self.time_range,
-                "sample_events": self.sample_events,
-                "event_statistics": self.event_statistics,
+                "statistics": self.event_statistics,
+                "sample_events": self.sample_events[:5],  # Use configured count (default 5)
             },
-            "original_query": {
-                "tool": self.original_tool,
-                "parameters": self.original_query,
-            },
-            "cache_info": {
+            # Cache metadata (expiration info)
+            "metadata": {
                 "cached_at": self.cached_at,
                 "expires_in_seconds": max(0, self.expires_at - int(time.time())),
+                "original_query": {
+                    "tool": self.original_tool,
+                    "parameters": self.original_query,
+                },
             },
-            "instructions": (
-                "This result was cached because it exceeded the context window limit. "
-                "Use fetch_cached_result_chunk(cache_id, offset, limit) to retrieve "
-                "specific events. You can also filter by time_range or search_pattern."
+            # Single, clear guidance on how to use this cached data
+            "guidance": (
+                f"This is a summary of cached results containing {self.total_events} events. "
+                f"The sample events above are for preview only - do not use them for counting or analysis. "
+                f"To analyze the full dataset, use fetch_cached_result_chunk() with cache_id='{self.cache_id}'. "
+                f"For counting or aggregation questions, you'll need to iterate through all {total_chunks} chunks "
+                f"(chunk_size=100). Example: fetch_cached_result_chunk(cache_id='{self.cache_id}', offset=0, limit=100)"
             ),
         }
 
@@ -88,6 +100,7 @@ class ResultCacheManager:
         cache_dir: Path,
         ttl_seconds: int = DEFAULT_TTL_SECONDS,
         max_size_mb: int = MAX_CACHE_SIZE_MB,
+        sample_event_count: int = 5,
         metrics_collector: MetricsCollector | None = None,
     ):
         """
@@ -97,6 +110,7 @@ class ResultCacheManager:
             cache_dir: Directory for cache database
             ttl_seconds: Time-to-live for cached results (seconds)
             max_size_mb: Maximum cache size in MB
+            sample_event_count: Number of sample events to include in summary (3-10)
             metrics_collector: Optional metrics collector for recording cache operations
         """
         self.cache_dir = cache_dir
@@ -104,6 +118,8 @@ class ResultCacheManager:
         self.db_path = self.cache_dir / "result_cache.db"
         self.ttl_seconds = ttl_seconds
         self.max_size_bytes = max_size_mb * 1024 * 1024
+        # Clamp sample_event_count to valid range (3-10), respecting MAX_SAMPLE_EVENTS
+        self.sample_event_count = min(max(3, sample_event_count), 10, self.MAX_SAMPLE_EVENTS)
         self._initialized = False
         self.metrics = metrics_collector
 
@@ -193,11 +209,143 @@ class ResultCacheManager:
         hash_digest = hashlib.sha256(content.encode()).hexdigest()[:16]
         return f"result_{hash_digest}"
 
+    def _detect_level_field(self, events: list[dict[str, Any]]) -> str | None:
+        """
+        Detect the field name used for log level in events.
+
+        Checks common field names: level, log_level, severity, logLevel, severityLabel.
+
+        Args:
+            events: Sample of event dictionaries to analyze
+
+        Returns:
+            Field name if found, None otherwise
+        """
+        if not events:
+            return None
+
+        # Common field names for log levels
+        candidate_fields = ["level", "log_level", "severity", "logLevel", "severityLabel"]
+
+        # Check first few events to detect field
+        for field in candidate_fields:
+            for event in events[:10]:
+                if field in event:
+                    value = event[field]
+                    # Verify it looks like a log level
+                    if isinstance(value, str):
+                        value_upper = value.upper()
+                        if any(
+                            level in value_upper
+                            for level in ["ERROR", "WARN", "INFO", "DEBUG", "TRACE", "FATAL"]
+                        ):
+                            logger.debug(f"Detected log level field: {field}")
+                            return field
+
+        return None
+
+    def _count_by_structured_field(
+        self, events: list[dict[str, Any]], field_name: str
+    ) -> dict[str, int]:
+        """
+        Count events by structured log level field.
+
+        Args:
+            events: List of event dictionaries
+            field_name: Name of the field containing log level
+
+        Returns:
+            Statistics dictionary with counts by normalized log level
+        """
+        stats: dict[str, int] = {}
+
+        for event in events:
+            level = event.get(field_name, "").upper()
+
+            # Normalize level names
+            if "ERROR" in level or "ERR" in level:
+                stats["ERROR"] = stats.get("ERROR", 0) + 1
+            elif "WARN" in level:
+                stats["WARN"] = stats.get("WARN", 0) + 1
+            elif "INFO" in level:
+                stats["INFO"] = stats.get("INFO", 0) + 1
+            elif "DEBUG" in level or "DBG" in level:
+                stats["DEBUG"] = stats.get("DEBUG", 0) + 1
+            elif "TRACE" in level or "TRC" in level:
+                stats["TRACE"] = stats.get("TRACE", 0) + 1
+            elif "FATAL" in level or "CRITICAL" in level or "CRIT" in level:
+                stats["FATAL"] = stats.get("FATAL", 0) + 1
+            else:
+                stats["OTHER"] = stats.get("OTHER", 0) + 1
+
+        return stats
+
+    def _count_by_text_heuristics(self, events: list[dict[str, Any]]) -> dict[str, int]:
+        """
+        Count events by text heuristics (fallback method).
+
+        Uses improved logic to avoid false positives like "No errors found".
+
+        Args:
+            events: List of event dictionaries
+
+        Returns:
+            Statistics dictionary with counts by detected log level
+        """
+        stats: dict[str, int] = {}
+
+        for event in events:
+            message = event.get("message", "")
+            message_upper = message.upper()
+
+            # Use more careful heuristics to avoid false positives
+            # Check for patterns that indicate actual log levels vs. mentions
+            categorized = False
+
+            # Look for explicit log level prefixes/patterns
+            if any(
+                pattern in message_upper
+                for pattern in [
+                    " ERROR:",
+                    " ERROR ",
+                    "[ERROR]",
+                    "ERROR:",
+                    " EXCEPTION:",
+                    " EXCEPTION ",
+                    "[EXCEPTION]",
+                    "EXCEPTION:",
+                ]
+            ):
+                stats["ERROR"] = stats.get("ERROR", 0) + 1
+                categorized = True
+            elif any(
+                pattern in message_upper
+                for pattern in [" WARN:", " WARN ", "[WARN]", "WARN:", " WARNING:", "[WARNING]"]
+            ):
+                stats["WARN"] = stats.get("WARN", 0) + 1
+                categorized = True
+            elif any(
+                pattern in message_upper for pattern in [" INFO:", " INFO ", "[INFO]", "INFO:"]
+            ):
+                stats["INFO"] = stats.get("INFO", 0) + 1
+                categorized = True
+            elif any(
+                pattern in message_upper for pattern in [" DEBUG:", " DEBUG ", "[DEBUG]", "DEBUG:"]
+            ):
+                stats["DEBUG"] = stats.get("DEBUG", 0) + 1
+                categorized = True
+
+            if not categorized:
+                stats["OTHER"] = stats.get("OTHER", 0) + 1
+
+        return stats
+
     def _extract_event_statistics(self, events: list[dict[str, Any]]) -> dict[str, int]:
         """
         Extract statistics from events for the summary.
 
-        Analyzes log levels, error types, and patterns.
+        Uses structured log level fields when available, falls back to text heuristics.
+        This provides more reliable statistics than pure text analysis.
 
         Args:
             events: List of event dictionaries
@@ -205,25 +353,18 @@ class ResultCacheManager:
         Returns:
             Statistics dictionary with counts by log level
         """
-        stats: dict[str, int] = {}
+        if not events:
+            return {}
 
-        for event in events:
-            message = event.get("message", "")
+        # Try to detect structured log level field
+        level_field = self._detect_level_field(events)
 
-            # Count by log level (heuristic detection)
-            message_upper = message.upper()
-            if "ERROR" in message_upper or "EXCEPTION" in message_upper:
-                stats["ERROR"] = stats.get("ERROR", 0) + 1
-            elif "WARN" in message_upper:
-                stats["WARN"] = stats.get("WARN", 0) + 1
-            elif "INFO" in message_upper:
-                stats["INFO"] = stats.get("INFO", 0) + 1
-            elif "DEBUG" in message_upper:
-                stats["DEBUG"] = stats.get("DEBUG", 0) + 1
-            else:
-                stats["OTHER"] = stats.get("OTHER", 0) + 1
-
-        return stats
+        if level_field:
+            logger.debug(f"Using structured field '{level_field}' for statistics (reliable method)")
+            return self._count_by_structured_field(events, level_field)
+        else:
+            logger.debug("No structured log level field found, using text heuristics (fallback)")
+            return self._count_by_text_heuristics(events)
 
     def _extract_time_range(self, events: list[dict[str, Any]]) -> dict[str, Any]:
         """
@@ -257,7 +398,7 @@ class ResultCacheManager:
         }
 
     def _sample_events(
-        self, events: list[dict[str, Any]], count: int = MAX_SAMPLE_EVENTS
+        self, events: list[dict[str, Any]], count: int | None = None
     ) -> list[dict[str, Any]]:
         """
         Sample representative events for the summary.
@@ -267,11 +408,14 @@ class ResultCacheManager:
 
         Args:
             events: List of event dictionaries
-            count: Number of samples to return
+            count: Number of samples to return (defaults to self.sample_event_count)
 
         Returns:
             List of sampled events
         """
+        if count is None:
+            count = self.sample_event_count
+
         if len(events) <= count:
             return events
 

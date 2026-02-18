@@ -1,7 +1,7 @@
 # Agent Self-Direction Investigation - Delivery Summary
 
-**Investigator**: Hans (Code Librarian)  
-**Date**: February 11, 2026  
+**Investigator**: Hans (Code Librarian)
+**Date**: February 11, 2026
 **Status**: ✅ COMPLETE
 
 ---
@@ -20,7 +20,7 @@ This is **NOT a technical bug** in tool execution, API communication, or data ha
 - **Impact**: Agent sees empty result and thinks it should try again, but has no instruction to DO IT
 - **Evidence**: Prompt says "suggest adjusting time range" not "automatically adjust time range and retry"
 
-### 2. 🔴 CRITICAL: Conversation Loop Exits Prematurely  
+### 2. 🔴 CRITICAL: Conversation Loop Exits Prematurely
 - **File**: `src/logai/core/orchestrator.py` lines 200-212
 - **Issue**: Loop terminates when agent produces text without tool calls, even if agent stated intent
 - **Impact**: Agent can't self-correct; it can only make statements about what it WOULD do
@@ -57,7 +57,7 @@ The agent is **trained to respond/report**, not to **self-direct**:
 - ✗ System prompt doesn't say: "If no logs found, automatically try again with..."
 - ✓ The agent thinks it should retry
 - ✗ The agent has no instruction to **EXECUTE** the retry, not just mention it
-- ✓ The agent is polite: "Let me try..."  
+- ✓ The agent is polite: "Let me try..."
 - ✗ The agent's training includes conditional language that doesn't trigger tool calls
 
 ---
@@ -129,12 +129,12 @@ Modify `_chat_complete()` in orchestrator.py around line 200:
 
 ```python
 if not response.has_tool_calls() and response.content:
-    intent_keywords = ["let me try", "let me search", "try again", 
+    intent_keywords = ["let me try", "let me search", "try again",
                        "broader", "try different"]
     if any(kw in response.content.lower() for kw in intent_keywords):
         # Agent stated intent but no tool call - ask it to execute
         messages.append({"role": "assistant", "content": response.content})
-        messages.append({"role": "user", 
+        messages.append({"role": "user",
                         "content": "Execute the tools needed for your stated action now."})
         continue  # CRITICAL: Loop continues, not exits
     # If no intent detected, then return response
@@ -167,7 +167,7 @@ async def test_empty_result_retry(orchestrator, mock_llm_provider, mock_tool_reg
     """Test that empty results trigger retry logic"""
     ...
 
-@pytest.mark.asyncio  
+@pytest.mark.asyncio
 async def test_intent_keyword_detection(orchestrator, mock_llm_provider, mock_tool_registry):
     """Test detection of intent keywords like 'let me try'"""
     ...
@@ -192,7 +192,7 @@ async def test_intent_keyword_detection(orchestrator, mock_llm_provider, mock_to
 - Recommended fix priority with effort estimates
 - Files to modify list
 
-### 2. AGENT_SELF_DIRECTION_QUICK_REFERENCE.md  
+### 2. AGENT_SELF_DIRECTION_QUICK_REFERENCE.md
 **Quick Reference Guide** (Actionable)
 - One-sentence root cause
 - Critical code locations with line numbers
@@ -216,7 +216,7 @@ async def test_intent_keyword_detection(orchestrator, mock_llm_provider, mock_to
 
 ### For George (Project Manager)
 
-**Complexity Level**: Medium  
+**Complexity Level**: Medium
 **Time Required**: 8-12 hours total
 **Breaking Down as**:
 - Prompt Fix: 5 min (quick win, high impact)
@@ -295,4 +295,3 @@ After implementing the fix:
 ---
 
 **Investigation Status**: ✅ COMPLETE - Ready for implementation planning
-

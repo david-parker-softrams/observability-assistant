@@ -24,7 +24,7 @@ class LogAIApp(App[None]):
     CSS_PATH = Path(__file__).parent / "styles" / "app.tcss"
 
     BINDINGS = [
-        Binding("ctrl+c", "quit", "Quit", priority=True),
+        Binding("ctrl+q", "quit", "Quit", show=True),
     ]
 
     def __init__(

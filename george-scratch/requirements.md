@@ -1,7 +1,7 @@
 # AI-Powered Observability Assistant - Requirements Document
 
-**Project Name:** Observability Assistant  
-**Date:** February 6, 2026  
+**Project Name:** Observability Assistant
+**Date:** February 6, 2026
 **Prepared by:** George (TPM)
 
 ## Executive Summary
@@ -15,7 +15,7 @@ Create a tool that integrates with various log/metric services (Splunk, New Reli
 ## Target Audience
 
 - **Primary**: DevOps Engineers and Site Reliability Engineers (SREs)
-- **Use Cases**: 
+- **Use Cases**:
   - Troubleshooting production issues
   - Root cause analysis
   - Correlating errors across multiple observability platforms
@@ -105,4 +105,4 @@ Create a tool that integrates with various log/metric services (Splunk, New Reli
 
 ---
 
-**Next Steps**: Architecture design by Sally (Software Architect)
+**Next Steps**: Architecture design by Saanvi (Software Architect)

@@ -99,6 +99,8 @@ class ModelConfigLoader:
             "llama3.1:8b": {"context_window": 8_192, "encoding": "cl100k_base"},
             "llama3.1:70b": {"context_window": 128_000, "encoding": "cl100k_base"},
             "qwen3": {"context_window": 32_768, "encoding": "cl100k_base"},
+            "openthinker": {"context_window": 131_072, "encoding": "cl100k_base"},
+            "deepseek-r1": {"context_window": 131_072, "encoding": "cl100k_base"},
         },
         "defaults": {
             "context_window": 8_192,
@@ -270,13 +272,17 @@ class ModelConfigLoader:
         if not path.exists():
             return None
 
-        if not YAML_AVAILABLE:
+        if not YAML_AVAILABLE or yaml is None:
             logger.warning("PyYAML not installed, cannot load config files")
             return None
 
+        # Type guard: yaml is not None at this point
+        yaml_module = yaml
+        assert yaml_module is not None
+
         try:
             with open(path, encoding="utf-8") as f:
-                data = yaml.safe_load(f)
+                data = yaml_module.safe_load(f)
 
             if not isinstance(data, dict):
                 logger.warning(f"Config file {path} does not contain a valid YAML dict")

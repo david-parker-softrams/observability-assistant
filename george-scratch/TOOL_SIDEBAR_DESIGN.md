@@ -1,8 +1,8 @@
 # Tool Calls Sidebar - Comprehensive Design Document
 
-**Author**: Sally (Senior Software Architect)  
-**Date**: February 11, 2026  
-**Status**: Ready for Implementation  
+**Author**: Saanvi (Senior Software Architect)
+**Date**: February 11, 2026
+**Status**: Ready for Implementation
 **Version**: 1.0
 
 ---
@@ -189,7 +189,7 @@ class ToolCallStatus(Enum):
 class ToolCallRecord:
     """
     Represents a single tool call for display in the sidebar.
-    
+
     Attributes:
         id: Unique identifier (matches tool_call_id from LLM)
         name: Tool name (e.g., "list_log_groups", "query_logs")
@@ -208,7 +208,7 @@ class ToolCallRecord:
     started_at: datetime = field(default_factory=datetime.now)
     completed_at: datetime | None = None
     error_message: str | None = None
-    
+
     @property
     def duration_ms(self) -> int | None:
         """Calculate execution duration in milliseconds."""
@@ -216,12 +216,12 @@ class ToolCallRecord:
             delta = self.completed_at - self.started_at
             return int(delta.total_seconds() * 1000)
         return None
-    
+
     @property
     def is_complete(self) -> bool:
         """Check if tool call has finished (success or error)."""
         return self.status in (ToolCallStatus.SUCCESS, ToolCallStatus.ERROR)
-    
+
     def truncated_result(self, max_length: int = 100) -> str:
         """Get truncated result string for display."""
         if self.result is None:
@@ -242,21 +242,21 @@ from typing import Callable
 class ToolCallHistory:
     """
     Manages the history of tool calls for the sidebar.
-    
+
     Uses a fixed-size deque to prevent unbounded memory growth.
     """
-    
+
     MAX_ENTRIES = 20  # Maximum tool calls to keep in history
-    
+
     def __init__(self):
         self._history: deque[ToolCallRecord] = deque(maxlen=self.MAX_ENTRIES)
         self._listeners: list[Callable[[ToolCallRecord], None]] = []
-    
+
     def add(self, record: ToolCallRecord) -> None:
         """Add a new tool call record."""
         self._history.append(record)
         self._notify_listeners(record)
-    
+
     def update(self, record_id: str, **updates) -> None:
         """Update an existing record by ID."""
         for record in self._history:
@@ -265,23 +265,23 @@ class ToolCallHistory:
                     setattr(record, key, value)
                 self._notify_listeners(record)
                 break
-    
+
     def get_all(self) -> list[ToolCallRecord]:
         """Get all tool call records (most recent last)."""
         return list(self._history)
-    
+
     def clear(self) -> None:
         """Clear all history."""
         self._history.clear()
-    
+
     def register_listener(self, callback: Callable[[ToolCallRecord], None]) -> None:
         """Register a callback for tool call updates."""
         self._listeners.append(callback)
-    
+
     def unregister_listener(self, callback: Callable[[ToolCallRecord], None]) -> None:
         """Unregister a callback."""
         self._listeners.remove(callback)
-    
+
     def _notify_listeners(self, record: ToolCallRecord) -> None:
         """Notify all listeners of an update."""
         for listener in self._listeners:
@@ -319,7 +319,7 @@ def format_result_for_display(result: dict, max_chars: int = 100) -> str:
     if "events" in result and isinstance(result["events"], list):
         count = len(result["events"])
         return f"{{count: {count}, events: [...]}}"
-    
+
     result_str = json.dumps(result)
     if len(result_str) > max_chars:
         return result_str[:max_chars - 3] + "..."
@@ -353,11 +353,11 @@ async def _toggle_tools_sidebar(self) -> str:
     # The actual toggle is done by posting a message to the ChatScreen
     # CommandHandler just returns a confirmation message
     # Note: This requires coordination with ChatScreen via app reference
-    
+
     # For MVP, we'll use app.post_message() pattern
     from logai.ui.events import ToggleToolsSidebar
     self.app.post_message(ToggleToolsSidebar())
-    
+
     # Return empty string - the visual change IS the feedback
     return ""
 ```
@@ -450,19 +450,19 @@ def _notify_tool_call(self, record: ToolCallRecord) -> None:
 async def _execute_tool_calls(self, tool_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Execute multiple tool calls with event notifications."""
     results = []
-    
+
     for tool_call in tool_calls:
         tool_call_id = tool_call.get("id", "unknown")
         function_info = tool_call.get("function", {})
         function_name = function_info.get("name")
         function_args_str = function_info.get("arguments", "{}")
-        
+
         # Parse arguments
         try:
             function_args = json.loads(function_args_str) if isinstance(function_args_str, str) else function_args_str
         except json.JSONDecodeError:
             function_args = {}
-        
+
         # Create record and notify PENDING
         record = ToolCallRecord(
             id=tool_call_id,
@@ -471,35 +471,35 @@ async def _execute_tool_calls(self, tool_calls: list[dict[str, Any]]) -> list[di
             status=ToolCallStatus.PENDING,
         )
         self._notify_tool_call(record)
-        
+
         # Update to RUNNING
         record.status = ToolCallStatus.RUNNING
         self._notify_tool_call(record)
-        
+
         try:
             # Execute tool
             result = await self.tool_registry.execute(function_name, **function_args)
-            
+
             # Update to SUCCESS
             record.status = ToolCallStatus.SUCCESS
             record.result = result
             record.completed_at = datetime.now()
             self._notify_tool_call(record)
-            
+
             results.append({"tool_call_id": tool_call_id, "result": result})
-            
+
         except Exception as e:
             # Update to ERROR
             record.status = ToolCallStatus.ERROR
             record.error_message = str(e)
             record.completed_at = datetime.now()
             self._notify_tool_call(record)
-            
+
             results.append({
                 "tool_call_id": tool_call_id,
                 "result": {"success": False, "error": str(e)},
             })
-    
+
     return results
 ```
 
@@ -529,21 +529,21 @@ async def _execute_tool_calls(self, tool_calls: list[dict[str, Any]]) -> list[di
 ```python
 class ChatScreen(Screen[None]):
     """Main chat screen with tool calls sidebar."""
-    
+
     def __init__(self, orchestrator: LLMOrchestrator, cache_manager: CacheManager) -> None:
         super().__init__()
         self.orchestrator = orchestrator
         self.cache_manager = cache_manager
         self.settings = get_settings()
         self.command_handler = CommandHandler(orchestrator, cache_manager, self.settings)
-        
+
         # Sidebar state
         self._sidebar_visible = True  # Open by default per requirement
         self._tool_sidebar: ToolCallsSidebar | None = None
-        
+
         # Register for tool call events
         self.orchestrator.register_tool_listener(self._on_tool_call)
-    
+
     def _on_tool_call(self, record: ToolCallRecord) -> None:
         """Handle tool call events from orchestrator."""
         if self._tool_sidebar:
@@ -569,7 +569,7 @@ class ToggleToolsSidebar(Message):
 
 class ToolCallUpdated(Message):
     """A tool call record was updated."""
-    
+
     def __init__(self, record: ToolCallRecord) -> None:
         super().__init__()
         self.record = record
@@ -607,11 +607,11 @@ from logai.core.orchestrator import ToolCallRecord, ToolCallStatus
 class ToolCallsSidebar(Static):
     """
     Sidebar widget showing recent tool calls and their results.
-    
+
     Displays a chronological list of tool calls made by the LLM orchestrator,
     with expandable details for each call.
     """
-    
+
     DEFAULT_CSS = """
     ToolCallsSidebar {
         width: 28;
@@ -622,65 +622,65 @@ class ToolCallsSidebar(Static):
         border-left: solid $primary;
         padding: 0 1;
     }
-    
+
     ToolCallsSidebar .sidebar-title {
         text-style: bold;
         color: $text;
         padding: 1 0;
     }
-    
+
     ToolCallsSidebar .empty-state {
         color: $text-muted;
         text-style: italic;
         padding: 2;
         text-align: center;
     }
-    
+
     ToolCallsSidebar Tree {
         width: 100%;
         height: 1fr;
         padding: 0;
     }
-    
+
     /* Status colors */
     .status-pending { color: $text-muted; }
     .status-running { color: $warning; }
     .status-success { color: $success; }
     .status-error { color: $error; }
     """
-    
+
     # Maximum number of tool calls to display
     MAX_DISPLAYED_CALLS = 20
-    
+
     def __init__(self, **kwargs) -> None:
         """Initialize the tool calls sidebar."""
         super().__init__(**kwargs)
         self._history: list[ToolCallRecord] = []
         self._tree: Tree | None = None
-    
+
     def compose(self) -> ComposeResult:
         """Compose the sidebar layout."""
         yield Static("TOOL CALLS", classes="sidebar-title")
-        yield Static("No tool calls yet.\nAsk a question to see\nthe agent's tools here.", 
+        yield Static("No tool calls yet.\nAsk a question to see\nthe agent's tools here.",
                      id="empty-state", classes="empty-state")
         yield Tree("", id="tool-tree")
-    
+
     def on_mount(self) -> None:
         """Set up the sidebar when mounted."""
         self._tree = self.query_one("#tool-tree", Tree)
         self._tree.show_root = False
         self._update_empty_state()
-    
+
     def update_tool_call(self, record: ToolCallRecord) -> None:
         """
         Update the sidebar with a tool call record.
-        
+
         Args:
             record: Tool call record to display/update
         """
         # Find existing record or add new
         existing = next((r for r in self._history if r.id == record.id), None)
-        
+
         if existing:
             # Update existing record
             idx = self._history.index(existing)
@@ -690,52 +690,52 @@ class ToolCallsSidebar(Static):
             if len(self._history) >= self.MAX_DISPLAYED_CALLS:
                 self._history.pop(0)
             self._history.append(record)
-        
+
         # Rebuild tree display
         self._rebuild_tree()
         self._update_empty_state()
-    
+
     def _rebuild_tree(self) -> None:
         """Rebuild the tree display from current history."""
         if not self._tree:
             return
-        
+
         self._tree.clear()
-        
+
         for record in self._history:
             # Create node label with status icon
             icon = self._status_icon(record.status)
             label = f"{icon} {record.name}"
-            
+
             node = self._tree.root.add(label, expand=False)
-            
+
             # Add status
             status_class = f"status-{record.status.value}"
             node.add_leaf(f"Status: {record.status.value}")
-            
+
             # Add timestamp
             time_str = record.started_at.strftime("%H:%M:%S")
             node.add_leaf(f"Time: {time_str}")
-            
+
             # Add duration if complete
             if record.duration_ms is not None:
                 node.add_leaf(f"Duration: {record.duration_ms}ms")
-            
+
             # Add arguments summary
             if record.arguments:
                 args_summary = self._format_args(record.arguments)
                 node.add_leaf(f"Args: {args_summary}")
-            
+
             # Add result or error
             if record.status == ToolCallStatus.SUCCESS and record.result:
                 result_summary = self._format_result(record.result)
                 node.add_leaf(f"Result: {result_summary}")
             elif record.status == ToolCallStatus.ERROR and record.error_message:
                 node.add_leaf(f"Error: {record.error_message[:50]}...")
-        
+
         # Auto-scroll to latest
         self._tree.scroll_end(animate=False)
-    
+
     def _status_icon(self, status: ToolCallStatus) -> str:
         """Get icon for tool call status."""
         icons = {
@@ -745,29 +745,29 @@ class ToolCallsSidebar(Static):
             ToolCallStatus.ERROR: "✗",
         }
         return icons.get(status, "?")
-    
+
     def _format_args(self, args: dict, max_len: int = 40) -> str:
         """Format arguments for display."""
         if not args:
             return "{}"
-        
+
         # Show key names and truncated values
         parts = []
         for key, value in list(args.items())[:3]:  # Max 3 args shown
             val_str = str(value)[:15] + "..." if len(str(value)) > 15 else str(value)
             parts.append(f"{key}={val_str}")
-        
+
         result = ", ".join(parts)
         if len(args) > 3:
             result += f", +{len(args) - 3} more"
-        
+
         return result[:max_len]
-    
+
     def _format_result(self, result: dict, max_len: int = 50) -> str:
         """Format result for display."""
         if not result:
             return "{}"
-        
+
         # Special handling for common result patterns
         if "count" in result:
             return f"count: {result['count']}"
@@ -777,14 +777,14 @@ class ToolCallsSidebar(Static):
             return f"{len(result['log_groups'])} groups"
         if "success" in result:
             return "success" if result["success"] else "failed"
-        
+
         # Fallback to truncated JSON
         import json
         result_str = json.dumps(result)
         if len(result_str) > max_len:
             return result_str[:max_len - 3] + "..."
         return result_str
-    
+
     def _update_empty_state(self) -> None:
         """Show/hide empty state based on history."""
         empty_state = self.query_one("#empty-state", Static)
@@ -792,7 +792,7 @@ class ToolCallsSidebar(Static):
             empty_state.display = False
         else:
             empty_state.display = True
-    
+
     def clear(self) -> None:
         """Clear all tool call history."""
         self._history.clear()
@@ -811,13 +811,13 @@ from textual.containers import Horizontal
 def compose(self) -> ComposeResult:
     """Compose the chat screen layout."""
     yield Header()
-    
+
     # Main content area with optional sidebar
     with Horizontal(id="main-content"):
         yield VerticalScroll(id="messages-container")
         if self._sidebar_visible:
             yield ToolCallsSidebar(id="tools-sidebar")
-    
+
     yield Container(ChatInput(), id="input-container")
     yield StatusBar(model=self.settings.current_llm_model)
 ```
@@ -847,13 +847,13 @@ def compose(self) -> ComposeResult:
 def _toggle_sidebar(self) -> None:
     """Toggle the tools sidebar visibility."""
     self._sidebar_visible = not self._sidebar_visible
-    
+
     if self._sidebar_visible:
         # Mount sidebar
         main_content = self.query_one("#main-content", Horizontal)
         self._tool_sidebar = ToolCallsSidebar(id="tools-sidebar")
         main_content.mount(self._tool_sidebar)
-        
+
         # Replay recent tool calls to populate sidebar
         for record in self._recent_tool_calls:
             self._tool_sidebar.update_tool_call(record)
@@ -973,7 +973,7 @@ def _format_result(self, result: dict, max_len: int = 50) -> str:
     if "events" in result:
         count = len(result["events"])
         return f"{count} events returned"
-    
+
     # For other large results, truncate
     result_str = json.dumps(result)
     if len(result_str) > max_len:
@@ -995,20 +995,20 @@ import asyncio
 
 class ToolCallsSidebar(Static):
     _rebuild_task: asyncio.Task | None = None
-    
+
     async def _debounced_rebuild(self) -> None:
         """Rebuild tree with debounce."""
         await asyncio.sleep(0.05)  # 50ms debounce
         self._rebuild_tree()
-    
+
     def update_tool_call(self, record: ToolCallRecord) -> None:
         """Update with debounced rebuild."""
         # ... update history ...
-        
+
         # Cancel pending rebuild
         if self._rebuild_task:
             self._rebuild_task.cancel()
-        
+
         # Schedule new rebuild
         self._rebuild_task = asyncio.create_task(self._debounced_rebuild())
 ```
@@ -1062,7 +1062,7 @@ def _show_sidebar_hidden_notice(self) -> None:
 
 **Problem**: User closes sidebar while tools are executing.
 
-**Solution**: 
+**Solution**:
 - Tool calls continue in background
 - History is preserved
 - When sidebar reopens, show complete history
@@ -1071,7 +1071,7 @@ def _show_sidebar_hidden_notice(self) -> None:
 def _toggle_sidebar(self) -> None:
     """Toggle sidebar - preserves history across toggles."""
     self._sidebar_visible = not self._sidebar_visible
-    
+
     if self._sidebar_visible and self._tool_sidebar is None:
         # Create sidebar and replay history
         self._tool_sidebar = ToolCallsSidebar(id="tools-sidebar")
@@ -1230,12 +1230,12 @@ from logai.core.orchestrator import ToolCallRecord, ToolCallStatus
 
 class TestToolCallsSidebar:
     """Unit tests for ToolCallsSidebar widget."""
-    
+
     def test_sidebar_initialization(self):
         """Test sidebar initializes with empty state."""
         sidebar = ToolCallsSidebar()
         assert len(sidebar._history) == 0
-    
+
     def test_add_tool_call(self):
         """Test adding a tool call record."""
         sidebar = ToolCallsSidebar()
@@ -1248,7 +1248,7 @@ class TestToolCallsSidebar:
         sidebar.update_tool_call(record)
         assert len(sidebar._history) == 1
         assert sidebar._history[0].name == "list_log_groups"
-    
+
     def test_max_history_limit(self):
         """Test that history is capped at MAX_DISPLAYED_CALLS."""
         sidebar = ToolCallsSidebar()
@@ -1260,15 +1260,15 @@ class TestToolCallsSidebar:
                 status=ToolCallStatus.SUCCESS,
             )
             sidebar.update_tool_call(record)
-        
+
         assert len(sidebar._history) == sidebar.MAX_DISPLAYED_CALLS
         # Oldest should be removed
         assert sidebar._history[0].id == "call_5"  # 25 - 20 = 5
-    
+
     def test_update_existing_record(self):
         """Test updating a record that already exists."""
         sidebar = ToolCallsSidebar()
-        
+
         # Add pending record
         record = ToolCallRecord(
             id="call_123",
@@ -1277,19 +1277,19 @@ class TestToolCallsSidebar:
             status=ToolCallStatus.PENDING,
         )
         sidebar.update_tool_call(record)
-        
+
         # Update to success
         record.status = ToolCallStatus.SUCCESS
         record.result = {"count": 42}
         sidebar.update_tool_call(record)
-        
+
         assert len(sidebar._history) == 1
         assert sidebar._history[0].status == ToolCallStatus.SUCCESS
-    
+
     def test_duration_calculation(self):
         """Test duration calculation for completed calls."""
         from datetime import timedelta
-        
+
         record = ToolCallRecord(
             id="call_123",
             name="query_logs",
@@ -1299,7 +1299,7 @@ class TestToolCallsSidebar:
             completed_at=datetime(2026, 2, 11, 14, 30, 0, 250000),  # +250ms
         )
         assert record.duration_ms == 250
-    
+
     def test_format_args_truncation(self):
         """Test argument formatting with truncation."""
         sidebar = ToolCallsSidebar()
@@ -1312,14 +1312,14 @@ class TestToolCallsSidebar:
         formatted = sidebar._format_args(args)
         assert len(formatted) <= 40
         assert "+1 more" in formatted  # 4th arg truncated
-    
+
     def test_format_result_events(self):
         """Test result formatting for events."""
         sidebar = ToolCallsSidebar()
         result = {"events": [{"msg": "test"}] * 100}
         formatted = sidebar._format_result(result)
         assert "100 events" in formatted
-    
+
     def test_status_icons(self):
         """Test status icon mapping."""
         sidebar = ToolCallsSidebar()
@@ -1341,7 +1341,7 @@ from logai.ui.app import LogAIApp
 
 class TestSidebarIntegration:
     """Integration tests for sidebar with full app."""
-    
+
     @pytest.mark.asyncio
     async def test_sidebar_visible_by_default(self):
         """Test that sidebar is visible when app starts."""
@@ -1350,7 +1350,7 @@ class TestSidebarIntegration:
             sidebar = app.query_one("#tools-sidebar")
             assert sidebar is not None
             assert sidebar.display is True
-    
+
     @pytest.mark.asyncio
     async def test_toggle_sidebar_command(self):
         """Test /tools command toggles sidebar."""
@@ -1359,15 +1359,15 @@ class TestSidebarIntegration:
             # Sidebar should be visible initially
             sidebar = app.query_one("#tools-sidebar")
             assert sidebar.display is True
-            
+
             # Type /tools command
             await pilot.type("/tools")
             await pilot.press("enter")
-            
+
             # Sidebar should be hidden
             with pytest.raises(NoMatches):
                 app.query_one("#tools-sidebar")
-    
+
     @pytest.mark.asyncio
     async def test_tool_call_appears_in_sidebar(self):
         """Test that tool calls from orchestrator appear in sidebar."""
@@ -1620,7 +1620,7 @@ tools_per_session         # Average tool calls per session
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 1.0 | 2026-02-11 | Sally | Initial design document |
+| 1.0 | 2026-02-11 | Saanvi | Initial design document |
 
 ---
 

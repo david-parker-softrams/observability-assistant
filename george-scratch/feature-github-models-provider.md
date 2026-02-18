@@ -1,8 +1,8 @@
 # Feature Request: GitHub Models as LLM Provider
 
-**Date:** February 11, 2026  
-**Requested by:** User  
-**Priority:** Medium  
+**Date:** February 11, 2026
+**Requested by:** User
+**Priority:** Medium
 **Status:** Ready for Implementation
 
 ---
@@ -34,7 +34,7 @@ GitHub Models is GitHub's AI model marketplace that provides:
 
 LogAI currently supports:
 1. Anthropic Claude (via API key)
-2. OpenAI GPT (via API key)  
+2. OpenAI GPT (via API key)
 3. Ollama (local models)
 
 ## Proposed Behavior
@@ -141,11 +141,11 @@ Add new settings:
 ```python
 class Settings(BaseSettings):
     # ... existing settings ...
-    
+
     # GitHub Models settings
     github_token: Optional[str] = Field(default=None, alias="LOGAI_GITHUB_TOKEN")
     github_model: str = Field(default="gpt-4o", alias="LOGAI_GITHUB_MODEL")
-    
+
     @property
     def current_llm_model(self) -> str:
         """Get the current LLM model being used."""
@@ -175,7 +175,7 @@ class LiteLLMProvider(BaseLLMProvider):
         self.api_key = api_key
         self.base_url = base_url
         self.github_token = github_token  # NEW
-        
+
     @classmethod
     def from_settings(cls, settings: Settings) -> "LiteLLMProvider":
         """Create provider from settings."""
@@ -187,13 +187,13 @@ class LiteLLMProvider(BaseLLMProvider):
                 base_url="https://models.inference.ai.azure.com",
             )
         # ... existing logic for other providers ...
-    
+
     def _get_model_name(self) -> str:
         """Get the full model name for LiteLLM."""
         if self.provider == "github":
             return f"azure_ai/{self.model}"
         # ... existing logic for other providers ...
-    
+
     def _get_api_params(self) -> Dict[str, Any]:
         """Get API parameters for the provider."""
         if self.provider == "github":
@@ -515,12 +515,12 @@ Manual testing:
 
 ## Implementation Assignment
 
-**Assigned to:** Jackie (software-engineer agent)  
-**Estimated Effort:** Medium feature (2-4 hours)  
+**Assigned to:** Jackie (software-engineer agent)
+**Estimated Effort:** Medium feature (2-4 hours)
 **Complexity:** Medium - requires LiteLLM provider addition and configuration updates
 
-**Review by:** Billy (code-reviewer agent)  
-**Testing by:** Raoul (qa-engineer agent)  
+**Review by:** Han-Ron (code-reviewer agent)
+**Testing by:** Raoul (qa-engineer agent)
 **Documentation by:** Tina (technical-writer agent)
 
 ---

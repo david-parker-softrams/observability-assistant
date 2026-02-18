@@ -241,7 +241,7 @@ class MetricsCollector:
                 summary["histograms"][event.name]["by_labels"][label_key].append(event.value)
 
         # Add statistics for histograms
-        for name, data in summary["histograms"].items():
+        for _name, data in summary["histograms"].items():
             values = data["values"]
             if values:
                 data["count"] = len(values)

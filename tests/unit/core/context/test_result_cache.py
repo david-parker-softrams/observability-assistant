@@ -75,9 +75,9 @@ class TestCachedResultSummary:
         assert context_dict["cache_id"] == "result_abc123"
         assert context_dict["summary"]["total_events"] == 100
         assert context_dict["summary"]["time_range"]["start"] == 1707750000000
-        assert context_dict["summary"]["event_statistics"] == {"ERROR": 10, "INFO": 90}
-        assert context_dict["original_query"]["tool"] == "fetch_logs"
-        assert "fetch_cached_result_chunk" in context_dict["instructions"]
+        assert context_dict["summary"]["statistics"] == {"ERROR": 10, "INFO": 90}
+        assert context_dict["metadata"]["original_query"]["tool"] == "fetch_logs"
+        assert "fetch_cached_result_chunk" in context_dict["guidance"]
 
     def test_to_context_dict_expires_in_seconds(self) -> None:
         """Test expires_in_seconds calculation."""
@@ -97,7 +97,7 @@ class TestCachedResultSummary:
         )
 
         context_dict = summary.to_context_dict()
-        expires_in = context_dict["cache_info"]["expires_in_seconds"]
+        expires_in = context_dict["metadata"]["expires_in_seconds"]
 
         # Should be approximately 1800 seconds (allow some test execution time)
         assert 1795 <= expires_in <= 1805

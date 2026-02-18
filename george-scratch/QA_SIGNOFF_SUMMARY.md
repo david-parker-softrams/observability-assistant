@@ -1,8 +1,8 @@
 # QA Sign-Off Summary - Tool Calls Sidebar
 
-**Feature**: Tool Calls Sidebar  
-**QA Engineer**: Raoul  
-**Date**: February 11, 2026  
+**Feature**: Tool Calls Sidebar
+**QA Engineer**: Raoul
+**Date**: February 11, 2026
 **Status**: ✅ **APPROVED FOR PRODUCTION**
 
 ---
@@ -109,8 +109,8 @@ The two low-severity bugs identified are enhancement requests already documented
 
 ## Quote from QA
 
-> "Jackie's implementation is solid, clean, and production-ready. The sidebar provides excellent visibility into agent tool execution without impacting performance or user experience. This is exactly what the design doc specified, and it works beautifully. Approved with enthusiasm!" 
-> 
+> "Jackie's implementation is solid, clean, and production-ready. The sidebar provides excellent visibility into agent tool execution without impacting performance or user experience. This is exactly what the design doc specified, and it works beautifully. Approved with enthusiasm!"
+>
 > — Raoul, QA Engineer
 
 ---

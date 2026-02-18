@@ -81,7 +81,7 @@ OpenCode supports the following `github-copilot/` provider models:
 - `github-copilot/claude-haiku-4.5` (small_model in config)
 - `github-copilot/claude-opus-4.5`
 - `github-copilot/claude-opus-4.6`
-- `github-copilot/claude-sonnet-4` 
+- `github-copilot/claude-sonnet-4`
 - `github-copilot/claude-sonnet-4.5` (default model)
 - `github-copilot/claude-opus-41`
 
@@ -155,7 +155,7 @@ No GitHub or Copilot-specific environment variables are set. Authentication reli
 
 **Supported for other providers:**
 - AWS_ACCESS_KEY_ID
-- AWS_SECRET_ACCESS_KEY  
+- AWS_SECRET_ACCESS_KEY
 - AWS_REGION
 
 ## 8. Configuration Example

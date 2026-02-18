@@ -136,7 +136,7 @@
 ## Key Visual Improvements
 
 ### 1. **Log Group Names**
-- **Before:** "3 groups" 
+- **Before:** "3 groups"
 - **After:** Bullet-pointed list of actual names
 
 ### 2. **Log Events**
@@ -240,7 +240,7 @@ logai
 
 # 3. Ask questions and watch the sidebar
 > List all my log groups
-> Show me errors from the last hour  
+> Show me errors from the last hour
 > Search for timeout in Lambda logs
 
 # 4. Observe the actual data in the sidebar
@@ -255,7 +255,7 @@ logai
 
 The tool sidebar enhancement transforms it from a **summary view** into a **data transparency layer**, allowing users to see exactly what the LLM agent receives from CloudWatch tools. This significantly improves the debugging and monitoring experience.
 
-**Before:** "3 groups", "15 events" (just counts)  
+**Before:** "3 groups", "15 events" (just counts)
 **After:** Actual log group names and log messages with timestamps
 
 This is a major UX improvement that builds trust and provides full transparency into the agent's tool execution.

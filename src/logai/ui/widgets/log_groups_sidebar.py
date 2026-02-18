@@ -25,7 +25,7 @@ class LogGroupsSidebar(Static):
     LogGroupsSidebar {
         width: 28;
         min-width: 24;
-        max-width: 35;
+        max-width: 70;
         height: 1fr;
         background: $panel;
         border-right: solid $primary;

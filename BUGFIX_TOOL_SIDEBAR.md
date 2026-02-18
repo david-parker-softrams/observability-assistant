@@ -12,8 +12,8 @@ However, the orchestrator's `_execute_tool_calls()` runs as an **async function 
 - Execute but fail silently
 
 ## The Fix
-**File**: `src/logai/ui/screens/chat.py`  
-**Method**: `_on_tool_call_event()`  
+**File**: `src/logai/ui/screens/chat.py`
+**Method**: `_on_tool_call_event()`
 **Change**: Call `on_tool_call()` directly instead of using `call_from_thread()`
 
 ### Before
@@ -97,6 +97,6 @@ If the orchestrator is ever moved to a separate thread (e.g., for CPU-intensive 
 
 ---
 
-**Status**: ✅ Fix implemented and ready for testing  
-**Reviewer**: Billy (Code Review)  
+**Status**: ✅ Fix implemented and ready for testing
+**Reviewer**: Han-Ron (Code Review)
 **Implementer**: Jackie (Senior Software Engineer)

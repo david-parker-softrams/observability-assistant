@@ -336,13 +336,13 @@ interface ModelRequest {
 class GitHubCopilotProvider {
   private authToken: string;
   private apiEndpoint = 'https://api.githubcopilot.com/chat/completions';
-  
+
   async authenticate() {
     // 1. Read from ~/.local/share/logai/auth.json
     // 2. Validate token is not expired
     // 3. Set this.authToken
   }
-  
+
   async request(modelRequest: ModelRequest) {
     // 1. Validate authentication
     // 2. Build request with Bearer token
@@ -350,7 +350,7 @@ class GitHubCopilotProvider {
     // 4. Handle response and errors
     // 5. Log to ~/.local/state/logai/model.json
   }
-  
+
   async saveAuth(token: string) {
     // 1. Ensure ~/.local/share/logai/ exists
     // 2. Write auth.json with proper structure

@@ -68,7 +68,7 @@ class TestLogGroupsSidebar:
 
     def test_full_names_displayed_without_truncation(self):
         """Test that full log group names are displayed without truncation."""
-        sidebar = LogGroupsSidebar()
+        _sidebar = LogGroupsSidebar()
 
         # Test very long name is not truncated
         long_name = (

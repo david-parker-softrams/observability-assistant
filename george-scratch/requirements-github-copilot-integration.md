@@ -1,8 +1,8 @@
 # GitHub Copilot Integration - Requirements Document
 
-**Date:** February 11, 2026  
-**Project:** LogAI  
-**Feature:** GitHub Copilot LLM Provider Integration  
+**Date:** February 11, 2026
+**Project:** LogAI
+**Feature:** GitHub Copilot LLM Provider Integration
 **Status:** Approved for Implementation
 
 ---
@@ -15,8 +15,8 @@ Add GitHub Copilot as an LLM provider option in LogAI, enabling users to leverag
 
 ## User Story
 
-**As a** LogAI user with GitHub Copilot access  
-**I want to** use GitHub Copilot models as my LLM provider  
+**As a** LogAI user with GitHub Copilot access
+**I want to** use GitHub Copilot models as my LLM provider
 **So that** I can leverage GitHub's AI models without managing separate API keys
 
 ---
@@ -352,7 +352,7 @@ None - all questions resolved:
 ## Approval
 
 - **User Decision:** Approved - Option A (Move forward with implementation)
-- **Architecture:** Approved by Sally (architecture-github-copilot-integration.md)
+- **Architecture:** Approved by Saanvi (architecture-github-copilot-integration.md)
 - **Implementation Lead:** Jackie (Senior Software Engineer)
 - **Estimated Timeline:** 2 weeks (accelerated for AI agents)
 
@@ -365,7 +365,7 @@ None - all questions resolved:
   - `OPENCODE_AUTH_INVESTIGATION.md`
   - `OPENCODE_TECHNICAL_DETAILS.md`
   - `LOGAI_IMPLEMENTATION_ROADMAP.md`
-- Architecture document by Sally:
+- Architecture document by Saanvi:
   - `george-scratch/architecture-github-copilot-integration.md`
 - OpenCode GitHub Copilot implementation (reference)
 - RFC 8628: OAuth 2.0 Device Authorization Grant

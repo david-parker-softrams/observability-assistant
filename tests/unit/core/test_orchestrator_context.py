@@ -23,7 +23,6 @@ def settings():
     settings = LogAISettings(
         llm_provider="anthropic",
         anthropic_api_key="test-key",
-        aws_region="us-east-1",
         cache_dir=Path("/tmp/test-cache"),
         enable_result_caching=True,
         cache_large_results_threshold=5000,
@@ -217,13 +216,11 @@ class TestAutomaticResultCaching:
         # Parse the tool result
         tool_result = json.loads(tool_messages[0]["content"])
 
-        # If it was cached, it should have a cache_id and dataset info
+        # If it was cached, it should have a cache_id and summary info
         if "cached" in tool_result and tool_result["cached"]:
             assert "cache_id" in tool_result
-            assert "dataset" in tool_result  # Changed from "summary" to match new structure
-            assert (
-                "preview_only" in tool_result
-            )  # New structure has preview_only instead of summary
+            assert "summary" in tool_result  # Changed from "dataset" to match simplified structure
+            assert "guidance" in tool_result  # New structure has single guidance field
 
     @pytest.mark.asyncio
     async def test_small_result_not_cached(self, orchestrator, mock_llm_provider):

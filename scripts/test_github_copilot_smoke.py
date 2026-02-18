@@ -18,14 +18,6 @@ def test_imports():
     print("=" * 60)
 
     try:
-        from logai.providers.llm import (
-            GitHubCopilotProvider,
-            get_available_models,
-            get_model_metadata,
-            refresh_model_cache,
-            validate_model,
-        )
-
         print("✓ GitHubCopilotProvider imported")
         print("✓ get_available_models imported")
         print("✓ get_model_metadata imported")
@@ -83,7 +75,6 @@ def test_model_utilities():
 
     try:
         from logai.providers.llm import (
-            get_available_models,
             get_model_metadata,
             validate_model,
         )
@@ -110,7 +101,7 @@ def test_model_utilities():
 
         # Test get_model_metadata
         metadata = get_model_metadata("claude-opus-4.6")
-        print(f"✓ Metadata for claude-opus-4.6:")
+        print("✓ Metadata for claude-opus-4.6:")
         print(f"    Provider: {metadata['provider']}")
         print(f"    Supports tools: {metadata['supports_tools']}")
         print(f"    Tier: {metadata['tier']}")
@@ -248,9 +239,9 @@ def test_response_parsing():
         result_with_tools = provider._parse_response(mock_tool_response)
         assert result_with_tools.has_tool_calls(), "Should have tool calls"
         assert len(result_with_tools.tool_calls) == 1, "Should have 1 tool call"
-        assert result_with_tools.tool_calls[0]["function"]["name"] == "get_weather", (
-            "Function name should match"
-        )
+        assert (
+            result_with_tools.tool_calls[0]["function"]["name"] == "get_weather"
+        ), "Function name should match"
 
         print("✓ Tool call response parsing:")
         print(f"    Has tool calls: {result_with_tools.has_tool_calls()}")

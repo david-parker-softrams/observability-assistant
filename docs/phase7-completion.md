@@ -56,7 +56,7 @@ Phase 7 has been successfully completed. The LogAI Terminal User Interface (TUI)
   - `/model` - Show current LLM configuration
   - `/config` - Display full configuration
   - `/quit` or `/exit` - Instructions to exit (use Ctrl+C)
-  
+
 ### 7. Styling (`src/logai/ui/styles/app.tcss`)
 - Professional Textual CSS stylesheet
 - Distinct styling for different message types
@@ -231,6 +231,6 @@ Phase 7 successfully brings together all the backend work from Phases 1-6 into a
 
 ---
 
-**Status**: ✅ COMPLETE  
-**Quality**: Outstanding  
+**Status**: ✅ COMPLETE
+**Quality**: Outstanding
 **Ready for**: Phase 8 - Integration Testing
