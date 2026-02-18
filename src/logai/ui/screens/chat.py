@@ -1,9 +1,11 @@
 """Main chat screen for LogAI TUI."""
 
 import asyncio
+import json
 import logging
 import time
-from typing import TYPE_CHECKING, Literal
+from datetime import datetime
+from typing import TYPE_CHECKING, Any, Literal
 
 from textual import on, work
 from textual.app import ComposeResult
@@ -17,7 +19,7 @@ from logai.config import get_settings
 from logai.core.orchestrator import LLMOrchestrator, ToolCallRecord
 from logai.ui.commands import CommandHandler
 from logai.ui.widgets.input_box import ChatInput
-from logai.ui.widgets.log_groups_sidebar import LogGroupsSidebar
+from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem, LogGroupsSidebar
 from logai.ui.widgets.messages import (
     AssistantMessage,
     ErrorMessage,
@@ -316,6 +318,128 @@ class ChatScreen(Screen[None]):
 
         finally:
             self._current_assistant_message = None
+
+    @on(ClickableLogGroupItem.LogGroupPreviewRequested)
+    async def on_log_group_preview_requested(
+        self, event: ClickableLogGroupItem.LogGroupPreviewRequested
+    ) -> None:
+        """
+        Handle request to preview logs from a log group.
+
+        Args:
+            event: Preview request event with log group name
+        """
+        try:
+            # Get datasource from tool registry via orchestrator
+            # The tools are registered with datasource instances
+            tool = self.orchestrator.tool_registry.get("list_log_groups")
+            if tool is None or not hasattr(tool, "datasource"):
+                self.notify(
+                    "Preview feature not available - datasource not found",
+                    severity="error",
+                    timeout=5,
+                )
+                logger.error("Could not access datasource from tool registry")
+                return
+
+            datasource = tool.datasource
+
+            # Import LogPreviewScreen here to avoid circular imports
+            from logai.ui.screens.log_preview import LogPreviewScreen
+
+            # Show preview modal and await result
+            result = await self.app.push_screen(
+                LogPreviewScreen(
+                    log_group_name=event.log_group_name,
+                    datasource=datasource,
+                )
+            )
+
+            # If user selected entries, inject them into context
+            if result:
+                await self._inject_log_entries_to_context(result)
+
+        except Exception as e:
+            logger.error(f"Failed to open log preview: {e}", exc_info=True)
+            self.notify(
+                f"Failed to open preview: {str(e)}",
+                severity="error",
+                timeout=5,
+            )
+
+    async def _inject_log_entries_to_context(self, result: dict[str, Any]) -> None:
+        """
+        Inject selected log entries into agent context.
+
+        Args:
+            result: Dictionary with log_group_name and selected_entries
+        """
+        try:
+            log_group = result["log_group_name"]
+            entries = result["selected_entries"]
+            count = len(entries)
+
+            # Format entries for context
+            context_message = self._format_log_entries_for_context(log_group, entries)
+
+            # Inject via orchestrator
+            self.orchestrator.inject_context_update(context_message)
+
+            # Show system message in chat
+            messages_container = self.query_one("#messages-container", VerticalScroll)
+            entry_word = "entry" if count == 1 else "entries"
+            system_msg = SystemMessage(
+                f"Added {count} log {entry_word} from {log_group} to context"
+            )
+            messages_container.mount(system_msg)
+            messages_container.scroll_end(animate=False)
+
+        except Exception as e:
+            logger.error(f"Failed to inject log entries to context: {e}", exc_info=True)
+            self.notify(
+                f"Failed to add logs to context: {str(e)}",
+                severity="error",
+                timeout=5,
+            )
+
+    def _format_log_entries_for_context(self, log_group: str, entries: list[dict[str, Any]]) -> str:
+        """
+        Format log entries for agent context injection.
+
+        Args:
+            log_group: Name of the log group
+            entries: List of log event dictionaries
+
+        Returns:
+            Formatted context string
+        """
+        formatted_entries = []
+        for entry in entries:
+            # Format timestamp for readability
+            timestamp_ms = entry.get("timestamp", 0)
+            dt = datetime.fromtimestamp(timestamp_ms / 1000)
+            formatted_time = dt.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+            formatted_entries.append(
+                {
+                    "timestamp": formatted_time,
+                    "message": entry.get("message", ""),
+                    "log_stream": entry.get("log_stream", ""),
+                }
+            )
+
+        return f"""USER-SELECTED LOG ENTRIES for analysis:
+
+Log Group: {log_group}
+Entry Count: {len(entries)}
+
+The user has specifically selected these log entries for your analysis:
+
+```json
+{json.dumps(formatted_entries, indent=2)}
+```
+
+Please analyze these logs and provide insights based on the user's next question."""
 
     def _handle_context_notification(self, level: str, message: str) -> None:
         """

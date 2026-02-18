@@ -1,16 +1,86 @@
 """Log groups sidebar widget for displaying available CloudWatch log groups."""
 
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 
 from textual.app import ComposeResult
 from textual.containers import VerticalScroll
+from textual.events import Click
+from textual.message import Message
 from textual.widgets import Label, Static
 
 if TYPE_CHECKING:
     from logai.core.log_group_manager import LogGroupManager
 
 logger = logging.getLogger(__name__)
+
+
+class ClickableLogGroupItem(Label):
+    """
+    Clickable log group label that emits preview requests on double-click.
+
+    This widget extends Label to detect double-click events and notify
+    parent components when a user wants to preview a log group.
+
+    Attributes:
+        log_group_name: The CloudWatch log group name this item represents
+    """
+
+    # Custom message for preview requests
+    class LogGroupPreviewRequested(Message):
+        """Emitted when user double-clicks to request log preview."""
+
+        def __init__(self, log_group_name: str) -> None:
+            """
+            Initialize preview request message.
+
+            Args:
+                log_group_name: Name of the log group to preview
+            """
+            super().__init__()
+            self.log_group_name = log_group_name
+
+    # Double-click detection threshold in seconds
+    DOUBLE_CLICK_THRESHOLD: float = 0.5
+
+    def __init__(self, log_group_name: str, **kwargs: Any) -> None:
+        """
+        Initialize clickable log group item.
+
+        Args:
+            log_group_name: CloudWatch log group name
+            **kwargs: Additional arguments passed to Label
+        """
+        super().__init__(log_group_name, **kwargs)
+        self.log_group_name = log_group_name
+        self._last_click_time: float = 0.0
+
+    def on_click(self, event: Click) -> None:
+        """
+        Handle click events and detect double-clicks.
+
+        Uses timestamp comparison to detect two clicks within
+        DOUBLE_CLICK_THRESHOLD seconds.
+
+        Args:
+            event: The click event from Textual
+        """
+        # Only handle left mouse button
+        if event.button != 1:
+            return
+
+        current_time = time.time()
+        time_since_last = current_time - self._last_click_time
+
+        if time_since_last < self.DOUBLE_CLICK_THRESHOLD:
+            # Double-click detected - emit preview request
+            self.post_message(self.LogGroupPreviewRequested(self.log_group_name))
+            # Reset timer to prevent triple-click triggering again
+            self._last_click_time = 0.0
+        else:
+            # Single click - record time for potential double-click
+            self._last_click_time = current_time
 
 
 class LogGroupsSidebar(Static):
@@ -57,10 +127,15 @@ class LogGroupsSidebar(Static):
         height: auto;
         padding: 0;
         color: $text;
+        cursor: pointer;
     }
 
     LogGroupsSidebar .log-group-item:hover {
         background: $surface;
+    }
+
+    LogGroupsSidebar .log-group-item:active {
+        background: $primary-darken-1;
     }
     """
 
@@ -156,9 +231,9 @@ class LogGroupsSidebar(Static):
 
         # Add log group items
         for name in log_groups:
-            # Display full name with automatic wrapping
-            label = Label(name, classes="log-group-item")
-            self._scroll_container.mount(label)
+            # Create clickable item with double-click support
+            item = ClickableLogGroupItem(name, classes="log-group-item")
+            self._scroll_container.mount(item)
 
     def _get_count(self) -> int:
         """Get the count of log groups."""
