@@ -119,6 +119,58 @@ class TestLogEntryItem:
         assert "\n" not in preview
         assert preview == "line1 line2 line3"
 
+    def test_json_message_pretty_printed(self):
+        """JSON messages should be pretty-printed when expanded."""
+        json_message = '{"level":"ERROR","message":"Test error","timestamp":123456}'
+        item = LogEntryItem(
+            event_data={
+                "timestamp": 1708263045123,
+                "message": json_message,
+                "log_stream": "stream",
+                "event_id": "event123",
+            },
+            entry_id="entry-0",
+        )
+
+        formatted = item._format_message(json_message)
+        # Should be pretty-printed with indentation
+        assert "\n" in formatted
+        assert "  " in formatted  # Has indentation
+        assert '"level"' in formatted
+        assert '"ERROR"' in formatted
+
+    def test_non_json_message_unchanged(self):
+        """Non-JSON messages should be displayed as-is."""
+        plain_message = "This is a plain text log message"
+        item = LogEntryItem(
+            event_data={
+                "timestamp": 1708263045123,
+                "message": plain_message,
+                "log_stream": "stream",
+                "event_id": "event123",
+            },
+            entry_id="entry-0",
+        )
+
+        formatted = item._format_message(plain_message)
+        assert formatted == plain_message
+
+    def test_invalid_json_unchanged(self):
+        """Invalid JSON should be displayed as-is."""
+        invalid_json = '{"incomplete": '
+        item = LogEntryItem(
+            event_data={
+                "timestamp": 1708263045123,
+                "message": invalid_json,
+                "log_stream": "stream",
+                "event_id": "event123",
+            },
+            entry_id="entry-0",
+        )
+
+        formatted = item._format_message(invalid_json)
+        assert formatted == invalid_json
+
 
 class TestLogPreviewScreen:
     """Tests for the log preview screen."""

@@ -1,5 +1,6 @@
 """Log preview screen for displaying and selecting recent log events."""
 
+import json
 import logging
 import time
 from datetime import datetime
@@ -158,7 +159,25 @@ class LogEntryItem(Static):
             yield Static(f"[bold]Stream:[/bold] {self.event_data.get('log_stream', 'N/A')}")
             yield Static(f"[bold]Event ID:[/bold] {self.event_data.get('event_id', 'N/A')}")
             yield Static("[bold]Full Message:[/bold]")
-            yield Static(message)
+            yield Static(self._format_message(message))
+
+    def _format_message(self, message: str) -> str:
+        """
+        Format the message, pretty-printing JSON if applicable.
+
+        Args:
+            message: Raw log message
+
+        Returns:
+            Formatted message (pretty-printed JSON or raw text)
+        """
+        # Try to parse as JSON and pretty-print
+        try:
+            parsed = json.loads(message)
+            return json.dumps(parsed, indent=2, ensure_ascii=False)
+        except (json.JSONDecodeError, TypeError):
+            # Not valid JSON, return as-is
+            return message
 
     def _create_preview(self, message: str) -> str:
         """
