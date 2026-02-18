@@ -127,7 +127,6 @@ class LogGroupsSidebar(Static):
         height: auto;
         padding: 0;
         color: $text;
-        cursor: pointer;
     }
 
     LogGroupsSidebar .log-group-item:hover {
