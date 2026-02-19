@@ -243,14 +243,22 @@ Found an error or want to improve the docs?
 
 ```
 docs/user-guide/
-├── README.md                    # This file
-├── getting-started.md           # Installation and first run
-├── cli-reference.md             # Command-line options
-├── runtime-commands.md          # Slash commands
-├── configuration.md             # All settings and env vars
-├── features.md                  # Feature descriptions
-├── examples.md                  # Usage examples
-└── troubleshooting.md          # Common issues
+├── README.md                         # This file
+├── getting-started.md                # Installation and first run
+├── cli-reference.md                  # Command-line options
+├── runtime-commands.md               # Slash commands
+├── configuration.md                  # All settings and env vars
+├── features.md                       # Feature descriptions
+├── examples.md                       # Usage examples
+├── troubleshooting.md                # Common issues
+├── aws-profile-argument.md           # AWS profile CLI feature
+├── cached-results.md                 # Working with cached results
+├── context-management.md             # Context management system
+├── github-models-provider.md         # GitHub Copilot models
+├── sidebar-quick-reference.md        # Sidebar controls quick ref
+├── status-indicator.md               # Status indicator guide
+├── timeframe-selector.md             # Log preview timeframe selector
+└── visual-guide-context-management.md # Visual context guide
 ```
 
 ---
