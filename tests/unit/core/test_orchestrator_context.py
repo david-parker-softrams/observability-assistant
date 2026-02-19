@@ -906,10 +906,10 @@ class TestCachedResultGuidance:
         assert injection2 is None
 
     @pytest.mark.asyncio
-    async def test_cache_guidance_prioritized_over_regular_injection(
+    async def test_cache_guidance_and_user_context_combined(
         self, settings, mock_llm_provider, mock_sanitizer, mock_result_cache
     ):
-        """Test that cache guidance takes priority over regular context injection."""
+        """Test that cache guidance and user context are BOTH included (bug fix)."""
         settings.enable_result_caching = True
         settings.enable_auto_fetch_guidance = True
 
@@ -921,8 +921,8 @@ class TestCachedResultGuidance:
             result_cache=mock_result_cache,
         )
 
-        # Set a regular context injection
-        orchestrator.inject_context_update("Regular context update")
+        # Set a regular context injection (user-selected logs)
+        orchestrator.inject_context_update("USER-SELECTED LOG ENTRIES:\n\nlog entry 1\nlog entry 2")
 
         # Trigger cache (should set cache guidance)
         large_result = {
@@ -933,12 +933,135 @@ class TestCachedResultGuidance:
         tool_result = {"tool_call_id": "call_123", "result": large_result}
         await orchestrator._process_tool_result(tool_result, "query_logs")
 
-        # Get injection - should be cache guidance, not regular injection
+        # Get injection - should contain BOTH cache guidance AND user context
         injection = orchestrator._get_pending_context_injection()
         assert injection is not None
-        assert "fetch_cached_result_chunk" in injection
-        assert "Regular context update" not in injection
+        assert "fetch_cached_result_chunk" in injection  # Cache guidance
+        assert "USER-SELECTED LOG ENTRIES" in injection  # User context
+        assert "---" in injection  # Separator between them
 
-        # Regular injection should still be pending
+        # Both should be cleared
+        assert orchestrator._pending_cache_guidance is None
+        assert orchestrator._pending_context_injection is None
+
+        # Second call should return None (both were cleared)
         injection2 = orchestrator._get_pending_context_injection()
-        assert injection2 == "Regular context update"
+        assert injection2 is None
+
+    @pytest.mark.asyncio
+    async def test_get_pending_context_injection_cache_only(
+        self, settings, mock_llm_provider, mock_sanitizer, mock_result_cache
+    ):
+        """Test cache guidance alone works correctly."""
+        settings.enable_result_caching = True
+        settings.enable_auto_fetch_guidance = True
+
+        orchestrator = LLMOrchestrator(
+            llm_provider=mock_llm_provider,
+            tool_registry=ToolRegistry,
+            sanitizer=mock_sanitizer,
+            settings=settings,
+            result_cache=mock_result_cache,
+        )
+
+        # Only set cache guidance
+        large_result = {
+            "success": True,
+            "events": [{"message": f"log {i}"} for i in range(1000)],
+            "count": 1000,
+        }
+        tool_result = {"tool_call_id": "call_456", "result": large_result}
+        processed = await orchestrator._process_tool_result(tool_result, "query_logs")
+
+        # Get injection - should only have cache guidance
+        injection = orchestrator._get_pending_context_injection()
+        assert injection is not None
+        assert "SYSTEM INSTRUCTION" in injection
+        assert "fetch_cached_result_chunk" in injection
+        assert processed["result"]["cache_id"] in injection
+        assert orchestrator._pending_cache_guidance is None
+
+    @pytest.mark.asyncio
+    async def test_get_pending_context_injection_user_only(
+        self, settings, mock_llm_provider, mock_sanitizer, mock_result_cache
+    ):
+        """Test user context alone works correctly."""
+        settings.enable_result_caching = True
+
+        orchestrator = LLMOrchestrator(
+            llm_provider=mock_llm_provider,
+            tool_registry=ToolRegistry,
+            sanitizer=mock_sanitizer,
+            settings=settings,
+            result_cache=mock_result_cache,
+        )
+
+        # Only set user context
+        orchestrator.inject_context_update("USER LOGS: log 1, log 2")
+
+        # Get injection - should only have user context
+        injection = orchestrator._get_pending_context_injection()
+        assert injection is not None
+        assert "USER LOGS" in injection
+        assert "SYSTEM INSTRUCTION" not in injection
+        assert "fetch_cached_result_chunk" not in injection
+        assert orchestrator._pending_context_injection is None
+
+    @pytest.mark.asyncio
+    async def test_get_pending_context_injection_none(
+        self, settings, mock_llm_provider, mock_sanitizer, mock_result_cache
+    ):
+        """Test returns None when no injections pending."""
+        orchestrator = LLMOrchestrator(
+            llm_provider=mock_llm_provider,
+            tool_registry=ToolRegistry,
+            sanitizer=mock_sanitizer,
+            settings=settings,
+            result_cache=mock_result_cache,
+        )
+
+        # No injections set
+        result = orchestrator._get_pending_context_injection()
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_get_pending_context_injection_clears_both_variables(
+        self, settings, mock_llm_provider, mock_sanitizer, mock_result_cache
+    ):
+        """Test that both variables are cleared after retrieval."""
+        settings.enable_result_caching = True
+        settings.enable_auto_fetch_guidance = True
+
+        orchestrator = LLMOrchestrator(
+            llm_provider=mock_llm_provider,
+            tool_registry=ToolRegistry,
+            sanitizer=mock_sanitizer,
+            settings=settings,
+            result_cache=mock_result_cache,
+        )
+
+        # Set both
+        orchestrator.inject_context_update("USER CONTEXT")
+        large_result = {
+            "success": True,
+            "events": [{"message": f"log {i}"} for i in range(1000)],
+            "count": 1000,
+        }
+        tool_result = {"tool_call_id": "call_789", "result": large_result}
+        await orchestrator._process_tool_result(tool_result, "query_logs")
+
+        # Verify both are set before calling
+        assert orchestrator._pending_cache_guidance is not None
+        assert orchestrator._pending_context_injection is not None
+
+        # Get injection
+        injection = orchestrator._get_pending_context_injection()
+        assert injection is not None
+
+        # Both should be cleared
+        assert orchestrator._pending_cache_guidance is None
+        assert orchestrator._pending_context_injection is None
+
+        # Second call should return None
+        result = orchestrator._get_pending_context_injection()
+        assert result is None

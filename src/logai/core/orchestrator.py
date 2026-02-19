@@ -434,12 +434,13 @@ Use this tool to find available log groups before querying logs."""
 
     def _get_pending_context_injection(self) -> str | None:
         """Get and clear any pending context injection."""
-        # Check for cache guidance first (higher priority)
+        injections = []
+
+        # Include cache guidance if available
         if self._pending_cache_guidance and self.settings.enable_auto_fetch_guidance:
             guidance = self._pending_cache_guidance
             self._pending_cache_guidance = None  # Clear after use
-
-            return f"""SYSTEM INSTRUCTION: The previous tool call returned a large result that was automatically cached.
+            cache_guidance = f"""SYSTEM INSTRUCTION: The previous tool call returned a large result that was automatically cached.
 
 CACHED RESULT INFORMATION:
 - Cache ID: {guidance["cache_id"]}
@@ -463,11 +464,18 @@ IMPORTANT: Always use the exact cache_id value shown above.
 
 DO NOT just acknowledge the cache - fetch and show the user actual events.
 """
+            injections.append(cache_guidance)
 
-        # Fall back to regular context injection (e.g., /refresh updates)
-        injection = self._pending_context_injection
-        self._pending_context_injection = None
-        return injection
+        # Include user-selected log entries if available
+        if self._pending_context_injection:
+            injection = self._pending_context_injection
+            self._pending_context_injection = None
+            injections.append(injection)
+
+        # Return combined injections or None if empty
+        if injections:
+            return "\n\n---\n\n".join(injections)
+        return None
 
     def _notify_context_event(self, level: str, message: str) -> None:
         """
