@@ -304,6 +304,27 @@ class LogPreviewScreen(ModalScreen[dict[str, Any] | None]):
         margin-left: 0;
     }
 
+    #entry-limit-controls {
+        height: 3;
+        layout: horizontal;
+        padding: 0 1;
+        background: $surface;
+        align: left middle;
+        width: 100%;
+    }
+
+    #entry-limit-controls Button {
+        min-width: 16;
+        margin: 0 1 0 0;
+    }
+
+    #entry-count-display {
+        width: 1fr;
+        text-align: right;
+        padding: 1 1;
+        color: $text-muted;
+    }
+
     #selection-controls {
         height: 3;
         layout: horizontal;
@@ -380,6 +401,7 @@ class LogPreviewScreen(ModalScreen[dict[str, Any] | None]):
     # Fetch parameters
     DEFAULT_TIME_RANGE_MINUTES: int = 15
     DEFAULT_LIMIT: int = 10
+    LOAD_MORE_LIMIT: int = 100  # Limit when "Load Last 100" is active
 
     # Time frame options for selector
     TIME_FRAME_OPTIONS: dict[str, int] = {
@@ -391,6 +413,9 @@ class LogPreviewScreen(ModalScreen[dict[str, Any] | None]):
 
     # Reactive property for time frame selection
     selected_time_frame: reactive[str] = reactive("15 min")
+
+    # Reactive property for entry limit
+    current_limit: reactive[int] = reactive(10)
 
     def __init__(
         self,
@@ -477,6 +502,15 @@ class LogPreviewScreen(ModalScreen[dict[str, Any] | None]):
                             f"[LOG_PREVIEW] Yielding button: label='{label}', variant='{variant}', is_selected={label == self.selected_time_frame}"
                         )
                         yield Button(label, variant=variant, classes="timeframe-btn")
+
+            # Entry limit controls
+            with Horizontal(id="entry-limit-controls"):
+                yield Button(
+                    "Load Last 100",
+                    id="load-100-btn",
+                    variant="default",
+                )
+                yield Static("", id="entry-count-display")
 
             # Selection controls
             with Horizontal(id="selection-controls"):
@@ -603,6 +637,87 @@ class LogPreviewScreen(ModalScreen[dict[str, Any] | None]):
         # Stop propagation to prevent other handlers
         event.stop()
 
+    @on(Button.Pressed, "#load-100-btn")
+    def on_load_100_clicked(self, event: Button.Pressed) -> None:
+        """
+        Handle 'Load Last 100' button click.
+
+        Toggles between DEFAULT_LIMIT (10) and LOAD_MORE_LIMIT (100).
+        The watcher automatically handles clearing state and triggering fetch.
+
+        Args:
+            event: Button pressed event
+        """
+        # Toggle between 10 and 100
+        if self.current_limit == self.DEFAULT_LIMIT:
+            self.current_limit = self.LOAD_MORE_LIMIT
+        else:
+            self.current_limit = self.DEFAULT_LIMIT
+
+        # Stop propagation to prevent other handlers
+        event.stop()
+
+    def watch_current_limit(self, new_limit: int) -> None:
+        """
+        Refresh logs when entry limit changes.
+
+        Called automatically by Textual when current_limit reactive property changes.
+        Clears current state and triggers a new fetch with the updated limit.
+
+        Args:
+            new_limit: The new entry limit (10 or 100)
+        """
+        logger.debug(f"Entry limit changed to: {new_limit}")
+
+        # Only refresh if we're already mounted (not during initial compose)
+        if not self.is_mounted:
+            return
+
+        # Update button visual state
+        self._update_limit_button()
+
+        # Clear current state to prepare for new data
+        self._events.clear()
+        self._selected_ids.clear()
+
+        # Trigger refresh (exclusive worker handles concurrency)
+        self._fetch_and_display_logs()
+
+    def _update_limit_button(self) -> None:
+        """
+        Update the limit button's label and variant based on current state.
+
+        When at default (10): Shows "Load Last 100" with default variant
+        When at 100: Shows "Show Last 10" with primary variant
+        """
+        try:
+            button = self.query_one("#load-100-btn", Button)
+            if self.current_limit == self.LOAD_MORE_LIMIT:
+                button.label = "Show Last 10"
+                button.variant = "primary"
+            else:
+                button.label = "Load Last 100"
+                button.variant = "default"
+        except Exception:
+            pass  # Button may not be mounted yet
+
+    def _update_entry_count_display(self) -> None:
+        """
+        Update the entry count display to show current number of entries.
+
+        Shows "Showing X entries" where X is the actual count fetched.
+        Display is empty when no entries exist.
+        """
+        try:
+            display = self.query_one("#entry-count-display", Static)
+            total = len(self._events)
+            if total > 0:
+                display.update(f"Showing {total} entries")
+            else:
+                display.update("")
+        except Exception:
+            pass  # Widget may not be mounted yet
+
     @work(exclusive=True)
     async def _fetch_and_display_logs(self) -> None:
         """Worker to fetch and display logs asynchronously."""
@@ -628,7 +743,7 @@ class LogPreviewScreen(ModalScreen[dict[str, Any] | None]):
                 log_group=self.log_group_name,
                 start_time=start_time,
                 end_time=end_time,
-                limit=self.limit,
+                limit=self.current_limit,
             )
 
             # Remove loading indicator
@@ -649,6 +764,9 @@ class LogPreviewScreen(ModalScreen[dict[str, Any] | None]):
 
             # Update selection counter
             self._update_selection_counter()
+
+            # Update entry count display
+            self._update_entry_count_display()
 
         except Exception as e:
             logger.error(f"Failed to fetch logs for preview: {e}", exc_info=True)

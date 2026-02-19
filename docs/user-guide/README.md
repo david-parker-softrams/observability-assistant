@@ -95,6 +95,13 @@ Welcome to the LogAI user documentation! This guide will help you get the most o
 
 ### Latest Features
 
+**Log Preview Entry Limit Toggle** (February 2026)
+- Switch between 10 and 100 entries with one click
+- Default stays at 10 for fast loading
+- Expand to 100 when you need more context
+- Limit persists across time frame changes
+- [Learn more](features.md#log-preview-entry-limit-toggle)
+
 **Tool Execution Sidebar** (February 2026)
 - Real-time visibility into agent tool execution
 - See parameters, results, and status

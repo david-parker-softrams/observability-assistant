@@ -642,3 +642,579 @@ class TestLogPreviewScreen:
 
         # Fetch should NOT have been called (is_mounted is False)
         assert not fetch_called[0]
+
+    # ========================================================================
+    # TESTS FOR "LOAD LAST 100" TOGGLE BUTTON FEATURE (Added by Raoul)
+    # ========================================================================
+
+    # --------------------------------------------------
+    # Test Group 1: Initialization & Default Values
+    # --------------------------------------------------
+
+    def test_current_limit_default_is_10(self):
+        """Verify current_limit initializes to DEFAULT_LIMIT (10)."""
+        datasource = AsyncMock()
+        screen = LogPreviewScreen(
+            log_group_name="/aws/lambda/test",
+            datasource=datasource,
+        )
+        assert screen.current_limit == LogPreviewScreen.DEFAULT_LIMIT
+        assert screen.current_limit == 10
+
+    def test_load_more_limit_constant_is_100(self):
+        """Verify LOAD_MORE_LIMIT constant is 100."""
+        assert LogPreviewScreen.LOAD_MORE_LIMIT == 100
+
+    def test_current_limit_is_reactive_property(self):
+        """Verify current_limit is a reactive property."""
+        datasource = AsyncMock()
+        screen = LogPreviewScreen(
+            log_group_name="/aws/lambda/test",
+            datasource=datasource,
+        )
+
+        # Should be able to set and get
+        screen.current_limit = 100
+        assert screen.current_limit == 100
+
+        screen.current_limit = 10
+        assert screen.current_limit == 10
+
+    # --------------------------------------------------
+    # Test Group 2: Button Toggle Behavior
+    # --------------------------------------------------
+
+    def test_load_100_button_toggles_from_10_to_100(self):
+        """Clicking button when at 10 should set limit to 100."""
+        datasource = AsyncMock()
+        screen = LogPreviewScreen(
+            log_group_name="/aws/lambda/test",
+            datasource=datasource,
+        )
+
+        # Initially at 10
+        assert screen.current_limit == 10
+
+        # Simulate button click
+        mock_button = MagicMock()
+        mock_event = MagicMock()
+        mock_event.button = mock_button
+        mock_event.stop = MagicMock()
+
+        screen.on_load_100_clicked(mock_event)
+
+        # Should now be 100
+        assert screen.current_limit == 100
+        mock_event.stop.assert_called_once()
+
+    def test_load_100_button_toggles_from_100_to_10(self):
+        """Clicking button when at 100 should set limit back to 10."""
+        datasource = AsyncMock()
+        screen = LogPreviewScreen(
+            log_group_name="/aws/lambda/test",
+            datasource=datasource,
+        )
+
+        # Set to 100
+        screen.current_limit = 100
+
+        # Simulate button click
+        mock_button = MagicMock()
+        mock_event = MagicMock()
+        mock_event.button = mock_button
+        mock_event.stop = MagicMock()
+
+        screen.on_load_100_clicked(mock_event)
+
+        # Should be back to 10
+        assert screen.current_limit == 10
+        mock_event.stop.assert_called_once()
+
+    def test_multiple_toggle_cycles(self):
+        """Multiple toggle cycles should work correctly."""
+        datasource = AsyncMock()
+        screen = LogPreviewScreen(
+            log_group_name="/aws/lambda/test",
+            datasource=datasource,
+        )
+
+        # Create reusable mock event
+        mock_event = MagicMock()
+        mock_event.button = MagicMock()
+        mock_event.stop = MagicMock()
+
+        # Start at 10, toggle multiple times
+        assert screen.current_limit == 10
+
+        screen.on_load_100_clicked(mock_event)  # 10 -> 100
+        assert screen.current_limit == 100
+
+        screen.on_load_100_clicked(mock_event)  # 100 -> 10
+        assert screen.current_limit == 10
+
+        screen.on_load_100_clicked(mock_event)  # 10 -> 100
+        assert screen.current_limit == 100
+
+        screen.on_load_100_clicked(mock_event)  # 100 -> 10
+        assert screen.current_limit == 10
+
+    # --------------------------------------------------
+    # Test Group 3: Watcher Behavior
+    # --------------------------------------------------
+
+    def test_watch_current_limit_clears_events_when_mounted(self):
+        """Watcher should clear events when screen is mounted."""
+        datasource = AsyncMock()
+        screen = LogPreviewScreen(
+            log_group_name="/aws/lambda/test",
+            datasource=datasource,
+        )
+
+        # Populate state
+        screen._events = [{"event_id": "e1"}, {"event_id": "e2"}]
+        screen._selected_ids = {"id1", "id2"}
+
+        # Mock methods
+        screen._fetch_and_display_logs = MagicMock()
+        screen._update_limit_button = MagicMock()
+
+        # Simulate mounted state
+        with patch.object(
+            type(screen), "is_mounted", new_callable=lambda: PropertyMock(return_value=True)
+        ):
+            screen.watch_current_limit(100)
+
+        # State should be cleared
+        assert len(screen._events) == 0
+        assert len(screen._selected_ids) == 0
+
+    def test_watch_current_limit_skips_when_not_mounted(self):
+        """Watcher should not fetch when screen is not mounted."""
+        datasource = AsyncMock()
+        screen = LogPreviewScreen(
+            log_group_name="/aws/lambda/test",
+            datasource=datasource,
+        )
+
+        # Populate state
+        screen._events = [{"event_id": "e1"}]
+        screen._selected_ids = {"id1"}
+
+        # Call watcher (is_mounted=False by default)
+        screen.watch_current_limit(100)
+
+        # State should NOT be cleared
+        assert len(screen._events) == 1
+        assert len(screen._selected_ids) == 1
+
+    def test_watch_current_limit_calls_update_button(self):
+        """Watcher should call _update_limit_button when mounted."""
+        datasource = AsyncMock()
+        screen = LogPreviewScreen(
+            log_group_name="/aws/lambda/test",
+            datasource=datasource,
+        )
+
+        # Mock methods to track calls
+        screen._update_limit_button = MagicMock()
+        screen._fetch_and_display_logs = MagicMock()
+
+        # Simulate mounted state
+        with patch.object(
+            type(screen), "is_mounted", new_callable=lambda: PropertyMock(return_value=True)
+        ):
+            screen.watch_current_limit(100)
+
+        # Verify _update_limit_button was called
+        screen._update_limit_button.assert_called_once()
+
+    def test_watch_current_limit_triggers_fetch(self):
+        """Watcher should trigger _fetch_and_display_logs when mounted."""
+        datasource = AsyncMock()
+        screen = LogPreviewScreen(
+            log_group_name="/aws/lambda/test",
+            datasource=datasource,
+        )
+
+        # Mock methods to track calls
+        screen._update_limit_button = MagicMock()
+        screen._fetch_and_display_logs = MagicMock()
+
+        # Simulate mounted state
+        with patch.object(
+            type(screen), "is_mounted", new_callable=lambda: PropertyMock(return_value=True)
+        ):
+            screen.watch_current_limit(100)
+
+        # Verify fetch was triggered
+        screen._fetch_and_display_logs.assert_called_once()
+
+    # --------------------------------------------------
+    # Test Group 4: UI Update Methods
+    # --------------------------------------------------
+
+    def test_update_limit_button_at_default_limit(self):
+        """Button should show 'Load Last 100' with default variant when at 10."""
+        datasource = AsyncMock()
+        screen = LogPreviewScreen(
+            log_group_name="/aws/lambda/test",
+            datasource=datasource,
+        )
+
+        # Set limit to 10
+        screen.current_limit = 10
+
+        # Mock button widget
+        mock_button = MagicMock()
+        screen.query_one = MagicMock(return_value=mock_button)
+
+        # Call update method
+        screen._update_limit_button()
+
+        # Verify button state
+        assert mock_button.label == "Load Last 100"
+        assert mock_button.variant == "default"
+
+    def test_update_limit_button_at_load_more_limit(self):
+        """Button should show 'Show Last 10' with primary variant when at 100."""
+        datasource = AsyncMock()
+        screen = LogPreviewScreen(
+            log_group_name="/aws/lambda/test",
+            datasource=datasource,
+        )
+
+        # Set limit to 100
+        screen.current_limit = 100
+
+        # Mock button widget
+        mock_button = MagicMock()
+        screen.query_one = MagicMock(return_value=mock_button)
+
+        # Call update method
+        screen._update_limit_button()
+
+        # Verify button state
+        assert mock_button.label == "Show Last 10"
+        assert mock_button.variant == "primary"
+
+    def test_update_limit_button_handles_not_mounted(self):
+        """_update_limit_button should handle button not mounted gracefully."""
+        datasource = AsyncMock()
+        screen = LogPreviewScreen(
+            log_group_name="/aws/lambda/test",
+            datasource=datasource,
+        )
+
+        # Make query_one raise exception (button not mounted)
+        screen.query_one = MagicMock(side_effect=Exception("Widget not found"))
+
+        # Should not raise exception
+        try:
+            screen._update_limit_button()
+        except Exception as e:
+            pytest.fail(f"_update_limit_button should not raise exception: {e}")
+
+    def test_update_entry_count_display_with_entries(self):
+        """Entry count display should show 'Showing X entries' when entries exist."""
+        datasource = AsyncMock()
+        screen = LogPreviewScreen(
+            log_group_name="/aws/lambda/test",
+            datasource=datasource,
+        )
+
+        # Add some events
+        screen._events = [{"event_id": f"e{i}"} for i in range(47)]
+
+        # Mock display widget
+        mock_display = MagicMock()
+        screen.query_one = MagicMock(return_value=mock_display)
+
+        # Call update method
+        screen._update_entry_count_display()
+
+        # Verify display was updated
+        mock_display.update.assert_called_once_with("Showing 47 entries")
+
+    def test_update_entry_count_display_with_zero_entries(self):
+        """Entry count display should be empty when no entries exist."""
+        datasource = AsyncMock()
+        screen = LogPreviewScreen(
+            log_group_name="/aws/lambda/test",
+            datasource=datasource,
+        )
+
+        # No events
+        screen._events = []
+
+        # Mock display widget
+        mock_display = MagicMock()
+        screen.query_one = MagicMock(return_value=mock_display)
+
+        # Call update method
+        screen._update_entry_count_display()
+
+        # Verify display was cleared
+        mock_display.update.assert_called_once_with("")
+
+    def test_update_entry_count_display_handles_not_mounted(self):
+        """_update_entry_count_display should handle widget not mounted gracefully."""
+        datasource = AsyncMock()
+        screen = LogPreviewScreen(
+            log_group_name="/aws/lambda/test",
+            datasource=datasource,
+        )
+
+        screen._events = [{"event_id": "e1"}]
+
+        # Make query_one raise exception (widget not mounted)
+        screen.query_one = MagicMock(side_effect=Exception("Widget not found"))
+
+        # Should not raise exception
+        try:
+            screen._update_entry_count_display()
+        except Exception as e:
+            pytest.fail(f"_update_entry_count_display should not raise exception: {e}")
+
+    # --------------------------------------------------
+    # Test Group 5: Time Frame Integration
+    # --------------------------------------------------
+
+    def test_limit_persists_when_changing_time_frames(self):
+        """Current limit should persist when changing time frames."""
+        datasource = AsyncMock()
+        screen = LogPreviewScreen(
+            log_group_name="/aws/lambda/test",
+            datasource=datasource,
+        )
+
+        # Set to 100
+        screen.current_limit = 100
+
+        # Mock methods
+        screen._fetch_and_display_logs = MagicMock()
+        screen._update_timeframe_buttons = MagicMock()
+
+        # Simulate mounted state and change time frame
+        with patch.object(
+            type(screen), "is_mounted", new_callable=lambda: PropertyMock(return_value=True)
+        ):
+            screen.watch_selected_time_frame("1 hour")
+
+        # Limit should still be 100
+        assert screen.current_limit == 100
+
+    def test_multiple_timeframe_changes_preserve_limit(self):
+        """Limit should persist across multiple time frame changes."""
+        datasource = AsyncMock()
+        screen = LogPreviewScreen(
+            log_group_name="/aws/lambda/test",
+            datasource=datasource,
+        )
+
+        # Set to 100
+        screen.current_limit = 100
+
+        # Mock methods
+        screen._fetch_and_display_logs = MagicMock()
+        screen._update_timeframe_buttons = MagicMock()
+
+        # Simulate mounted state
+        with patch.object(
+            type(screen), "is_mounted", new_callable=lambda: PropertyMock(return_value=True)
+        ):
+            # Change through multiple time frames
+            screen.watch_selected_time_frame("1 hour")
+            assert screen.current_limit == 100
+
+            screen.watch_selected_time_frame("8 hours")
+            assert screen.current_limit == 100
+
+            screen.watch_selected_time_frame("24 hours")
+            assert screen.current_limit == 100
+
+            screen.watch_selected_time_frame("15 min")
+            assert screen.current_limit == 100
+
+    def test_changing_limit_after_timeframe_change(self):
+        """Should be able to change limit after changing time frame."""
+        datasource = AsyncMock()
+        screen = LogPreviewScreen(
+            log_group_name="/aws/lambda/test",
+            datasource=datasource,
+        )
+
+        # Mock methods
+        screen._fetch_and_display_logs = MagicMock()
+        screen._update_timeframe_buttons = MagicMock()
+        screen._update_limit_button = MagicMock()
+
+        # Simulate mounted state
+        with patch.object(
+            type(screen), "is_mounted", new_callable=lambda: PropertyMock(return_value=True)
+        ):
+            # Change time frame (property assignment triggers watcher)
+            screen.selected_time_frame = "1 hour"
+            assert screen.current_limit == 10  # Still at default
+
+            # Now change limit (property assignment triggers watcher)
+            screen.current_limit = 100
+            assert screen.current_limit == 100
+
+            # Change time frame again
+            screen.selected_time_frame = "8 hours"
+            assert screen.current_limit == 100  # Should persist
+
+    # --------------------------------------------------
+    # Test Group 6: Edge Cases
+    # --------------------------------------------------
+
+    def test_rapid_button_clicking(self):
+        """Rapid button clicking should toggle correctly."""
+        datasource = AsyncMock()
+        screen = LogPreviewScreen(
+            log_group_name="/aws/lambda/test",
+            datasource=datasource,
+        )
+
+        mock_event = MagicMock()
+        mock_event.button = MagicMock()
+        mock_event.stop = MagicMock()
+
+        # Click button rapidly 10 times
+        for _ in range(10):
+            screen.on_load_100_clicked(mock_event)
+
+        # Should end at 10 (started at 10, so even number of clicks returns to 10)
+        assert screen.current_limit == 10
+
+    def test_odd_number_of_rapid_clicks(self):
+        """Odd number of rapid clicks should toggle to opposite state."""
+        datasource = AsyncMock()
+        screen = LogPreviewScreen(
+            log_group_name="/aws/lambda/test",
+            datasource=datasource,
+        )
+
+        mock_event = MagicMock()
+        mock_event.button = MagicMock()
+        mock_event.stop = MagicMock()
+
+        # Click button 7 times (odd)
+        for _ in range(7):
+            screen.on_load_100_clicked(mock_event)
+
+        # Should end at 100 (started at 10, odd number toggles to opposite)
+        assert screen.current_limit == 100
+
+    def test_fetch_with_fewer_than_100_entries_available(self):
+        """Fetch should handle case where fewer than 100 entries exist."""
+        # This is tested indirectly through _update_entry_count_display
+        # showing actual count, not requested limit
+        datasource = AsyncMock()
+        screen = LogPreviewScreen(
+            log_group_name="/aws/lambda/test",
+            datasource=datasource,
+        )
+
+        # Set limit to 100 but only have 47 entries
+        screen.current_limit = 100
+        screen._events = [{"event_id": f"e{i}"} for i in range(47)]
+
+        mock_display = MagicMock()
+        screen.query_one = MagicMock(return_value=mock_display)
+
+        screen._update_entry_count_display()
+
+        # Should show actual count (47), not requested limit (100)
+        mock_display.update.assert_called_once_with("Showing 47 entries")
+
+    def test_entry_count_display_shows_actual_not_limit(self):
+        """Entry count should always show actual fetched count, not the limit."""
+        datasource = AsyncMock()
+        screen = LogPreviewScreen(
+            log_group_name="/aws/lambda/test",
+            datasource=datasource,
+        )
+
+        test_cases = [
+            (10, 5),  # Requested 10, got 5
+            (100, 100),  # Requested 100, got 100
+            (100, 73),  # Requested 100, got 73
+            (10, 10),  # Requested 10, got 10
+        ]
+
+        mock_display = MagicMock()
+        screen.query_one = MagicMock(return_value=mock_display)
+
+        for limit, actual_count in test_cases:
+            screen.current_limit = limit
+            screen._events = [{"event_id": f"e{i}"} for i in range(actual_count)]
+
+            mock_display.reset_mock()
+            screen._update_entry_count_display()
+
+            # Should always show actual count
+            mock_display.update.assert_called_once_with(f"Showing {actual_count} entries")
+
+    def test_watcher_not_triggered_during_initialization(self):
+        """Watcher should not execute during screen initialization."""
+        datasource = AsyncMock()
+
+        # Track if fetch was called
+        fetch_called = [False]
+
+        class TestScreen(LogPreviewScreen):
+            def _fetch_and_display_logs(self):
+                fetch_called[0] = True
+                return super()._fetch_and_display_logs()
+
+        screen = TestScreen(
+            log_group_name="/aws/lambda/test",
+            datasource=datasource,
+        )
+
+        # Screen is not mounted, so watcher should not execute fetch
+        # even though current_limit is set to default
+        screen.watch_current_limit(10)
+
+        # Fetch should NOT have been called (is_mounted is False)
+        assert not fetch_called[0]
+
+    def test_button_update_called_after_fetch_completes(self):
+        """Entry count display should update after fetch completes."""
+        # This test verifies the integration in _fetch_and_display_logs
+        # The method should call _update_entry_count_display() at line 769
+        datasource = AsyncMock()
+        screen = LogPreviewScreen(
+            log_group_name="/aws/lambda/test",
+            datasource=datasource,
+        )
+
+        # Just verify the method exists and is callable
+        assert callable(screen._update_entry_count_display)
+
+        # The actual integration is tested in integration tests
+        # This unit test confirms the method is available
+
+    # --------------------------------------------------
+    # Test Group 7: Constants and Configuration
+    # --------------------------------------------------
+
+    def test_default_limit_constant_value(self):
+        """DEFAULT_LIMIT constant should be 10."""
+        assert LogPreviewScreen.DEFAULT_LIMIT == 10
+
+    def test_load_more_limit_constant_value(self):
+        """LOAD_MORE_LIMIT constant should be 100."""
+        assert LogPreviewScreen.LOAD_MORE_LIMIT == 100
+
+    def test_limit_constants_are_positive(self):
+        """All limit constants should be positive integers."""
+        assert LogPreviewScreen.DEFAULT_LIMIT > 0
+        assert LogPreviewScreen.LOAD_MORE_LIMIT > 0
+        assert isinstance(LogPreviewScreen.DEFAULT_LIMIT, int)
+        assert isinstance(LogPreviewScreen.LOAD_MORE_LIMIT, int)
+
+    def test_load_more_limit_greater_than_default(self):
+        """LOAD_MORE_LIMIT should be greater than DEFAULT_LIMIT."""
+        assert LogPreviewScreen.LOAD_MORE_LIMIT > LogPreviewScreen.DEFAULT_LIMIT

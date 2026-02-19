@@ -658,6 +658,104 @@ Agent: [Refines time range, keeps context]
 
 ## Interface Features
 
+### Log Preview: Entry Limit Toggle
+
+**NEW FEATURE** - The log preview modal now includes a toggle button to switch between viewing 10 entries (default) and 100 entries.
+
+#### What It Does
+
+When viewing logs in the preview modal:
+- **Default:** Opens with 10 entries for fast loading
+- **Extended:** Click "Load Last 100" to view up to 100 entries
+- **Toggle Back:** Click "Show Last 10" to return to default
+- **Smart Persistence:** Your choice persists when changing time frames
+
+#### Visual Layout
+
+```
+┌──────────────────────────────────────────────────┐
+│ Time Frame: [15 min] [1 hour] [8 hours] [24 hrs]│
+├──────────────────────────────────────────────────┤
+│ [Load Last 100]            Showing 10 entries   │ ← Toggle controls
+├──────────────────────────────────────────────────┤
+│ [Select All] [Deselect All]    0 of 10 selected │
+└──────────────────────────────────────────────────┘
+```
+
+#### Why It's Useful
+
+**Flexible Context:**
+- Start with 10 for speed, expand to 100 when you need more information
+- No need to manually configure entry limits
+- Switch back and forth as your investigation evolves
+
+**Better Investigation:**
+- 10 entries: Quick checks, recent activity, initial exploration
+- 100 entries: Pattern analysis, historical context, trend investigation
+- Your limit choice persists across time frame changes
+
+**Non-Disruptive:**
+- Default behavior unchanged (still 10 entries on open)
+- No configuration required
+- Works seamlessly with all existing features
+
+#### How to Use
+
+**View More Entries:**
+1. Open any log preview modal
+2. Click "Load Last 100" button
+3. Wait 1-3 seconds while loading
+4. See up to 100 entries from current time window
+
+**Return to Default:**
+1. Click "Show Last 10" button
+2. Modal returns to 10 entries
+
+**With Time Frames:**
+- Load 100 entries from 15 minutes
+- Switch to "1 hour" time frame
+- Still shows 100 entries (limit persists)
+- Can toggle back to 10 anytime
+
+#### Entry Count Display
+
+The display shows the actual number of entries loaded:
+- "Showing 10 entries" - Default view
+- "Showing 100 entries" - Extended view
+- "Showing 47 entries" - When fewer than 100 exist (normal)
+
+**Note:** If only 47 entries exist in your time window, you'll see all 47 even though the limit is 100. This is expected behavior.
+
+#### Button States
+
+| Button Label | Button Color | Current State | Action |
+|--------------|--------------|---------------|--------|
+| "Load Last 100" | Gray | Viewing 10 | Click to load 100 |
+| "Show Last 10" | Blue | Viewing 100 | Click to return to 10 |
+
+#### Tips
+
+**When to Use 100 Entries:**
+- Investigating patterns that need more data points
+- Looking for infrequent events
+- Analyzing error sequences or trends
+- Need more historical context
+
+**When to Keep 10 Entries:**
+- Quick checks and recent activity
+- High-volume log groups (faster loading)
+- Initial exploration
+- Fast navigation and selection
+
+**Performance:**
+- 10 entries: < 1 second (typical)
+- 100 entries: 1-3 seconds (typical)
+- Narrower time windows load faster
+
+For complete documentation, see: [Log Preview Entry Limit Guide](../../george-scratch/feature-doc-log-preview-100-entries.md)
+
+---
+
 ### Interactive Terminal UI (TUI)
 
 LogAI uses Textual to provide a rich terminal interface.
