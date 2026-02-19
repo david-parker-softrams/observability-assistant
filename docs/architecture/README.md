@@ -15,8 +15,21 @@ This directory contains architectural design documents and technical specificati
 
 ### Component Architecture
 - **[context-management-system.md](context-management-system.md)** - Context management system architecture
+- **[context-window-management-improvements.md](context-window-management-improvements.md)** - Context window management implementation (435 lines!)
+  - 3x improvement in conversation length
+  - Mid-loop token budget tracking
+  - Emergency pruning strategy
+  - Search result deduplication (50% token reduction)
 - **[github-copilot-integration.md](github-copilot-integration.md)** - GitHub Copilot OAuth and API integration
 - **[log-groups-sidebar.md](log-groups-sidebar.md)** - Log groups sidebar component architecture
+- **[model-configuration-architecture.md](model-configuration-architecture.md)** - 3-tier YAML model configuration system
+  - Hardcoded fallbacks → Built-in YAML → User YAML
+  - Custom/local model support without code changes
+  - ModelConfigLoader and ModelConfig components
+- **[ollama-tool-calling-architecture.md](ollama-tool-calling-architecture.md)** - Ollama model tool calling support architecture
+  - Why Ollama models support tool calling
+  - LiteLLM integration patterns
+  - Function calling implementation
 - **[preload-log-groups.md](preload-log-groups.md)** - Background log group loading system
 
 ## Design Documents

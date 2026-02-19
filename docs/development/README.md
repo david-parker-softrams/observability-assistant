@@ -17,6 +17,12 @@ This directory contains documentation for developers working on LogAI, including
 - **[agent-self-direction.md](agent-self-direction.md)** - AI agent self-direction design and guidelines
 - **[file-writing-guidelines.md](file-writing-guidelines.md)** - Guidelines for agents writing files
 
+### Development Patterns
+- **[cli-argument-patterns.md](cli-argument-patterns.md)** - CLI argument implementation patterns
+  - Argument parsing best practices
+  - User experience considerations
+  - Testing strategies for CLI arguments
+
 ## Best Practices
 
 ### Framework-Specific

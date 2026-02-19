@@ -72,7 +72,7 @@ Implemented 5-part comprehensive solution:
 - Documented model-specific impacts
 - Created 100+ section detailed analysis
 
-**Deliverable:** `george-scratch/CONTEXT_WINDOW_INVESTIGATION.md`
+**Deliverable:** `../internal/investigation-context-window-limits.md` (previously in george-scratch)
 
 ### Requirements Phase
 **George (TPM)** - Requirements definition
@@ -81,7 +81,7 @@ Implemented 5-part comprehensive solution:
 - Specified testing requirements
 - Risk assessment and mitigation
 
-**Deliverable:** `george-scratch/requirements-context-window-fixes.md`
+**Deliverable:** `../internal/requirements-context-window-fixes.md` (previously in george-scratch)
 
 ### Design Phase
 **Saanvi (Software Architect)** - Detailed design
@@ -90,7 +90,7 @@ Implemented 5-part comprehensive solution:
 - Defined algorithm specifications
 - Method signatures and class modifications
 
-**Deliverable:** `george-scratch/design-context-window-fixes.md`
+**Deliverable:** `design-context-window-fixes.md` (in this directory)
 
 **Key Design Decisions:**
 - Implementation order: Fix 3 → Fix 2 → Fixes 1+4 → Fix 5
@@ -120,7 +120,7 @@ Implemented 5-part comprehensive solution:
 - **Score: 9.0/10**
 - **Approval: YES - Ready for Production**
 
-**Deliverable:** `george-scratch/code-review-context-window-fixes.md`
+**Deliverable:** `../internal/code-review-context-window-fixes.md` (previously in george-scratch)
 
 **Review Highlights:**
 - Zero critical issues
@@ -163,11 +163,11 @@ Implemented 5-part comprehensive solution:
 7. **`tests/unit/test_cloudwatch_tools.py`**
    - Updated for API change (removed events field)
 
-### Documentation (3 files)
-8. **`george-scratch/CONTEXT_WINDOW_INVESTIGATION.md`** - Hans's investigation
-9. **`george-scratch/requirements-context-window-fixes.md`** - Requirements
-10. **`george-scratch/design-context-window-fixes.md`** - Saanvi's design
-11. **`george-scratch/code-review-context-window-fixes.md`** - Han-Ron's review
+### Documentation (4 files)
+8. **`../internal/investigation-context-window-limits.md`** - Hans's investigation
+9. **`../internal/requirements-context-window-fixes.md`** - Requirements
+10. **`design-context-window-fixes.md`** - Saanvi's design (in this directory)
+11. **`../internal/code-review-context-window-fixes.md`** - Han-Ron's review
 
 ---
 
@@ -415,11 +415,11 @@ You should be able to complete 10+ exchanges with tool usage before hitting any 
 
 All documentation for this feature:
 
-1. **Investigation:** `george-scratch/CONTEXT_WINDOW_INVESTIGATION.md`
-2. **Requirements:** `george-scratch/requirements-context-window-fixes.md`
-3. **Design:** `george-scratch/design-context-window-fixes.md`
-4. **Code Review:** `george-scratch/code-review-context-window-fixes.md`
-5. **Session Summary:** `george-scratch/SESSION_2026-02-17_context-window-management.md` (this file)
+1. **Investigation:** `../internal/investigation-context-window-limits.md`
+2. **Requirements:** `../internal/requirements-context-window-fixes.md`
+3. **Design:** `design-context-window-fixes.md` (in this directory)
+4. **Code Review:** `../internal/code-review-context-window-fixes.md`
+5. **Session Summary:** This file (`context-window-management-improvements.md`)
 
 ---
 

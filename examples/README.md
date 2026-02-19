@@ -29,6 +29,28 @@ Showcases the SQLite-based caching system that:
 python examples/demo_phase6.py
 ```
 
+### spinner_demo.py - Interactive Spinner Selection
+Interactive demonstration of spinner styles with Textual:
+- Real-time spinner preview
+- User selection interface
+- Integration patterns for TUI applications
+
+**Run with:**
+```bash
+python examples/spinner_demo.py
+```
+
+### spinner_guide.py - Non-Interactive Spinner Guide
+Non-interactive guide showing all available spinner styles:
+- All spinner types displayed
+- Visual reference for choosing spinners
+- Implementation examples
+
+**Run with:**
+```bash
+python examples/spinner_guide.py
+```
+
 ## Development Runner
 
 The `logai_dev.py` script in the root directory allows running LogAI without full installation:

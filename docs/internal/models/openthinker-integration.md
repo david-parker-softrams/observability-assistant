@@ -170,23 +170,24 @@ Follows the exact same pattern as Command-R implementation:
 
 ## Documentation
 
-### Created Documents
+### Related Documents
 
-1. **`george-scratch/OPENTHINKER_IMPLEMENTATION_SUMMARY.md`**
+1. **`../OPENTHINKER_IMPLEMENTATION_SUMMARY.md`**
    - Complete technical documentation
    - Integration details
    - Model comparison
 
-2. **`george-scratch/OPENTHINKER_QUICK_REFERENCE.md`**
+2. **`../OPENTHINKER_QUICK_REFERENCE.md`**
    - Quick start guide
    - Configuration examples
 
-3. **`george-scratch/OPENTHINKER_CODE_REVIEW.md`**
+3. **Code review document** (if available in internal/)
    - Han-Ron's detailed code review
    - Quality assessment
    - Verification results
 
-4. **`george-scratch/OPENTHINKER_COMPLETE.md`** (this file)
+4. **`openthinker-integration.md`** (this file)
+   - Production-ready integration guide
    - Project completion summary
    - Usage instructions
    - Testing results

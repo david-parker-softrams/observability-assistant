@@ -65,10 +65,10 @@ examples/
 tests/unit/
 └── test_model_config.py         # 39 comprehensive tests (506 lines)
 
-george-scratch/
-├── requirements-model-config-externalization.md
-├── design-model-config-externalization.md
-└── SESSION_2026-02-17_model-config-externalization.md (this file)
+Related Documentation:
+├── ../internal/requirements-model-config-externalization.md  # Requirements
+├── design-model-config.md  # Original design document (in this directory)
+└── model-configuration-architecture.md  # This comprehensive session summary
 ```
 
 ### **Modified Files**

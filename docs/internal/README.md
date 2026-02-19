@@ -4,6 +4,38 @@ This directory contains internal project documentation including requirements, c
 
 ## Document Categories
 
+### Model Integration Documentation
+Production-approved model integrations and implementation guides.
+
+**Directory:** [models/](models/)
+- `deepseek-r1-integration.md` - DeepSeek-R1:32b reasoning model (128K context, all variants)
+- `openthinker-integration.md` - OpenThinker reasoning model implementation
+
+See [models/README.md](models/README.md) for details.
+
+### Bug Fix Patterns
+Documented bug fixes and defensive programming patterns.
+
+**Directory:** [bug-fixes/](bug-fixes/)
+- `cache-truncation-defense-in-depth.md` - Defense-in-depth pattern for cache corruption prevention
+
+See [bug-fixes/README.md](bug-fixes/README.md) for details.
+
+### Testing Methodology
+Comprehensive testing documentation and methodology reports.
+
+**Testing Documents:**
+- `phase2-testing-methodology.md` - Phase 2 configuration testing complete report
+  - 52 new tests covering 28 Phase 2 settings
+  - 98.9% test pass rate (704/712 tests)
+  - Testing methodology and patterns
+
+### Configuration Documentation
+Configuration improvements and session documentation.
+
+**Configuration Docs:**
+- `configuration-improvements-session.md` - Multi-improvement session covering bug fixes and feature additions
+
 ### Requirements Documents (87 files)
 Requirements specifications for features and improvements. These define what needs to be built and why.
 

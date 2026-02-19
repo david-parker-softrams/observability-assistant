@@ -273,11 +273,11 @@ CLI module coverage: 77%
    - Usage examples
 
 ### Project Documentation
-6. **`george-scratch/feature-aws-profile-cli-arg.md`** (NEW)
+6. **Feature requirements** (in `docs/internal/`)
    - Complete feature requirements document
 
-7. **`george-scratch/SESSION_2026-02-11_cli-arguments.md`** (NEW, this file)
-   - Session notes and summary
+7. **`cli-argument-patterns.md`** (this file)
+   - Session notes and implementation patterns
 
 ---
 
@@ -440,8 +440,7 @@ tests/unit/test_cli.py
 README.md
 docs/tui.md
 .env.example
-george-scratch/feature-aws-profile-cli-arg.md
-george-scratch/SESSION_2026-02-11_cli-arguments.md
+docs/development/cli-argument-patterns.md
 ```
 
 ### Suggested Commit Message
@@ -554,14 +553,14 @@ logai --help  # See clear documentation
 
 ## References
 
-**Feature Request Document:**
-- `/Users/David.Parker/src/observability-assistant/george-scratch/feature-aws-profile-cli-arg.md`
+**Feature Documentation:**
+- See `docs/internal/` for requirements documents
 
 **Implementation Files:**
 - `src/logai/cli.py` (lines 62-90, 115-121)
 - `tests/unit/test_cli.py`
 
-**Han-Ron's Code Review:**
+**Code Review:**
 - Rating: 9/10
 - Status: Approved
 - Security: Pass
