@@ -1876,3 +1876,13 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
             List of message dictionaries
         """
         return self.conversation_history.copy()
+
+    def get_conversation_history(self) -> list[dict[str, Any]]:
+        """
+        Get a copy of the current conversation history.
+
+        Returns:
+            Copy of conversation history messages (system, user, assistant, tool messages).
+            Returns a copy to prevent external mutation.
+        """
+        return list(self.conversation_history)

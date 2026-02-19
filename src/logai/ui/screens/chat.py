@@ -18,6 +18,7 @@ from logai.cache.manager import CacheManager
 from logai.config import get_settings
 from logai.core.orchestrator import LLMOrchestrator, ToolCallRecord
 from logai.ui.commands import CommandHandler
+from logai.ui.screens.context_viewer import ContextParser, ContextViewerScreen
 from logai.ui.widgets.input_box import ChatInput
 from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem, LogGroupsSidebar
 from logai.ui.widgets.messages import (
@@ -370,6 +371,52 @@ class ChatScreen(Screen[None]):
             logger.error(f"Failed to open log preview: {e}", exc_info=True)
             self.notify(
                 f"Failed to open preview: {str(e)}",
+                severity="error",
+                timeout=5,
+            )
+
+    @on(StatusFooter.ContextViewRequested)
+    async def on_context_view_requested(self, event: StatusFooter.ContextViewRequested) -> None:
+        """
+        Handle request to view context from status bar click.
+
+        Args:
+            event: Context view request event
+        """
+        try:
+            # Get current staged context from orchestrator
+            staged_context = self.orchestrator._pending_context_injection
+
+            # Get conversation history from orchestrator
+            conversation_history = self.orchestrator.get_conversation_history()
+
+            # Parse metadata for staged context
+            metadata = ContextParser.parse(staged_context)
+
+            # Update metadata with actual token count from budget tracker
+            if hasattr(self.orchestrator, "budget_tracker"):
+                usage = self.orchestrator.budget_tracker.get_usage()
+                metadata.total_tokens = usage.total_tokens
+
+            # Define callback (follows pattern from log preview fix)
+            async def handle_context_viewer_close(result: None) -> None:
+                """Handle context viewer modal close."""
+                logger.debug("Context viewer modal closed")
+
+            # Show modal with callback
+            self.app.push_screen(
+                ContextViewerScreen(
+                    staged_context=staged_context,
+                    conversation_history=conversation_history,
+                    metadata=metadata,
+                ),
+                handle_context_viewer_close,
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to open context viewer: {e}", exc_info=True)
+            self.notify(
+                f"Failed to open context viewer: {str(e)}",
                 severity="error",
                 timeout=5,
             )

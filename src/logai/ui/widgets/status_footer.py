@@ -1,19 +1,84 @@
 """Combined footer with keyboard shortcuts and status information."""
 
+import logging
 import time
 
 from rich.spinner import Spinner
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Horizontal
+from textual.css.query import NoMatches
+from textual.events import Click
+from textual.message import Message
 from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Static
 from textual.widgets._footer import FooterKey
 
+logger = logging.getLogger(__name__)
+
+
+class ClickableContextLabel(Static):
+    """Clickable label for status and context display with hover feedback."""
+
+    # Enable focus to allow hover pseudo-class to work properly
+    can_focus = False  # Keep False but enable mouse interaction via CSS
+
+    DEFAULT_CSS = """
+    ClickableContextLabel {
+        width: auto;
+        max-width: 999;
+        content-align: right top;
+        &:hover {
+            background: $block-hover-background;
+        }
+    }
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        """Initialize the clickable context label."""
+        super().__init__(*args, **kwargs)
+
+    def on_click(self, event: Click) -> None:
+        """Handle click - emit request to view context only if clicking on text.
+
+        Args:
+            event: Click event with position information
+        """
+        # Get the actual rendered text content
+        renderable = self.render()
+        if hasattr(renderable, "plain"):
+            text_length = len(renderable.plain)
+        else:
+            text_length = len(str(renderable))
+
+        # Calculate the actual text width including padding
+        # The widget has padding: 0 2 (left and right padding of 2)
+        padding_left = 2
+
+        # Click position is relative to the widget (0-indexed from left edge)
+        click_x = event.x
+
+        # Text starts after left padding and ends at: padding_left + text_length
+        text_start = padding_left
+        text_end = padding_left + text_length
+
+        # Only trigger if click is within the actual text bounds
+        if text_start <= click_x < text_end:
+            # Post the message to parent (StatusFooter)
+            self.post_message(StatusFooter.ContextViewRequested())
+        else:
+            # Stop event propagation to prevent any parent widgets from handling it
+            event.stop()
+
 
 class StatusFooter(Widget):
     """Footer showing keyboard shortcuts (left) and status info (right)."""
+
+    class ContextViewRequested(Message):
+        """Emitted when user clicks the context label to view context."""
+
+        pass
 
     DEFAULT_CSS = """
     StatusFooter {
@@ -26,18 +91,25 @@ class StatusFooter(Widget):
     StatusFooter > Horizontal {
         width: auto;
         height: 1;
-        padding-right: 2;
+        content-align: left middle;
     }
 
     StatusFooter FooterKey {
         margin-right: 1;
     }
 
-    StatusFooter > Static {
-        width: 1fr;
+    StatusFooter > Static#status-info {
+        width: auto;
         height: 1;
         background: $panel;
-        padding-left: 2;
+        padding: 0 2;
+    }
+
+    StatusFooter > ClickableContextLabel {
+        width: auto;
+        height: 1;
+        background: $panel;
+        padding: 0 2;
     }
     """
 
@@ -65,7 +137,7 @@ class StatusFooter(Widget):
 
     def compose(self) -> ComposeResult:
         """Create the footer structure with FooterKey widgets and status display."""
-        # Create a horizontal container for shortcuts
+        # Create a horizontal container for shortcuts (left side)
         with Horizontal():
             # Get active bindings and create FooterKey widgets
             try:
@@ -90,8 +162,11 @@ class StatusFooter(Widget):
                 # They might not be available yet
                 pass
 
-        # Create Static widget for status and context info
-        yield Static(self._render_status_context(), id="status-context")
+        # Non-clickable status info in middle-right (Ready + Cache stats)
+        yield Static(self._render_status_info(), id="status-info")
+
+        # Clickable context info on far right (Context utilization + Model)
+        yield ClickableContextLabel(self._render_context_info(), id="context-clickable")
 
     def on_mount(self) -> None:
         """Start spinner timer when widget is mounted."""
@@ -117,13 +192,21 @@ class StatusFooter(Widget):
             self._update_status_display()
 
     def _update_status_display(self) -> None:
-        """Update the status/context display Static widget."""
+        """Update both the status info and context info display widgets."""
         try:
-            static = self.query_one("#status-context", Static)
-            static.update(self._render_status_context())
-        except Exception:
-            # Widget might not be mounted yet
+            # Update non-clickable status info widget
+            status_widget = self.query_one("#status-info", Static)
+            status_widget.update(self._render_status_info())
+
+            # Update clickable context info widget
+            context_widget = self.query_one("#context-clickable", ClickableContextLabel)
+            context_widget.update(self._render_context_info())
+        except NoMatches:
+            # Widget not yet mounted, skip update
             pass
+        except Exception as e:
+            # Unexpected error - log it
+            logger.error(f"Unexpected error updating status display: {e}")
 
     def _update_shortcuts(self) -> None:
         """Update the shortcuts display when bindings change."""
@@ -204,10 +287,11 @@ class StatusFooter(Widget):
         """
         self._update_status_display()
 
-    def _render_status_context(self) -> Text:
-        """Render the status and context information for the Static widget."""
+    def _render_status_info(self) -> Text:
+        """Render non-clickable status information (Ready + Cache stats)."""
+        result = Text()
+
         # Build status message (Phase 1 + Phase 2 with spinner)
-        status_display = Text()
         if self.status and self.status != "Ready":
             # Active status - show with spinner animation (Phase 2)
             current_time = time.time()
@@ -218,14 +302,13 @@ class StatusFooter(Widget):
             else:
                 spinner_str_full = str(spinner_text).strip()
                 spinner_str = spinner_str_full[0] if spinner_str_full else "⠋"
-            status_display.append(f"{spinner_str} ", style="yellow")
-            status_display.append(self.status, style="bold yellow")
+            result.append(f"{spinner_str} ", style="yellow")
+            result.append(self.status, style="bold yellow")
         elif self.status:
             # Idle status - show dimmed
-            status_display.append(self.status, style="dim")
+            result.append(self.status, style="dim")
 
-        # Build context info for right side
-        # Calculate cache hit rate
+        # Add cache stats
         total = self.cache_hits + self.cache_misses
         if total > 0:
             hit_rate = (self.cache_hits / total) * 100
@@ -233,6 +316,14 @@ class StatusFooter(Widget):
         else:
             cache_info = "Cache: 0/0"
 
+        if len(result.plain) > 0:
+            result.append("  ", style="dim")
+        result.append(cache_info, style="dim")
+
+        return result
+
+    def _render_context_info(self) -> Text:
+        """Render clickable context information (Context utilization + Model name)."""
         # Format context utilization with enhanced color coding
         if self.context_utilization >= 95:
             context_color = "red bold"
@@ -249,8 +340,6 @@ class StatusFooter(Widget):
 
         # Build context text with absolute values
         context_text = Text()
-        context_text.append(cache_info, style="dim")
-        context_text.append(" | ", style="dim")
         context_text.append("Context: ", style="dim")
 
         # Show tokens in K format (e.g., "25.5K/32K") if available
@@ -267,14 +356,7 @@ class StatusFooter(Widget):
         context_text.append(" | ", style="dim")
         context_text.append(self.model, style="dim")
 
-        # Combine status and context with proper spacing
-        result = Text()
-        if len(status_display.plain) > 0:
-            result.append_text(status_display)
-            result.append("  ")
-        result.append_text(context_text)
-
-        return result
+        return context_text
 
     def set_status(self, status: str) -> None:
         """
