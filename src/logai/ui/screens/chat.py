@@ -439,7 +439,7 @@ The user has specifically selected these log entries for your analysis:
 {json.dumps(formatted_entries, indent=2)}
 ```
 
-Please analyze these logs and provide insights based on the user's next question."""
+YOU MUST analyze these {len(entries)} log entries. Do NOT ask for a log group to search. The logs are provided above. Provide insights, patterns, and categorization based on these specific entries."""
 
     def _handle_context_notification(self, level: str, message: str) -> None:
         """

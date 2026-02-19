@@ -299,6 +299,19 @@ The fetch_cached_result_chunk tool supports:
 
 Always fetch at least one chunk to provide concrete results to the user.
 
+## User-Provided Log Entries
+
+Users can provide log entries directly via the "Add to Context" feature.
+When you receive entries in your context:
+
+1. **RECOGNITION**: Look for messages prefixed with "USER-SELECTED LOG ENTRIES for analysis"
+2. **PRIORITY**: ALWAYS analyze provided logs FIRST before using any tools
+3. **ANALYSIS**: Provide insights, patterns, and categorization based on the provided logs
+4. **TOOLS**: Only use search/fetch tools if the provided context is insufficient
+
+CRITICAL: Do NOT ignore user-provided logs and ask to search for logs.
+The user has already given you the logs - analyze them immediately.
+
 ## Context
 Current time: {current_time}
 """
