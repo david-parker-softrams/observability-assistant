@@ -347,17 +347,24 @@ class ChatScreen(Screen[None]):
             # Import LogPreviewScreen here to avoid circular imports
             from logai.ui.screens.log_preview import LogPreviewScreen
 
-            # Show preview modal and await result
-            result = await self.app.push_screen(
+            # Define callback to handle modal result
+            async def handle_log_selection(result: dict[str, Any] | None) -> None:
+                """Handle the result from the log preview modal."""
+                if result:
+                    entry_count = len(result.get("selected_entries", []))
+                    logger.debug(f"Injecting {entry_count} log entries from preview to context")
+                    await self._inject_log_entries_to_context(result)
+                else:
+                    logger.debug("Log preview modal dismissed without selection")
+
+            # Show preview modal with callback
+            self.app.push_screen(
                 LogPreviewScreen(
                     log_group_name=event.log_group_name,
                     datasource=datasource,
-                )
+                ),
+                handle_log_selection,
             )
-
-            # If user selected entries, inject them into context
-            if result:
-                await self._inject_log_entries_to_context(result)
 
         except Exception as e:
             logger.error(f"Failed to open log preview: {e}", exc_info=True)
@@ -378,18 +385,15 @@ class ChatScreen(Screen[None]):
             log_group = result["log_group_name"]
             entries = result["selected_entries"]
             count = len(entries)
-            logger.info(f"[CONTEXT_DEBUG] Chat screen received {count} entries from log preview")
 
             # Format entries for context
             context_message = self._format_log_entries_for_context(log_group, entries)
-            logger.info(f"[CONTEXT_DEBUG] Formatted context message: {len(context_message)} chars")
-            logger.info(f"[CONTEXT_DEBUG] Context contains {len(entries)} entries")
-            # Log first 500 chars to verify content
-            logger.info(f"[CONTEXT_DEBUG] Context preview: {context_message[:500]}...")
+            logger.info(
+                f"Adding {count} log entries from {log_group} to context ({len(context_message)} chars)"
+            )
 
             # Inject via orchestrator
             self.orchestrator.inject_context_update(context_message)
-            logger.info("[CONTEXT_DEBUG] Injected context to orchestrator")
 
             # Show system message in chat
             messages_container = self.query_one("#messages-container", VerticalScroll)
