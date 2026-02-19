@@ -745,6 +745,9 @@ class LogPreviewScreen(ModalScreen[dict[str, Any] | None]):
                 end_time=end_time,
                 limit=self.current_limit,
             )
+            logger.info(
+                f"[CONTEXT_DEBUG] Fetched {len(self._events)} events with limit={self.current_limit}"
+            )
 
             # Remove loading indicator
             loading.remove()
@@ -895,6 +898,18 @@ class LogPreviewScreen(ModalScreen[dict[str, Any] | None]):
             entry_id = f"entry-{idx}"
             if entry_id in self._selected_ids:
                 selected_events.append(event)
+                # Log progress every 10 events
+                if len(selected_events) % 10 == 0 or len(selected_events) == len(
+                    self._selected_ids
+                ):
+                    logger.info(
+                        f"[CONTEXT_DEBUG] Gathered {len(selected_events)} of {len(self._selected_ids)} selected events"
+                    )
+
+        # Log final counts before dismiss
+        logger.info(f"[CONTEXT_DEBUG] Total selected_ids: {len(self._selected_ids)}")
+        logger.info(f"[CONTEXT_DEBUG] Total selected_events gathered: {len(selected_events)}")
+        logger.info(f"[CONTEXT_DEBUG] Dismissing modal with {len(selected_events)} entries")
 
         # Return result and dismiss
         result = {

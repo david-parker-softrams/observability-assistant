@@ -444,6 +444,7 @@ Use this tool to find available log groups before querying logs."""
             context_message: Message to inject as system context
         """
         self._pending_context_injection = context_message
+        logger.info(f"[CONTEXT_DEBUG] Orchestrator stored context: {len(context_message)} chars")
 
     def _get_pending_context_injection(self) -> str | None:
         """Get and clear any pending context injection."""
@@ -483,6 +484,7 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
         if self._pending_context_injection:
             injection = self._pending_context_injection
             self._pending_context_injection = None
+            logger.info(f"[CONTEXT_DEBUG] Orchestrator retrieved context: {len(injection)} chars")
             injections.append(injection)
 
         # Return combined injections or None if empty
@@ -1026,6 +1028,10 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
 
                 # Add context injection BEFORE the last user message
                 if pending_injection:
+                    logger.info(
+                        f"[CONTEXT_DEBUG] Adding context to messages array: {len(pending_injection)} chars"
+                    )
+                    logger.info(f"[CONTEXT_DEBUG] Context preview: {pending_injection[:500]}...")
                     messages.append({"role": "system", "content": pending_injection})
 
                 # Add the last user message
@@ -1035,10 +1041,18 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
                 # Add all history, then context at the end
                 messages.extend(self.conversation_history)
                 if pending_injection:
+                    logger.info(
+                        f"[CONTEXT_DEBUG] Adding context to messages array: {len(pending_injection)} chars"
+                    )
+                    logger.info(f"[CONTEXT_DEBUG] Context preview: {pending_injection[:500]}...")
                     messages.append({"role": "system", "content": pending_injection})
         else:
             # Empty history, just add context if present
             if pending_injection:
+                logger.info(
+                    f"[CONTEXT_DEBUG] Adding context to messages array: {len(pending_injection)} chars"
+                )
+                logger.info(f"[CONTEXT_DEBUG] Context preview: {pending_injection[:500]}...")
                 messages.append({"role": "system", "content": pending_injection})
 
         # Update budget tracker with current state
@@ -1047,6 +1061,14 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
 
         # Get available tools
         tools = self.tool_registry.to_function_definitions()
+
+        # Log message summary before LLM call
+        logger.info(f"[CONTEXT_DEBUG] Sending {len(messages)} messages to LLM")
+        for i, msg in enumerate(messages):
+            content_preview = msg["content"][:100] if len(msg["content"]) > 100 else msg["content"]
+            logger.info(
+                f"[CONTEXT_DEBUG] Message {i}: role={msg['role']}, length={len(msg['content'])} chars, preview={content_preview}..."
+            )
 
         # Initialize retry state for this turn
         retry_state = RetryState()
@@ -1335,6 +1357,10 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
 
                 # Add context injection BEFORE the last user message
                 if pending_injection:
+                    logger.info(
+                        f"[CONTEXT_DEBUG] Adding context to messages array: {len(pending_injection)} chars"
+                    )
+                    logger.info(f"[CONTEXT_DEBUG] Context preview: {pending_injection[:500]}...")
                     messages.append({"role": "system", "content": pending_injection})
 
                 # Add the last user message
@@ -1344,10 +1370,18 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
                 # Add all history, then context at the end
                 messages.extend(self.conversation_history)
                 if pending_injection:
+                    logger.info(
+                        f"[CONTEXT_DEBUG] Adding context to messages array: {len(pending_injection)} chars"
+                    )
+                    logger.info(f"[CONTEXT_DEBUG] Context preview: {pending_injection[:500]}...")
                     messages.append({"role": "system", "content": pending_injection})
         else:
             # Empty history, just add context if present
             if pending_injection:
+                logger.info(
+                    f"[CONTEXT_DEBUG] Adding context to messages array: {len(pending_injection)} chars"
+                )
+                logger.info(f"[CONTEXT_DEBUG] Context preview: {pending_injection[:500]}...")
                 messages.append({"role": "system", "content": pending_injection})
 
         # Update budget tracker with current state
@@ -1356,6 +1390,14 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
 
         # Get available tools
         tools = self.tool_registry.to_function_definitions()
+
+        # Log message summary before LLM call
+        logger.info(f"[CONTEXT_DEBUG] Sending {len(messages)} messages to LLM")
+        for i, msg in enumerate(messages):
+            content_preview = msg["content"][:100] if len(msg["content"]) > 100 else msg["content"]
+            logger.info(
+                f"[CONTEXT_DEBUG] Message {i}: role={msg['role']}, length={len(msg['content'])} chars, preview={content_preview}..."
+            )
 
         # Initialize retry state for this turn
         retry_state = RetryState()

@@ -378,12 +378,18 @@ class ChatScreen(Screen[None]):
             log_group = result["log_group_name"]
             entries = result["selected_entries"]
             count = len(entries)
+            logger.info(f"[CONTEXT_DEBUG] Chat screen received {count} entries from log preview")
 
             # Format entries for context
             context_message = self._format_log_entries_for_context(log_group, entries)
+            logger.info(f"[CONTEXT_DEBUG] Formatted context message: {len(context_message)} chars")
+            logger.info(f"[CONTEXT_DEBUG] Context contains {len(entries)} entries")
+            # Log first 500 chars to verify content
+            logger.info(f"[CONTEXT_DEBUG] Context preview: {context_message[:500]}...")
 
             # Inject via orchestrator
             self.orchestrator.inject_context_update(context_message)
+            logger.info("[CONTEXT_DEBUG] Injected context to orchestrator")
 
             # Show system message in chat
             messages_container = self.query_one("#messages-container", VerticalScroll)
