@@ -1012,14 +1012,34 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
         self._prune_history_if_needed()
 
         # Prepare messages with system prompt
-        messages = [
-            {"role": "system", "content": self._get_system_prompt()}
-        ] + self.conversation_history
+        messages = [{"role": "system", "content": self._get_system_prompt()}]
 
-        # Check for pending context injection
+        # Handle context injection BEFORE the latest user message
         pending_injection = self._get_pending_context_injection()
-        if pending_injection:
-            messages.append({"role": "system", "content": pending_injection})
+
+        if self.conversation_history:
+            # Check if last message is from user
+            if self.conversation_history[-1]["role"] == "user":
+                # Add all history except the last user message
+                if len(self.conversation_history) > 1:
+                    messages.extend(self.conversation_history[:-1])
+
+                # Add context injection BEFORE the last user message
+                if pending_injection:
+                    messages.append({"role": "system", "content": pending_injection})
+
+                # Add the last user message
+                messages.append(self.conversation_history[-1])
+            else:
+                # Last message is not from user (e.g., assistant message)
+                # Add all history, then context at the end
+                messages.extend(self.conversation_history)
+                if pending_injection:
+                    messages.append({"role": "system", "content": pending_injection})
+        else:
+            # Empty history, just add context if present
+            if pending_injection:
+                messages.append({"role": "system", "content": pending_injection})
 
         # Update budget tracker with current state
         self._update_budget_tracker(messages)
@@ -1301,14 +1321,34 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
         self._prune_history_if_needed()
 
         # Prepare messages with system prompt
-        messages = [
-            {"role": "system", "content": self._get_system_prompt()}
-        ] + self.conversation_history
+        messages = [{"role": "system", "content": self._get_system_prompt()}]
 
-        # Check for pending context injection
+        # Handle context injection BEFORE the latest user message
         pending_injection = self._get_pending_context_injection()
-        if pending_injection:
-            messages.append({"role": "system", "content": pending_injection})
+
+        if self.conversation_history:
+            # Check if last message is from user
+            if self.conversation_history[-1]["role"] == "user":
+                # Add all history except the last user message
+                if len(self.conversation_history) > 1:
+                    messages.extend(self.conversation_history[:-1])
+
+                # Add context injection BEFORE the last user message
+                if pending_injection:
+                    messages.append({"role": "system", "content": pending_injection})
+
+                # Add the last user message
+                messages.append(self.conversation_history[-1])
+            else:
+                # Last message is not from user (e.g., assistant message)
+                # Add all history, then context at the end
+                messages.extend(self.conversation_history)
+                if pending_injection:
+                    messages.append({"role": "system", "content": pending_injection})
+        else:
+            # Empty history, just add context if present
+            if pending_injection:
+                messages.append({"role": "system", "content": pending_injection})
 
         # Update budget tracker with current state
         self._update_budget_tracker(messages)
