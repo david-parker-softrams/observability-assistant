@@ -1065,3 +1065,224 @@ class TestCachedResultGuidance:
         # Second call should return None
         result = orchestrator._get_pending_context_injection()
         assert result is None
+
+
+class TestGetFullContextSnapshot:
+    """Test get_full_context_snapshot() method."""
+
+    def test_empty_conversation_includes_system_prompt(self, orchestrator):
+        """Test snapshot with no conversation history includes system prompt."""
+        # When: Get snapshot with empty conversation
+        snapshot = orchestrator.get_full_context_snapshot()
+
+        # Then: Should return a list with only the system message
+        assert isinstance(snapshot, list)
+        assert len(snapshot) == 1
+        assert snapshot[0]["role"] == "system"
+        assert "observability assistant" in snapshot[0]["content"]
+
+    def test_with_conversation_history(self, orchestrator):
+        """Test snapshot includes full conversation history."""
+        # Given: Conversation with multiple messages
+        orchestrator.conversation_history.append({"role": "user", "content": "Hello"})
+        orchestrator.conversation_history.append({"role": "assistant", "content": "Hi there!"})
+        orchestrator.conversation_history.append({"role": "user", "content": "Fetch logs"})
+        orchestrator.conversation_history.append(
+            {"role": "assistant", "content": "I'll fetch the logs for you"}
+        )
+
+        # When: Get snapshot
+        snapshot = orchestrator.get_full_context_snapshot()
+
+        # Then: Should include system + all history messages
+        assert len(snapshot) == 5  # 1 system + 4 conversation messages
+        assert snapshot[0]["role"] == "system"
+        assert snapshot[1]["role"] == "user"
+        assert snapshot[1]["content"] == "Hello"
+        assert snapshot[2]["role"] == "assistant"
+        assert snapshot[2]["content"] == "Hi there!"
+        assert snapshot[3]["role"] == "user"
+        assert snapshot[3]["content"] == "Fetch logs"
+        assert snapshot[4]["role"] == "assistant"
+        assert snapshot[4]["content"] == "I'll fetch the logs for you"
+
+    def test_system_prompt_is_first_message(self, orchestrator):
+        """Test that system message is always first in snapshot."""
+        # Given: Conversation with history
+        orchestrator.conversation_history.append({"role": "user", "content": "Test message 1"})
+        orchestrator.conversation_history.append({"role": "assistant", "content": "Response 1"})
+        orchestrator.conversation_history.append({"role": "user", "content": "Test message 2"})
+
+        # When: Get snapshot
+        snapshot = orchestrator.get_full_context_snapshot()
+
+        # Then: System message should be at index 0
+        assert snapshot[0]["role"] == "system"
+        assert "observability assistant" in snapshot[0]["content"]
+        # User message should be at index 1 (not 0)
+        assert snapshot[1]["role"] == "user"
+
+    def test_return_type_structure(self, orchestrator):
+        """Test that return type has correct structure."""
+        # Given: Some conversation history
+        orchestrator.conversation_history.append({"role": "user", "content": "Hello"})
+        orchestrator.conversation_history.append({"role": "assistant", "content": "Hi!"})
+
+        # When: Get snapshot
+        snapshot = orchestrator.get_full_context_snapshot()
+
+        # Then: Should return list of dicts with correct structure
+        assert isinstance(snapshot, list)
+        for message in snapshot:
+            assert isinstance(message, dict)
+            assert "role" in message
+            assert "content" in message
+            assert isinstance(message["role"], str)
+            assert isinstance(message["content"], str)
+            assert message["role"] in ["system", "user", "assistant", "tool"]
+
+    def test_doesnt_mutate_conversation_history(self, orchestrator):
+        """Test that getting snapshot doesn't modify conversation_history."""
+        # Given: Original conversation history
+        original_history = [
+            {"role": "user", "content": "Message 1"},
+            {"role": "assistant", "content": "Response 1"},
+            {"role": "user", "content": "Message 2"},
+        ]
+        orchestrator.conversation_history = original_history.copy()
+        original_length = len(orchestrator.conversation_history)
+
+        # When: Get snapshot
+        snapshot = orchestrator.get_full_context_snapshot()
+
+        # Then: Original conversation_history should be unchanged
+        assert len(orchestrator.conversation_history) == original_length
+        assert orchestrator.conversation_history == original_history
+        # Snapshot should have additional system message
+        assert len(snapshot) == len(original_history) + 1
+
+    def test_snapshot_with_tool_messages(self, orchestrator):
+        """Test snapshot includes tool call and response messages."""
+        # Given: Conversation with tool messages
+        orchestrator.conversation_history.append({"role": "user", "content": "Fetch logs"})
+        orchestrator.conversation_history.append(
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_123",
+                        "type": "function",
+                        "function": {"name": "fetch_logs", "arguments": "{}"},
+                    }
+                ],
+            }
+        )
+        orchestrator.conversation_history.append(
+            {
+                "role": "tool",
+                "tool_call_id": "call_123",
+                "content": '{"success": true, "count": 10}',
+            }
+        )
+        orchestrator.conversation_history.append(
+            {"role": "assistant", "content": "I found 10 log entries"}
+        )
+
+        # When: Get snapshot
+        snapshot = orchestrator.get_full_context_snapshot()
+
+        # Then: Should include all messages including tool messages
+        assert len(snapshot) == 5  # system + user + assistant + tool + assistant
+        assert snapshot[0]["role"] == "system"
+        assert snapshot[1]["role"] == "user"
+        assert snapshot[2]["role"] == "assistant"
+        assert "tool_calls" in snapshot[2]
+        assert snapshot[3]["role"] == "tool"
+        assert snapshot[3]["tool_call_id"] == "call_123"
+        assert snapshot[4]["role"] == "assistant"
+
+    def test_snapshot_excludes_pending_injections(self, orchestrator):
+        """Test that snapshot does NOT include pending context injections."""
+        # Given: Conversation history and a pending injection
+        orchestrator.conversation_history.append({"role": "user", "content": "Hello"})
+        orchestrator.inject_context_update("PENDING CONTEXT INJECTION")
+
+        # When: Get snapshot
+        snapshot = orchestrator.get_full_context_snapshot()
+
+        # Then: Should NOT include the pending injection
+        assert len(snapshot) == 2  # Only system + user message
+        # Verify pending injection is not in snapshot
+        for message in snapshot:
+            assert "PENDING CONTEXT INJECTION" not in message["content"]
+
+    def test_snapshot_with_multiple_message_types(self, orchestrator):
+        """Test snapshot with various message types in history."""
+        # Given: Complex conversation with all message types
+        orchestrator.conversation_history.extend(
+            [
+                {"role": "user", "content": "Start query"},
+                {"role": "assistant", "content": "Starting..."},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {"name": "list_log_groups", "arguments": "{}"},
+                        }
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_1",
+                    "content": '{"success": true, "log_groups": []}',
+                },
+                {"role": "assistant", "content": "Found the log groups"},
+                {"role": "user", "content": "Thanks"},
+            ]
+        )
+
+        # When: Get snapshot
+        snapshot = orchestrator.get_full_context_snapshot()
+
+        # Then: All messages should be included in order with system first
+        assert len(snapshot) == 7  # system + 6 conversation messages
+        assert snapshot[0]["role"] == "system"
+        assert [msg["role"] for msg in snapshot[1:]] == [
+            "user",
+            "assistant",
+            "assistant",
+            "tool",
+            "assistant",
+            "user",
+        ]
+
+    def test_snapshot_is_independent_copy(self, orchestrator):
+        """Test that modifying snapshot doesn't affect conversation_history."""
+        # Given: Some conversation history
+        orchestrator.conversation_history.append({"role": "user", "content": "Original message"})
+
+        # When: Get snapshot and modify it
+        snapshot = orchestrator.get_full_context_snapshot()
+        snapshot.append({"role": "user", "content": "Modified message"})
+
+        # Then: Original conversation_history should be unaffected
+        assert len(orchestrator.conversation_history) == 1
+        assert orchestrator.conversation_history[0]["content"] == "Original message"
+        # Snapshot should have the modification
+        assert len(snapshot) == 3  # system + original + modified
+
+    def test_system_prompt_content(self, orchestrator):
+        """Test that system prompt has expected content."""
+        # When: Get snapshot
+        snapshot = orchestrator.get_full_context_snapshot()
+
+        # Then: System prompt should contain key sections
+        system_content = snapshot[0]["content"]
+        assert "observability assistant" in system_content
+        assert "CloudWatch" in system_content
+        assert "Tool Usage" in system_content or "Guidelines" in system_content
+        assert "current_time" not in system_content  # Should be formatted, not template

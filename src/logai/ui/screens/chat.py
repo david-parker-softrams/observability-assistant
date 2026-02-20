@@ -387,8 +387,8 @@ class ChatScreen(Screen[None]):
             # Get current staged context from orchestrator
             staged_context = self.orchestrator._pending_context_injection
 
-            # Get conversation history from orchestrator
-            conversation_history = self.orchestrator.get_conversation_history()
+            # Get full context snapshot from orchestrator (includes system prompt)
+            conversation_history = self.orchestrator.get_full_context_snapshot()
 
             # Parse metadata for staged context
             metadata = ContextParser.parse(staged_context)

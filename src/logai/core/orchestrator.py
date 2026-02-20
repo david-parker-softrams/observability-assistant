@@ -1886,3 +1886,28 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
             Returns a copy to prevent external mutation.
         """
         return list(self.conversation_history)
+
+    def get_full_context_snapshot(self) -> list[dict[str, Any]]:
+        """
+        Get a snapshot of the full context that would be sent to the LLM.
+
+        This includes:
+        - System prompt (always prepended)
+        - Full conversation history (user, assistant, tool messages)
+        - Does NOT include pending/staged injections (those are shown separately in Staged Context)
+
+        This method provides visibility into the complete context the agent is working with,
+        which is useful for debugging and understanding the agent's behavior.
+
+        Returns:
+            List of message dicts representing the complete context
+        """
+        messages = []
+
+        # Always include system prompt
+        messages.append({"role": "system", "content": self._get_system_prompt()})
+
+        # Add full conversation history
+        messages.extend(self.conversation_history)
+
+        return messages

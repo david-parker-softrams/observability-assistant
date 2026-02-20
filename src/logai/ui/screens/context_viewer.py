@@ -67,12 +67,16 @@ class ContextViewerScreen(ModalScreen[None]):
     }
 
     #sections-container {
+        layout: horizontal;
+        overflow: hidden;
         height: 1fr;
         background: $panel;
     }
 
     /* Collapsible section styling */
     Collapsible {
+        width: 1fr;
+        height: 1fr;
         margin: 0 0 1 0;
         border: solid $surface-darken-2;
     }
@@ -86,14 +90,22 @@ class ContextViewerScreen(ModalScreen[None]):
     Collapsible > Contents {
         padding: 0;
         background: $panel;
-        height: auto;
+        height: 1fr;
         max-height: 40;
+    }
+
+    /* Scroll containers for independent scrolling */
+    #staged-scroll, #memory-scroll {
+        width: 1fr;
+        height: 1fr;
+        scrollbar-gutter: stable;
     }
 
     /* RichLog content widgets */
     #staged-content, #memory-content {
         width: 100%;
-        height: 100%;
+        min-height: 20;
+        height: auto;
         border: none;
         background: $panel;
         scrollbar-gutter: stable;
@@ -164,7 +176,7 @@ class ContextViewerScreen(ModalScreen[None]):
             yield Static("Context Viewer", id="context-header")
 
             # Scrollable sections container
-            with VerticalScroll(id="sections-container"):
+            with Horizontal(id="sections-container"):
                 # Staged Context Section
                 staged_count = self._get_staged_item_count()
                 with Collapsible(
@@ -172,28 +184,30 @@ class ContextViewerScreen(ModalScreen[None]):
                     collapsed=False,
                     id="staged-section",
                 ):
-                    yield RichLog(
-                        id="staged-content",
-                        wrap=True,
-                        highlight=False,
-                        markup=True,
-                        auto_scroll=False,
-                    )
+                    with VerticalScroll(id="staged-scroll"):
+                        yield RichLog(
+                            id="staged-content",
+                            wrap=True,
+                            highlight=False,
+                            markup=True,
+                            auto_scroll=False,
+                        )
 
                 # Agent Memory Section
                 memory_count = len(self.conversation_history)
                 with Collapsible(
-                    title=f"Agent Memory ({memory_count} messages)",
+                    title=f"Agent Memory (Full Context: {memory_count} messages)",
                     collapsed=False,
                     id="memory-section",
                 ):
-                    yield RichLog(
-                        id="memory-content",
-                        wrap=True,
-                        highlight=False,
-                        markup=True,
-                        auto_scroll=False,
-                    )
+                    with VerticalScroll(id="memory-scroll"):
+                        yield RichLog(
+                            id="memory-content",
+                            wrap=True,
+                            highlight=False,
+                            markup=True,
+                            auto_scroll=False,
+                        )
 
             # Action buttons
             with Horizontal(id="action-buttons"):
@@ -207,13 +221,18 @@ class ContextViewerScreen(ModalScreen[None]):
             staged_log = self.query_one("#staged-content", RichLog)
             formatted_staged = self._format_staged_context()
             staged_log.write(formatted_staged)
+            staged_log.refresh()
             self._formatted_staged = formatted_staged
 
             # Populate Agent Memory section
             memory_log = self.query_one("#memory-content", RichLog)
             formatted_history = self._format_conversation_history()
             memory_log.write(formatted_history)
+            memory_log.refresh()
             self._formatted_history = formatted_history
+
+            # Refresh the entire screen to ensure rendering
+            self.refresh()
 
             logger.debug(
                 f"Context viewer loaded: {len(self.staged_context)} staged chars, "
@@ -285,11 +304,12 @@ class ContextViewerScreen(ModalScreen[None]):
         return (
             "[dim italic]No conversation history yet.[/dim italic]\n\n"
             "Start a conversation by typing a message below.\n"
-            "The agent's memory will include:\n"
-            "• System instructions\n"
+            "This section shows the FULL context the agent has:\n"
+            "• System instructions (always present)\n"
             "• Your messages\n"
             "• Agent responses\n"
-            "• Tool calls and results"
+            "• Tool calls and results\n"
+            "• Previously injected log context"
         )
 
     def _format_conversation_message(self, msg: dict[str, Any]) -> str:
@@ -307,8 +327,7 @@ class ContextViewerScreen(ModalScreen[None]):
 
         # Format based on role
         if role == "system":
-            truncated_content = self._truncate_content(content, 500)
-            return f"[bold cyan][System][/bold cyan] {truncated_content}"
+            return f"[bold cyan][System][/bold cyan] {content}"
 
         elif role == "user":
             return f"[bold green][User][/bold green] {content}"
@@ -336,28 +355,11 @@ class ContextViewerScreen(ModalScreen[None]):
 
         elif role == "tool":
             tool_call_id = msg.get("tool_call_id", "")
-            content_preview = self._truncate_content(content, 2000)
             tool_id_short = tool_call_id[:8] + "..." if len(tool_call_id) > 8 else tool_call_id
-            return f"[bold blue][Tool Result][/bold blue] ({tool_id_short}) {content_preview}"
+            return f"[bold blue][Tool Result][/bold blue] ({tool_id_short}) {content}"
 
         else:
             return f"[dim][{role}][/dim] {content}"
-
-    def _truncate_content(self, content: str, max_length: int = 2000) -> str:
-        """
-        Truncate content for display with indicator.
-
-        Args:
-            content: Content string to truncate
-            max_length: Maximum length before truncation
-
-        Returns:
-            Truncated content with indicator if needed
-        """
-        if len(content) <= max_length:
-            return content
-        remaining = len(content) - max_length
-        return content[:max_length] + f"\n[dim]... ({remaining:,} more chars)[/dim]"
 
     @on(Button.Pressed, "#copy-all-btn")
     def on_copy_all_pressed(self) -> None:
