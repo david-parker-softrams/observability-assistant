@@ -1,12 +1,19 @@
 """Message widgets for chat interface."""
 
-from textual.widgets import Static
+from textual.widgets import TextArea
 
 
-class ChatMessage(Static):
+class ChatMessage(TextArea):
     """Base class for chat messages."""
 
-    pass
+    def __init__(self, content: str = "") -> None:
+        """
+        Initialize chat message.
+
+        Args:
+            content: Message content
+        """
+        super().__init__(text=content, read_only=True, show_line_numbers=False)
 
 
 class UserMessage(ChatMessage):
@@ -65,7 +72,7 @@ class AssistantMessage(ChatMessage):
             token: Token to append
         """
         self._content += token
-        self.update(f"[bold cyan]Assistant:[/bold cyan] {self._content}")
+        self.text = f"[bold cyan]Assistant:[/bold cyan] {self._content}"
 
 
 class SystemMessage(ChatMessage):

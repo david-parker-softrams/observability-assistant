@@ -12,7 +12,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Collapsible, RichLog, Static
+from textual.widgets import Button, Collapsible, Static, TextArea
 
 logger = logging.getLogger(__name__)
 
@@ -101,14 +101,18 @@ class ContextViewerScreen(ModalScreen[None]):
         scrollbar-gutter: stable;
     }
 
-    /* RichLog content widgets */
+    /* TextArea content widgets */
     #staged-content, #memory-content {
         width: 100%;
         min-height: 20;
-        height: auto;
+        height: 1fr;
         border: none;
         background: $panel;
         scrollbar-gutter: stable;
+    }
+
+    #staged-content:focus, #memory-content:focus {
+        border: solid $primary;
     }
 
     .empty-state {
@@ -185,12 +189,13 @@ class ContextViewerScreen(ModalScreen[None]):
                     id="staged-section",
                 ):
                     with VerticalScroll(id="staged-scroll"):
-                        yield RichLog(
+                        yield TextArea(
                             id="staged-content",
-                            wrap=True,
-                            highlight=False,
-                            markup=True,
-                            auto_scroll=False,
+                            text="",
+                            read_only=True,
+                            soft_wrap=True,
+                            show_line_numbers=False,
+                            show_cursor=False,
                         )
 
                 # Agent Memory Section
@@ -201,12 +206,13 @@ class ContextViewerScreen(ModalScreen[None]):
                     id="memory-section",
                 ):
                     with VerticalScroll(id="memory-scroll"):
-                        yield RichLog(
+                        yield TextArea(
                             id="memory-content",
-                            wrap=True,
-                            highlight=False,
-                            markup=True,
-                            auto_scroll=False,
+                            text="",
+                            read_only=True,
+                            soft_wrap=True,
+                            show_line_numbers=False,
+                            show_cursor=False,
                         )
 
             # Action buttons
@@ -218,17 +224,17 @@ class ContextViewerScreen(ModalScreen[None]):
         """Populate sections with content asynchronously."""
         try:
             # Populate Staged Context section
-            staged_log = self.query_one("#staged-content", RichLog)
+            staged_textarea = self.query_one("#staged-content", TextArea)
             formatted_staged = self._format_staged_context()
-            staged_log.write(formatted_staged)
-            staged_log.refresh()
+            clean_staged = self._strip_rich_markup(formatted_staged)
+            staged_textarea.text = clean_staged
             self._formatted_staged = formatted_staged
 
             # Populate Agent Memory section
-            memory_log = self.query_one("#memory-content", RichLog)
+            memory_textarea = self.query_one("#memory-content", TextArea)
             formatted_history = self._format_conversation_history()
-            memory_log.write(formatted_history)
-            memory_log.refresh()
+            clean_history = self._strip_rich_markup(formatted_history)
+            memory_textarea.text = clean_history
             self._formatted_history = formatted_history
 
             # Refresh the entire screen to ensure rendering
@@ -240,6 +246,36 @@ class ContextViewerScreen(ModalScreen[None]):
             )
         except Exception as e:
             logger.error(f"Failed to populate context viewer: {e}", exc_info=True)
+
+    def _strip_rich_markup(self, text: str) -> str:
+        """
+        Remove Rich markup tags from text.
+
+        Converts [bold cyan]text[/bold cyan] → text
+        Removes all formatting but preserves content.
+
+        Args:
+            text: Text with Rich markup
+
+        Returns:
+            Plain text without markup
+        """
+        # Remove closing tags like [/bold], [/cyan], [/italic], etc.
+        text = re.sub(r"\[/[^\]]+\]", "", text)
+        # Remove opening Rich markup tags
+        # This pattern matches known Rich console markup styles
+        text = re.sub(
+            r"\[(bold|italic|underline|strike|reverse|conceal|dim|"
+            r"blink|blink2|overline|not bold|not dim|not italic|not underline|"
+            r"white|red|green|yellow|blue|magenta|cyan|black|"
+            r"bright_white|bright_red|bright_green|bright_yellow|"
+            r"bright_blue|bright_magenta|bright_cyan|bright_black|"
+            r"on [^\]]+|link [^\]]+)"
+            r"([^\]]*)\]",
+            "",
+            text,
+        )
+        return text
 
     def _get_staged_item_count(self) -> int:
         """Get count of items in staged context."""
