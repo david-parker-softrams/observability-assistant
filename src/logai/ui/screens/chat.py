@@ -20,7 +20,11 @@ from logai.core.orchestrator import LLMOrchestrator, ToolCallRecord
 from logai.ui.commands import CommandHandler
 from logai.ui.screens.context_viewer import ContextParser, ContextViewerScreen
 from logai.ui.widgets.input_box import ChatInput
-from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem, LogGroupsSidebar
+from logai.ui.widgets.log_groups_sidebar import (
+    ClickableLogGroupItem,
+    LogGroupsSidebar,
+    SelectableLogGroupItem,
+)
 from logai.ui.widgets.messages import (
     AssistantMessage,
     ErrorMessage,
@@ -254,6 +258,13 @@ class ChatScreen(Screen[None]):
         status_footer = self.query_one(StatusFooter)
 
         try:
+            # Inject selected groups context if any are selected
+            if self._log_groups_sidebar and self._log_groups_sidebar.has_selection():
+                selected_groups = self._log_groups_sidebar.get_selected_groups()
+                selection_context = self._format_selected_groups_context(selected_groups)
+                self.orchestrator.inject_context_update(selection_context)
+                logger.debug(f"Injected {len(selected_groups)} selected groups into context")
+
             # Update status
             status_footer.set_status("Thinking...")
 
@@ -321,8 +332,11 @@ class ChatScreen(Screen[None]):
             self._current_assistant_message = None
 
     @on(ClickableLogGroupItem.LogGroupPreviewRequested)
+    @on(SelectableLogGroupItem.LogGroupPreviewRequested)
     async def on_log_group_preview_requested(
-        self, event: ClickableLogGroupItem.LogGroupPreviewRequested
+        self,
+        event: ClickableLogGroupItem.LogGroupPreviewRequested
+        | SelectableLogGroupItem.LogGroupPreviewRequested,
     ) -> None:
         """
         Handle request to preview logs from a log group.
@@ -420,6 +434,50 @@ class ChatScreen(Screen[None]):
                 severity="error",
                 timeout=5,
             )
+
+    def _format_selected_groups_context(self, selected_groups: list[str]) -> str:
+        """
+        Format selected log groups for agent context injection.
+
+        Creates a clear message that tells the agent which log groups
+        the user has selected, allowing natural references like "these logs".
+
+        Args:
+            selected_groups: List of selected log group names
+
+        Returns:
+            Formatted context string for agent
+        """
+        count = len(selected_groups)
+
+        # Truncate display if too many groups to prevent excessive context size
+        MAX_DISPLAY_GROUPS = 20
+        if count > MAX_DISPLAY_GROUPS:
+            group_list = "\n".join(f"- {name}" for name in selected_groups[:MAX_DISPLAY_GROUPS])
+            group_list += f"\n... and {count - MAX_DISPLAY_GROUPS} more groups"
+            group_names = (
+                ", ".join(selected_groups[:MAX_DISPLAY_GROUPS])
+                + f" (and {count - MAX_DISPLAY_GROUPS} more)"
+            )
+        else:
+            # Show all groups if within limit
+            group_list = "\n".join(f"- {name}" for name in selected_groups)
+            group_names = ", ".join(selected_groups)
+
+        return f"""USER HAS SELECTED THE FOLLOWING LOG GROUPS:
+
+The user has explicitly selected {count} log group(s) in the sidebar. When they refer to "these logs", "selected groups", "these", or make requests without specifying a log group, they are referring to:
+
+{group_list}
+
+INSTRUCTIONS:
+1. When the user says "search these", "check these logs", "look at these", etc. - use the above log groups
+2. When the user asks about "errors", "issues", etc. without specifying a group - search the selected groups
+3. If the user explicitly names a different log group, use that instead
+4. You do NOT need to ask which log groups to search - the user has already told you by selecting them
+
+Selected groups: {group_names}
+"""
 
     async def _inject_log_entries_to_context(self, result: dict[str, Any]) -> None:
         """
