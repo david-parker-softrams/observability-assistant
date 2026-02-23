@@ -1,7 +1,7 @@
 # Pull Request Review Workflow
 
 ## Overview
-This document describes the two-tier PR review process for the observability-assistant project:
+This document describes the two-tier PR review process for the LogAI project:
 1. **Automated review** by GitHub Copilot (quick checks)
 2. **Manual review** by Han-Ron code-reviewer agent (deep project-specific review)
 
