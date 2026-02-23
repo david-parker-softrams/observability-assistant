@@ -363,12 +363,13 @@ class ChatScreen(Screen[None]):
             from logai.ui.screens.log_preview import LogPreviewScreen
 
             # Define callback to handle modal result
-            async def handle_log_selection(result: dict[str, Any] | None) -> None:
+            def handle_log_selection(result: dict[str, Any] | None) -> None:
                 """Handle the result from the log preview modal."""
                 if result:
                     entry_count = len(result.get("selected_entries", []))
                     logger.debug(f"Injecting {entry_count} log entries from preview to context")
-                    await self._inject_log_entries_to_context(result)
+                    # Use call_later to schedule the async operation
+                    self.call_later(self._inject_log_entries_to_context, result)
                 else:
                     logger.debug("Log preview modal dismissed without selection")
 
@@ -413,7 +414,7 @@ class ChatScreen(Screen[None]):
                 metadata.total_tokens = usage.total_tokens
 
             # Define callback (follows pattern from log preview fix)
-            async def handle_context_viewer_close(result: None) -> None:
+            def handle_context_viewer_close(result: None) -> None:
                 """Handle context viewer modal close."""
                 logger.debug("Context viewer modal closed")
 
