@@ -134,57 +134,6 @@ class TestToolCallsSidebar:
         assert isinstance(sidebar, Static)
         assert sidebar._history == []
 
-    def test_format_log_groups(self) -> None:
-        """Test log groups result formatting."""
-        sidebar = ToolCallsSidebar()
-        result = {
-            "log_groups": [
-                {"name": "/aws/lambda/function-1"},
-                {"name": "/aws/lambda/function-2"},
-                {"name": "/aws/ecs/service"},
-            ]
-        }
-        formatted = sidebar._format_result(result)
-        assert "Found 3 log groups:" in formatted
-        assert "•" in formatted  # Bullet points
-        assert "/aws/lambda" in formatted
-
-    def test_format_log_events(self) -> None:
-        """Test log events result formatting."""
-        sidebar = ToolCallsSidebar()
-        result = {
-            "events": [
-                {
-                    "timestamp": 1707649815000,
-                    "message": "ERROR Something went wrong",
-                },
-                {
-                    "timestamp": 1707649820000,
-                    "message": "INFO Request completed",
-                },
-            ]
-        }
-        formatted = sidebar._format_result(result)
-        assert "Found 2 events:" in formatted
-        assert "[" in formatted  # Timestamp brackets
-        assert "ERROR" in formatted or "went wrong" in formatted
-
-    def test_format_truncation(self) -> None:
-        """Test that large results are truncated."""
-        sidebar = ToolCallsSidebar()
-        result = {"log_groups": [{"name": f"/aws/lambda/function-{i}"} for i in range(20)]}
-        formatted = sidebar._format_result(result)
-        assert "Found 20 log groups:" in formatted
-        assert "+10 more" in formatted  # Shows truncation
-
-    def test_format_empty_results(self) -> None:
-        """Test formatting of empty results."""
-        sidebar = ToolCallsSidebar()
-
-        result = {"log_groups": []}
-        formatted = sidebar._format_result(result)
-        assert "No log groups found" in formatted
-
-        result = {"events": []}
-        formatted = sidebar._format_result(result)
-        assert "No events found" in formatted
+    # Note: The _format_result method no longer exists after Phase 1 & 2 refactoring.
+    # The sidebar now uses a tree-based display with _add_result_node, _add_log_groups_node, etc.
+    # Tests for the tree-based display would require more complex setup with Tree widgets.

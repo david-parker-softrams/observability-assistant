@@ -327,7 +327,16 @@ class TestLogGroupsSidebarSelectionState:
     @pytest.mark.asyncio
     async def test_counter_updates_on_clear(self):
         """Test that counter resets when selection is cleared."""
-        app = SidebarTestApp()
+        # Create a mock log group manager with test groups
+        mock_manager = Mock()
+        mock_manager.count = 2
+        mock_manager.get_log_group_names = Mock(
+            return_value=["/aws/lambda/test1", "/aws/lambda/test2"]
+        )
+        mock_manager.register_update_callback = Mock()
+        mock_manager.unregister_update_callback = Mock()
+
+        app = SidebarTestApp(log_group_manager=mock_manager)
         async with app.run_test() as _pilot:
             sidebar = app.query_one(LogGroupsSidebar)
 

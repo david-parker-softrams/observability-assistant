@@ -216,11 +216,12 @@ class TestAutomaticResultCaching:
         # Parse the tool result
         tool_result = json.loads(tool_messages[0]["content"])
 
-        # If it was cached, it should have cache_info with cache_id and instructions
+        # If it was cached, it should have flat structure with cache_id and fetch_instructions
         if "cached" in tool_result and tool_result["cached"]:
-            assert "cache_info" in tool_result
-            assert "cache_id" in tool_result["cache_info"]
-            assert "fetch_instructions" in tool_result["cache_info"]
+            assert "cache_id" in tool_result
+            assert "fetch_instructions" in tool_result
+            assert "tool" in tool_result["fetch_instructions"]
+            assert "fetch_cached_result_chunk" in tool_result["fetch_instructions"]["tool"]
 
     @pytest.mark.asyncio
     async def test_small_result_not_cached(self, orchestrator, mock_llm_provider):
@@ -754,29 +755,26 @@ class TestCachedResultGuidance:
         result = processed["result"]
         assert result["success"] is True
         assert result["cached"] is True
-        assert "Successfully retrieved" in result["message"]
-        assert "1000 log events" in result["message"]
 
-        # Should have cache_info with inline guidance
-        assert "cache_info" in result
-        assert result["cache_info"]["cached"] is True
-        assert "cache_id" in result["cache_info"]
-        assert "fetch_instructions" in result["cache_info"]
-        assert "fetch_cached_result_chunk" in result["cache_info"]["fetch_instructions"]
+        # Should have flat structure with cache_id and fetch_instructions
+        assert "cache_id" in result
+        assert "fetch_instructions" in result
+        assert "fetch_cached_result_chunk" in result["fetch_instructions"]["tool"]
 
         # Should have sample events
         assert "events" in result
         assert len(result["events"]) > 0  # Has samples
         assert "sample_note" in result
 
-        # Should NOT set pending cache guidance (that was the old buggy behavior)
-        assert orchestrator._pending_cache_guidance is None
+        # Should track active cache for follow-up detection (Phase 1: Separate Message Timing)
+        assert orchestrator._active_cache is not None
+        assert orchestrator._active_cache.cache_id == result["cache_id"]
 
     @pytest.mark.asyncio
     async def test_cache_guidance_not_in_system_prompt(
         self, settings, mock_llm_provider, mock_sanitizer, mock_result_cache
     ):
-        """Test that cache guidance is NOT injected into system prompt."""
+        """Test that cache guidance is NOT injected into system prompt immediately."""
         settings.enable_result_caching = True
         settings.cache_large_results_threshold = 1000
 
@@ -801,10 +799,17 @@ class TestCachedResultGuidance:
 
         await orchestrator._process_tool_result(tool_result, "query_logs")
 
-        # Should NOT have pending guidance (that was the bug)
-        assert orchestrator._pending_cache_guidance is None
+        # Phase 1: No longer uses _pending_cache_guidance
+        # Instead, tracks active cache for follow-up detection
+        assert (
+            not hasattr(orchestrator, "_pending_cache_guidance")
+            or orchestrator._pending_cache_guidance is None
+        )
 
-        # Get pending injection - should be None (no cache guidance injected)
+        # Should track active cache instead (for follow-up guidance)
+        assert orchestrator._active_cache is not None
+
+        # Get pending injection - should be None (no immediate cache guidance injected)
         injection = orchestrator._get_pending_context_injection()
         assert injection is None
 
@@ -843,7 +848,7 @@ class TestCachedResultGuidance:
     async def test_cache_includes_clear_success_message(
         self, settings, mock_llm_provider, mock_sanitizer, mock_result_cache
     ):
-        """Test that cache summary has clear success message."""
+        """Test that cache summary has clear sample note."""
         settings.enable_result_caching = True
 
         orchestrator = LLMOrchestrator(
@@ -865,11 +870,13 @@ class TestCachedResultGuidance:
 
         result = processed["result"]
 
-        # Message should clearly indicate success
-        assert "message" in result
-        assert "Successfully retrieved" in result["message"]
-        assert "1000" in result["message"]
-        assert "log events" in result["message"]
+        # Sample note should clearly indicate this is a preview
+        assert "sample_note" in result
+        assert "1000" in result["sample_note"]
+        assert (
+            "representative samples" in result["sample_note"]
+            or "samples" in result["sample_note"].lower()
+        )
 
     @pytest.mark.asyncio
     async def test_user_context_injection_still_works(

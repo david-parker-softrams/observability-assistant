@@ -681,6 +681,20 @@ Do NOT answer based only on preview samples."""
         Returns:
             Processed result (possibly cached with enhanced summary) for context
         """
+        # DIAGNOSTIC: Log what tool we're processing
+        result_data_temp = tool_result.get("result", {})
+        event_count = 0
+        if isinstance(result_data_temp, dict):
+            event_count = len(result_data_temp.get("events", [])) or len(
+                result_data_temp.get("logs", [])
+            )
+
+        logger.info(
+            f"[DIAGNOSTIC] Processing tool result: tool_name={tool_name}, "
+            f"event_count={event_count}, "
+            f"has_result={bool(result_data_temp)}"
+        )
+
         # Never cache fetch results - agent requested full events, not summary
         if tool_name == "fetch_cached_result_chunk":
             result_data = tool_result["result"]
@@ -688,6 +702,12 @@ Do NOT answer based only on preview samples."""
                 result_data, self.settings.current_llm_model
             )
             self.budget_tracker.add_result_tokens(token_count)
+            logger.info(
+                f"[FETCH_LOGS_DEBUG] Bypassing cache for fetch_cached_result_chunk, "
+                f"result keys: {list(result_data.keys())}, "
+                f"event count: {len(result_data.get('events', []))}, "
+                f"tokens: {token_count}"
+            )
             return tool_result  # Return as-is, no caching!
 
         # Initial query tools must show full results - agent needs data to make decisions
@@ -698,6 +718,37 @@ Do NOT answer based only on preview samples."""
                 result_data, self.settings.current_llm_model
             )
             self.budget_tracker.add_result_tokens(token_count)
+
+            # Comprehensive diagnostic logging for fetch_logs
+            logger.info(
+                "[FETCH_LOGS_DEBUG] ===== BYPASS BLOCK ENTERED ===== Bypassing cache for fetch_logs"
+            )
+            logger.info(
+                f"[FETCH_LOGS_DEBUG] Result structure - "
+                f"keys: {list(result_data.keys())}, "
+                f"type: {type(result_data).__name__}"
+            )
+            logger.info(f"[FETCH_LOGS_DEBUG] Event count: {len(result_data.get('events', []))}")
+            logger.info(f"[FETCH_LOGS_DEBUG] Token estimate: {token_count}")
+            logger.info(f"[FETCH_LOGS_DEBUG] Success flag: {result_data.get('success', 'N/A')}")
+
+            # Log sample of first event if available
+            events = result_data.get("events", [])
+            if events:
+                first_event = events[0]
+                logger.info(
+                    f"[FETCH_LOGS_DEBUG] First event preview - "
+                    f"keys: {list(first_event.keys()) if isinstance(first_event, dict) else 'non-dict'}, "
+                    f"size: {len(str(first_event))} chars"
+                )
+            else:
+                logger.info("[FETCH_LOGS_DEBUG] No events in result")
+
+            logger.info(
+                f"[FETCH_LOGS_DEBUG] Returning tool_result AS-IS (no caching), "
+                f"tool_call_id: {tool_result.get('tool_call_id')}"
+            )
+
             return tool_result  # Return as-is, no caching!
 
         result_data = tool_result["result"]
@@ -716,6 +767,12 @@ Do NOT answer based only on preview samples."""
         should_cache, token_count = self.budget_tracker.should_cache_result(
             result_data,
             threshold=self.settings.cache_large_results_threshold,
+        )
+
+        logger.info(
+            f"[DIAGNOSTIC] Cache decision: tool_name={tool_name}, "
+            f"should_cache={should_cache}, tokens={token_count}, "
+            f"threshold={self.settings.cache_large_results_threshold}"
         )
 
         # Enforce max_result_tokens limit
@@ -751,6 +808,13 @@ Do NOT answer based only on preview samples."""
                     tool_name=tool_name,
                     query_params=query_params,
                     result=result_data,
+                )
+
+                logger.info(
+                    f"[DIAGNOSTIC] CACHED: tool_name={tool_name}, "
+                    f"cache_id={summary.cache_id}, "
+                    f"total_events={summary.total_events}, "
+                    f"samples={len(summary.sample_events)}"
                 )
 
                 # Create an ENHANCED summary that makes success clear
@@ -1210,45 +1274,35 @@ Do NOT answer based only on preview samples."""
         - Automatically retries on empty results
         - Tracks retry state across the conversation turn
         - Prunes history when context fills
-        - Caches large tool results
 
         Args:
-            user_message: User's message
+            user_message: User's input message
 
         Returns:
             Complete response text
-        """
-        # Add user message to history
-        self.conversation_history.append({"role": "user", "content": user_message})
 
-        # Reset cache fetch count for new user message (new turn)
+        Raises:
+            OrchestratorError: If orchestration fails
+        """
+        # Track cache fetch count per turn (Phase 1)
         self._reset_cache_fetch_count()
 
-        # Prune history if needed (before preparing messages)
-        self._prune_history_if_needed()
+        # Get pending context to inject (user-provided logs, etc.)
+        context_to_inject = self._get_pending_context_injection()
 
-        # Build complete system prompt with context injection merged in
-        # This ensures only ONE system message is created (OpenAI API ignores subsequent system messages)
+        # Build system prompt with any context injection
         system_prompt = self._get_system_prompt()
-        pending_injection = self._get_pending_context_injection()
+        if context_to_inject:
+            system_prompt = f"{system_prompt}\n\n---\n\n{context_to_inject}"
 
-        # Check if we should inject cache guidance for follow-up questions (Phase 1)
-        cache_injection = self._get_follow_up_cache_injection(user_message)
+        # Inject follow-up cache guidance if needed (Phase 1 - Separate Message Timing)
+        follow_up_injection = self._get_follow_up_cache_injection(user_message)
+        if follow_up_injection:
+            system_prompt = f"{system_prompt}\n\n{follow_up_injection}"
 
-        # Merge all injections into system prompt
-        if pending_injection:
-            logger.info(
-                f"[CONTEXT_DEBUG] Merging context into system prompt: {len(pending_injection)} chars"
-            )
-            logger.info(f"[CONTEXT_DEBUG] Context preview: {pending_injection[:500]}...")
-            # Merge context injection into the main system prompt
-            system_prompt = system_prompt + "\n\n---\n\n" + pending_injection
-
-        if cache_injection:
-            logger.info(
-                f"[CACHE_INJECTION] Injecting cache guidance for follow-up: {len(cache_injection)} chars"
-            )
-            system_prompt = system_prompt + "\n\n---\n\n" + cache_injection
+        # Add user message to history
+        user_msg = {"role": "user", "content": user_message}
+        self.conversation_history.append(user_msg)
 
         # Prepare messages with complete system prompt (only ONE system message)
         messages = [{"role": "system", "content": system_prompt}]
@@ -1329,6 +1383,56 @@ Do NOT answer based only on preview samples."""
                         }
                         self.conversation_history.append(tool_message)
                         messages.append(tool_message)
+
+                        # DIAGNOSTIC: Enhanced logging for what's being sent to agent
+                        logger.info(
+                            f"[DIAGNOSTIC] Message to agent (_chat_complete): role=tool, "
+                            f"tool_call_id={tool_result['tool_call_id']}, "
+                            f"content_length={len(tool_message['content'])}, "
+                            f"content_preview={tool_message['content'][:200]}..."
+                        )
+
+                        # FETCH_LOGS specific diagnostic
+                        tool_result_data = tool_result.get("result", {})
+                        if isinstance(tool_result_data, dict):
+                            # Try to identify if this is a fetch_logs result
+                            has_events = "events" in tool_result_data
+                            has_success = "success" in tool_result_data
+                            is_cached = tool_result_data.get("cached", False)
+
+                            if has_events and has_success and not is_cached:
+                                # This looks like a fetch_logs result
+                                logger.info(
+                                    "[FETCH_LOGS_DEBUG] ===== FINAL MESSAGE TO LLM ===== "
+                                    "Tool result being sent to LLM"
+                                )
+                                logger.info(
+                                    f"[FETCH_LOGS_DEBUG] Message role: {tool_message['role']}"
+                                )
+                                logger.info(
+                                    f"[FETCH_LOGS_DEBUG] Message tool_call_id: {tool_message['tool_call_id']}"
+                                )
+                                logger.info(
+                                    f"[FETCH_LOGS_DEBUG] Message content length: {len(tool_message['content'])} chars"
+                                )
+                                logger.info("[FETCH_LOGS_DEBUG] Content is JSON-serialized: True")
+
+                                # Parse the JSON to show structure
+                                try:
+                                    content_parsed = json.loads(tool_message["content"])
+                                    logger.info(
+                                        f"[FETCH_LOGS_DEBUG] Parsed content keys: {list(content_parsed.keys())}"
+                                    )
+                                    logger.info(
+                                        f"[FETCH_LOGS_DEBUG] Event count in message: {len(content_parsed.get('events', []))}"
+                                    )
+                                    logger.info(
+                                        f"[FETCH_LOGS_DEBUG] Content preview (first 300 chars): {tool_message['content'][:300]}..."
+                                    )
+                                except json.JSONDecodeError:
+                                    logger.warning(
+                                        "[FETCH_LOGS_DEBUG] Failed to parse message content as JSON"
+                                    )
 
                         # Track the tool result tokens for mid-loop budget management
                         result_content = tool_message["content"]
@@ -1650,6 +1754,56 @@ Do NOT answer based only on preview samples."""
                         self.conversation_history.append(tool_message)
                         messages.append(tool_message)
 
+                        # DIAGNOSTIC: Enhanced logging for what's being sent to agent
+                        logger.info(
+                            f"[DIAGNOSTIC] Message to agent (_chat_stream): role=tool, "
+                            f"tool_call_id={tool_result['tool_call_id']}, "
+                            f"content_length={len(tool_message['content'])}, "
+                            f"content_preview={tool_message['content'][:200]}..."
+                        )
+
+                        # FETCH_LOGS specific diagnostic
+                        tool_result_data = tool_result.get("result", {})
+                        if isinstance(tool_result_data, dict):
+                            # Try to identify if this is a fetch_logs result
+                            has_events = "events" in tool_result_data
+                            has_success = "success" in tool_result_data
+                            is_cached = tool_result_data.get("cached", False)
+
+                            if has_events and has_success and not is_cached:
+                                # This looks like a fetch_logs result
+                                logger.info(
+                                    "[FETCH_LOGS_DEBUG] ===== FINAL MESSAGE TO LLM (STREAM) ===== "
+                                    "Tool result being sent to LLM"
+                                )
+                                logger.info(
+                                    f"[FETCH_LOGS_DEBUG] Message role: {tool_message['role']}"
+                                )
+                                logger.info(
+                                    f"[FETCH_LOGS_DEBUG] Message tool_call_id: {tool_message['tool_call_id']}"
+                                )
+                                logger.info(
+                                    f"[FETCH_LOGS_DEBUG] Message content length: {len(tool_message['content'])} chars"
+                                )
+                                logger.info("[FETCH_LOGS_DEBUG] Content is JSON-serialized: True")
+
+                                # Parse the JSON to show structure
+                                try:
+                                    content_parsed = json.loads(tool_message["content"])
+                                    logger.info(
+                                        f"[FETCH_LOGS_DEBUG] Parsed content keys: {list(content_parsed.keys())}"
+                                    )
+                                    logger.info(
+                                        f"[FETCH_LOGS_DEBUG] Event count in message: {len(content_parsed.get('events', []))}"
+                                    )
+                                    logger.info(
+                                        f"[FETCH_LOGS_DEBUG] Content preview (first 300 chars): {tool_message['content'][:300]}..."
+                                    )
+                                except json.JSONDecodeError:
+                                    logger.warning(
+                                        "[FETCH_LOGS_DEBUG] Failed to parse message content as JSON"
+                                    )
+
                         # Track the tool result tokens for mid-loop budget management
                         result_content = tool_message["content"]
                         result_tokens = TokenCounter.count_tokens(
@@ -1922,6 +2076,28 @@ Do NOT answer based only on preview samples."""
                 # Execute tool
                 result = await self.tool_registry.execute(function_name, **function_args)
 
+                # DIAGNOSTIC: Log raw tool result immediately after execution
+                if function_name == "fetch_logs":
+                    logger.info(
+                        f"[FETCH_LOGS_DEBUG] ===== RAW TOOL EXECUTION ===== "
+                        f"Tool executed: {function_name}"
+                    )
+                    logger.info(f"[FETCH_LOGS_DEBUG] Raw result type: {type(result).__name__}")
+                    logger.info(
+                        f"[FETCH_LOGS_DEBUG] Raw result keys: {list(result.keys()) if isinstance(result, dict) else 'non-dict'}"
+                    )
+                    if isinstance(result, dict):
+                        # Type-safe event count extraction
+                        event_count = 0
+                        events = result.get("events") or result.get("logs")
+                        if events and isinstance(events, list):
+                            event_count = len(events)
+                        logger.info(f"[FETCH_LOGS_DEBUG] Raw event count: {event_count}")
+                        logger.info(f"[FETCH_LOGS_DEBUG] Raw result size: {len(str(result))} chars")
+                        logger.info(
+                            f"[FETCH_LOGS_DEBUG] Raw success flag: {result.get('success', 'N/A')}"
+                        )
+
                 # Track successful fetch for limit enforcement (Phase 2)
                 if function_name == "fetch_cached_result_chunk" and result.get("success"):
                     cache_id = function_args.get("cache_id")
@@ -1941,6 +2117,27 @@ Do NOT answer based only on preview samples."""
                 # Process through context manager (may cache large results)
                 tool_result = {"tool_call_id": tool_call_id, "result": result}
                 processed_result = await self._process_tool_result(tool_result, function_name)
+
+                # DIAGNOSTIC: Log what's being added to results after processing
+                if function_name == "fetch_logs":
+                    logger.info(
+                        "[FETCH_LOGS_DEBUG] ===== AFTER PROCESSING ===== "
+                        "Result processed by _process_tool_result"
+                    )
+                    logger.info(
+                        f"[FETCH_LOGS_DEBUG] Processed result keys: {list(processed_result.keys())}"
+                    )
+                    processed_data = processed_result.get("result", {})
+                    logger.info(
+                        f"[FETCH_LOGS_DEBUG] Processed data keys: {list(processed_data.keys()) if isinstance(processed_data, dict) else 'non-dict'}"
+                    )
+                    if isinstance(processed_data, dict):
+                        logger.info(
+                            f"[FETCH_LOGS_DEBUG] Processed event count: {len(processed_data.get('events', []))}"
+                        )
+                        logger.info(
+                            f"[FETCH_LOGS_DEBUG] Is cached: {processed_data.get('cached', False)}"
+                        )
 
                 results.append(processed_result)
 
