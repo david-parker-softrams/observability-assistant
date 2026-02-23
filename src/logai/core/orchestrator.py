@@ -690,6 +690,16 @@ Do NOT answer based only on preview samples."""
             self.budget_tracker.add_result_tokens(token_count)
             return tool_result  # Return as-is, no caching!
 
+        # Initial query tools must show full results - agent needs data to make decisions
+        # Caching only applies to follow-up/enrichment tools, not initial queries
+        if tool_name == "fetch_logs":
+            result_data = tool_result["result"]
+            token_count = TokenCounter.estimate_json_tokens(
+                result_data, self.settings.current_llm_model
+            )
+            self.budget_tracker.add_result_tokens(token_count)
+            return tool_result  # Return as-is, no caching!
+
         result_data = tool_result["result"]
         tool_call_id = tool_result["tool_call_id"]
 
