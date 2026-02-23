@@ -818,17 +818,20 @@ Do NOT answer based only on preview samples."""
         tool_name: str,
     ) -> dict[str, Any]:
         """
-        Create an enhanced summary using the new 5-key structure.
+        Create an enhanced summary optimized for LLM consumption.
 
         Phase 1 (Separate Message Timing) approach:
-        - Return the full summary with clear preview structure
-        - No immediate guidance injection (that comes on follow-up)
-        - Uses CachedResultSummary.to_context_dict() for consistent structure
+        - Returns flat structure that LLMs can parse efficiently
+        - Events visible at top level, not buried in nested structure
+        - Cache info and fetch instructions included but clearly separated
+        - No premature guidance injection (that comes on follow-up)
 
         The key improvements from Phase 1 design:
-        - Uses new 5-key structure (result_type, full_dataset, preview_events, fetch_more, expires_in_seconds)
-        - Clear separation between "what you have" and "how to get more"
-        - No premature guidance injection
+        - Flat structure for LLM parsing (not nested 3 levels deep)
+        - Events at top-level "events" key for agent visibility
+        - Clear total_events vs sample_events distinction
+        - Fetch instructions at top level
+        - Success message clearly indicates preview vs total
 
         Args:
             summary: Cached result summary from cache manager
@@ -836,18 +839,30 @@ Do NOT answer based only on preview samples."""
             tool_name: Name of the tool
 
         Returns:
-            Enhanced summary dictionary with new 5-key structure
+            Enhanced summary dictionary flattened for LLM consumption
         """
-        # Use the new to_context_dict() method which implements the 5-key structure
-        base_structure = summary.to_context_dict()
-
-        # Wrap it in a success envelope to make it clear the operation succeeded
+        # Return flat structure for LLM parsing
+        # The 5-key structure is used internally but must be unwrapped for tool messages
         enhanced = {
             "success": True,
-            "message": f"Successfully retrieved {summary.total_events} log events. "
-            f"Showing {len(summary.sample_events)} representative samples. "
-            f"Full dataset cached for efficient access.",
-            "cached_result": base_structure,
+            "events": summary.sample_events,  # ✅ Flat top-level key
+            "count": len(summary.sample_events),  # Number of sample events
+            "total_events": summary.total_events,  # Total events in cache
+            "sample_note": f"Showing {len(summary.sample_events)} representative samples of {summary.total_events} total events",
+            "statistics": summary.event_statistics,  # Event breakdown by level
+            "time_range": summary.time_range,  # Time span of events
+            # Cache information (top-level for clarity)
+            "cached": True,
+            "cache_id": summary.cache_id,
+            "expires_at": summary.expires_at,
+            # Fetch instructions (clear and actionable)
+            "fetch_instructions": {
+                "available": True,
+                "tool": "fetch_cached_result_chunk",
+                "cache_id": summary.cache_id,
+                "example": f"fetch_cached_result_chunk(cache_id='{summary.cache_id}', offset=0, limit=100)",
+                "note": "Use to retrieve additional events from the full cached dataset",
+            },
         }
 
         return enhanced
