@@ -695,7 +695,7 @@ Do NOT answer based only on preview samples."""
             f"has_result={bool(result_data_temp)}"
         )
 
-        # Never cache fetch results - agent requested full events, not summary
+        # Never cache fetch_cached_result_chunk - agent requested full events, not summary
         if tool_name == "fetch_cached_result_chunk":
             result_data = tool_result["result"]
             token_count = TokenCounter.estimate_json_tokens(
@@ -708,47 +708,6 @@ Do NOT answer based only on preview samples."""
                 f"event count: {len(result_data.get('events', []))}, "
                 f"tokens: {token_count}"
             )
-            return tool_result  # Return as-is, no caching!
-
-        # Initial query tools must show full results - agent needs data to make decisions
-        # Caching only applies to follow-up/enrichment tools, not initial queries
-        if tool_name == "fetch_logs":
-            result_data = tool_result["result"]
-            token_count = TokenCounter.estimate_json_tokens(
-                result_data, self.settings.current_llm_model
-            )
-            self.budget_tracker.add_result_tokens(token_count)
-
-            # Comprehensive diagnostic logging for fetch_logs
-            logger.info(
-                "[FETCH_LOGS_DEBUG] ===== BYPASS BLOCK ENTERED ===== Bypassing cache for fetch_logs"
-            )
-            logger.info(
-                f"[FETCH_LOGS_DEBUG] Result structure - "
-                f"keys: {list(result_data.keys())}, "
-                f"type: {type(result_data).__name__}"
-            )
-            logger.info(f"[FETCH_LOGS_DEBUG] Event count: {len(result_data.get('events', []))}")
-            logger.info(f"[FETCH_LOGS_DEBUG] Token estimate: {token_count}")
-            logger.info(f"[FETCH_LOGS_DEBUG] Success flag: {result_data.get('success', 'N/A')}")
-
-            # Log sample of first event if available
-            events = result_data.get("events", [])
-            if events:
-                first_event = events[0]
-                logger.info(
-                    f"[FETCH_LOGS_DEBUG] First event preview - "
-                    f"keys: {list(first_event.keys()) if isinstance(first_event, dict) else 'non-dict'}, "
-                    f"size: {len(str(first_event))} chars"
-                )
-            else:
-                logger.info("[FETCH_LOGS_DEBUG] No events in result")
-
-            logger.info(
-                f"[FETCH_LOGS_DEBUG] Returning tool_result AS-IS (no caching), "
-                f"tool_call_id: {tool_result.get('tool_call_id')}"
-            )
-
             return tool_result  # Return as-is, no caching!
 
         result_data = tool_result["result"]
