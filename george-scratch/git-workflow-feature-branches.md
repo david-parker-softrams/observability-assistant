@@ -8,13 +8,30 @@ As of 2026-02-23, we are switching from working directly on `main` to using feat
 ### 1. Starting New Work
 When beginning ANY new feature, bug fix, or enhancement:
 
+**⚠️ CRITICAL: Always pull latest changes before creating a new branch!**
+
 ```bash
-# Ensure main is up to date
+# Switch to main branch
 git checkout main
+
+# CRITICAL: Pull latest changes from remote
+# This ensures your new branch includes all recent work
 git pull origin main
 
-# Create feature branch with descriptive name
+# Now create feature branch with descriptive name
 git checkout -b feature/descriptive-name
+```
+
+**Why this matters:**
+- If you skip `git pull`, your new branch will be based on old code
+- Your changes might conflict with recent work
+- You might miss important fixes or features
+- Merging becomes much harder later
+
+**Pro tip:** Check if you're behind before creating a branch:
+```bash
+git fetch origin
+git status  # Will show "Your branch is behind 'origin/main' by X commits"
 ```
 
 ### 2. Branch Naming Conventions
@@ -101,11 +118,13 @@ git push origin --delete feature/descriptive-name
 ## Team Member Responsibilities
 
 ### George (TPM)
-- **BEFORE tasking any team member**: Create the feature branch
+- **CRITICAL FIRST STEP**: `git checkout main && git pull origin main` before creating any new branch
+- **BEFORE tasking any team member**: Create the feature branch from updated main
 - Communicate the branch name to the team member
 - Ensure all work happens on the feature branch, not main
 - Create PR when feature is complete and reviewed
 - Coordinate merging back to main
+- **AFTER merging PR**: Pull main again before starting next feature
 
 ### Hans (Librarian)
 - Works on `main` for investigations (read-only, no commits)
@@ -171,10 +190,64 @@ git pull origin main
 ## Important Notes
 
 - **NEVER commit directly to main** (except in extraordinary circumstances with user approval)
+- **ALWAYS `git pull origin main` before creating a new branch** - This is critical!
 - Always create feature branch BEFORE starting work
 - Keep feature branches focused (one feature per branch)
 - Merge main into feature branch regularly to avoid conflicts
 - Delete feature branches after merging to keep repository clean
+
+## Common Mistakes to Avoid
+
+### ❌ Mistake #1: Forgetting to Pull Before Creating Branch
+```bash
+# WRONG - Creates branch from old main
+git checkout main
+git checkout -b feature/new-work  # ← Skipped git pull!
+```
+
+**Problem**: Your branch is based on old code, missing recent changes.
+
+**Fix**: Always pull first!
+```bash
+# CORRECT
+git checkout main
+git pull origin main  # ← Don't skip this!
+git checkout -b feature/new-work
+```
+
+### ❌ Mistake #2: Working on Wrong Branch
+```bash
+# Check what branch you're on before working
+git branch  # Shows current branch
+
+# If on wrong branch, switch to correct one
+git checkout feature/your-branch
+```
+
+### ❌ Mistake #3: Creating Branch from Another Feature Branch
+```bash
+# WRONG - Creates branch from feature branch instead of main
+git checkout feature/old-work
+git checkout -b feature/new-work  # ← Based on feature branch!
+```
+
+**Fix**: Always branch from main
+```bash
+# CORRECT
+git checkout main
+git pull origin main
+git checkout -b feature/new-work
+```
+
+### ❌ Mistake #4: Not Pulling After PR Merge
+```bash
+# After your PR is merged, update your local main
+git checkout main
+git pull origin main  # ← Get the merged changes!
+
+# Now safe to create next feature branch
+git checkout -b feature/next-work
+```
 
 ---
 
