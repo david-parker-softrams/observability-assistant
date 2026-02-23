@@ -10,20 +10,21 @@ This document describes the two-tier PR review process for the observability-ass
 ## Automated Reviews: GitHub Copilot
 
 ### What It Does
-GitHub Copilot automatically reviews every PR for:
+Once enabled for this repository/account, GitHub Copilot automatically reviews PRs for:
 - Security vulnerabilities
 - Common bugs and logic errors
 - Code style and best practices
 - Performance issues
 
 ### Setup
-See `george-scratch/github-copilot-review-setup.md` for instructions on enabling Copilot reviews.
+Before Copilot can review PRs in this repo, you must enable Copilot reviews once by following `george-scratch/github-copilot-review-setup.md`.
 
 ### When It Runs
-- Automatically when PR is opened
-- Automatically when new commits are pushed to PR
-- Reviews appear from "GitHub Copilot" user
-- Takes 30-90 seconds per review
+After Copilot reviews are enabled:
+- Automatically when a PR is opened
+- Automatically when new commits are pushed to a PR
+- Reviews appear from the "GitHub Copilot" user
+- Typically takes 30-90 seconds per review
 
 ### Output
 - Line-specific comments in "Files changed" tab
