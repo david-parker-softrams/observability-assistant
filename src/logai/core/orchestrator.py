@@ -1013,47 +1013,25 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
         # Prune history if needed (before preparing messages)
         self._prune_history_if_needed()
 
-        # Prepare messages with system prompt
-        messages = [{"role": "system", "content": self._get_system_prompt()}]
-
-        # Handle context injection BEFORE the latest user message
+        # Build complete system prompt with context injection merged in
+        # This ensures only ONE system message is created (OpenAI API ignores subsequent system messages)
+        system_prompt = self._get_system_prompt()
         pending_injection = self._get_pending_context_injection()
 
+        if pending_injection:
+            logger.info(
+                f"[CONTEXT_DEBUG] Merging context into system prompt: {len(pending_injection)} chars"
+            )
+            logger.info(f"[CONTEXT_DEBUG] Context preview: {pending_injection[:500]}...")
+            # Merge context injection into the main system prompt
+            system_prompt = system_prompt + "\n\n---\n\n" + pending_injection
+
+        # Prepare messages with complete system prompt (only ONE system message)
+        messages = [{"role": "system", "content": system_prompt}]
+
+        # Add conversation history
         if self.conversation_history:
-            # Check if last message is from user
-            if self.conversation_history[-1]["role"] == "user":
-                # Add all history except the last user message
-                if len(self.conversation_history) > 1:
-                    messages.extend(self.conversation_history[:-1])
-
-                # Add context injection BEFORE the last user message
-                if pending_injection:
-                    logger.info(
-                        f"[CONTEXT_DEBUG] Adding context to messages array: {len(pending_injection)} chars"
-                    )
-                    logger.info(f"[CONTEXT_DEBUG] Context preview: {pending_injection[:500]}...")
-                    messages.append({"role": "system", "content": pending_injection})
-
-                # Add the last user message
-                messages.append(self.conversation_history[-1])
-            else:
-                # Last message is not from user (e.g., assistant message)
-                # Add all history, then context at the end
-                messages.extend(self.conversation_history)
-                if pending_injection:
-                    logger.info(
-                        f"[CONTEXT_DEBUG] Adding context to messages array: {len(pending_injection)} chars"
-                    )
-                    logger.info(f"[CONTEXT_DEBUG] Context preview: {pending_injection[:500]}...")
-                    messages.append({"role": "system", "content": pending_injection})
-        else:
-            # Empty history, just add context if present
-            if pending_injection:
-                logger.info(
-                    f"[CONTEXT_DEBUG] Adding context to messages array: {len(pending_injection)} chars"
-                )
-                logger.info(f"[CONTEXT_DEBUG] Context preview: {pending_injection[:500]}...")
-                messages.append({"role": "system", "content": pending_injection})
+            messages.extend(self.conversation_history)
 
         # Update budget tracker with current state
         self._update_budget_tracker(messages)
@@ -1342,47 +1320,25 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
         # Prune history if needed (before preparing messages)
         self._prune_history_if_needed()
 
-        # Prepare messages with system prompt
-        messages = [{"role": "system", "content": self._get_system_prompt()}]
-
-        # Handle context injection BEFORE the latest user message
+        # Build complete system prompt with context injection merged in
+        # This ensures only ONE system message is created (OpenAI API ignores subsequent system messages)
+        system_prompt = self._get_system_prompt()
         pending_injection = self._get_pending_context_injection()
 
+        if pending_injection:
+            logger.info(
+                f"[CONTEXT_DEBUG] Merging context into system prompt: {len(pending_injection)} chars"
+            )
+            logger.info(f"[CONTEXT_DEBUG] Context preview: {pending_injection[:500]}...")
+            # Merge context injection into the main system prompt
+            system_prompt = system_prompt + "\n\n---\n\n" + pending_injection
+
+        # Prepare messages with complete system prompt (only ONE system message)
+        messages = [{"role": "system", "content": system_prompt}]
+
+        # Add conversation history
         if self.conversation_history:
-            # Check if last message is from user
-            if self.conversation_history[-1]["role"] == "user":
-                # Add all history except the last user message
-                if len(self.conversation_history) > 1:
-                    messages.extend(self.conversation_history[:-1])
-
-                # Add context injection BEFORE the last user message
-                if pending_injection:
-                    logger.info(
-                        f"[CONTEXT_DEBUG] Adding context to messages array: {len(pending_injection)} chars"
-                    )
-                    logger.info(f"[CONTEXT_DEBUG] Context preview: {pending_injection[:500]}...")
-                    messages.append({"role": "system", "content": pending_injection})
-
-                # Add the last user message
-                messages.append(self.conversation_history[-1])
-            else:
-                # Last message is not from user (e.g., assistant message)
-                # Add all history, then context at the end
-                messages.extend(self.conversation_history)
-                if pending_injection:
-                    logger.info(
-                        f"[CONTEXT_DEBUG] Adding context to messages array: {len(pending_injection)} chars"
-                    )
-                    logger.info(f"[CONTEXT_DEBUG] Context preview: {pending_injection[:500]}...")
-                    messages.append({"role": "system", "content": pending_injection})
-        else:
-            # Empty history, just add context if present
-            if pending_injection:
-                logger.info(
-                    f"[CONTEXT_DEBUG] Adding context to messages array: {len(pending_injection)} chars"
-                )
-                logger.info(f"[CONTEXT_DEBUG] Context preview: {pending_injection[:500]}...")
-                messages.append({"role": "system", "content": pending_injection})
+            messages.extend(self.conversation_history)
 
         # Update budget tracker with current state
         self._update_budget_tracker(messages)

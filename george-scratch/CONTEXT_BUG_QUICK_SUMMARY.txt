@@ -1,0 +1,113 @@
+╔════════════════════════════════════════════════════════════════════════════╗
+║               CRITICAL UX BUG: "Add to Context" Broken                     ║
+║              Quick Summary for George (February 19, 2026)                  ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+PROBLEM
+=======
+User clicks "Add to Context" with log entries, but agent ignores them and asks
+to search for logs instead.
+
+THE PARADOX
+===========
+✓ Logs ARE captured correctly
+✓ Logs ARE formatted correctly
+✓ Logs ARE transmitted to agent
+✗ Agent ignores them anyway
+
+ROOT CAUSE
+==========
+The system prompt never tells the agent that user-provided logs might be in
+context or that it should analyze them first.
+
+DATA FLOW VERIFICATION (All Working ✓)
+======================================
+1. ✓ UI captures selected entries in checkboxes
+2. ✓ Chat screen formats entries as JSON
+3. ✓ Orchestrator stores in _pending_context_injection
+4. ✓ Orchestrator retrieves on next message
+5. ✓ Context appended to messages array
+6. ✓ Messages array sent to LLM
+7. ✗ LLM receives logs BUT agent ignores them (no instructions in system prompt)
+
+FILES INVOLVED
+==============
+Primary:   src/logai/core/orchestrator.py (SYSTEM_PROMPT section, lines 220-304)
+Secondary: src/logai/ui/screens/chat.py (message formatting, lines 431-442)
+
+WHAT'S MISSING FROM SYSTEM PROMPT
+==================================
+Currently system prompt says:
+✓ "Always start by understanding what log groups are available"
+✓ "Fetch logs before attempting analysis"
+
+But MISSING:
+✗ "If logs are provided in context, analyze them FIRST"
+✗ "Look for USER-SELECTED LOG ENTRIES section"
+✗ "Only use tools if context logs insufficient"
+
+THE FIX (20 minutes, two files)
+==============================
+
+FIX 1: Add to src/logai/core/orchestrator.py (CRITICAL - 5 min)
+Location: After line 300 in SYSTEM_PROMPT
+
+Add this new section:
+
+    ## User-Provided Log Entries
+
+    Users can provide log entries directly via "Add to Context" feature.
+    When you receive entries in your context:
+
+    1. **RECOGNITION**: Look for "USER-SELECTED LOG ENTRIES for analysis"
+    2. **PRIORITY**: ALWAYS analyze provided logs FIRST
+    3. **ANALYSIS**: Provide insights based on provided logs
+    4. **TOOLS**: Only use if context insufficient
+
+    CRITICAL: Do NOT ignore provided logs and ask to search.
+
+FIX 2: Update src/logai/ui/screens/chat.py (HIGH - 5 min)
+Location: Lines 431-442 in _format_log_entries_for_context()
+
+Change message from polite suggestion to commanding directive:
+
+OLD: "Please analyze these logs and provide insights..."
+NEW: "YOU MUST analyze these logs. Do NOT ask for a log group to search."
+
+TESTING
+=======
+1. Open log preview, select entries
+2. Click "Add to Context"
+3. Type: "Look at the logs in context and categorize them"
+4. EXPECTED: Agent analyzes provided logs immediately
+5. SHOULD NOT SEE: "Let me search for logs..."
+
+IMPACT
+======
+- 99% infrastructure working perfectly
+- 1% system prompt missing instructions
+- Fix is simple: just educate the agent
+- Restores full "Add to Context" UX
+
+KEY EVIDENCE
+============
+Logs ARE reaching the agent:
+- Context stored: orchestrator.py:433 ✓
+- Context retrieved: orchestrator.py:470-473 ✓
+- Context appended: orchestrator.py:1008-1009 ✓
+- Context sent to LLM: orchestrator.py:1030-1032 ✓
+
+Agent DOESN'T know to use them:
+- System prompt: orchestrator.py:220-304 (MISSING section) ✗
+
+RECOMMENDATION
+==============
+1. Implement Fix 1 and Fix 2 (20 minutes)
+2. Test with scenario above (5 minutes)
+3. Deploy (done)
+4. Monitor user feedback
+
+This is a straightforward fix - the infrastructure works perfectly,
+the agent just needs to be told what to do with the information.
+
+Full detailed analysis: CONTEXT_UX_BUG_INVESTIGATION.md

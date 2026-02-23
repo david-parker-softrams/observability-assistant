@@ -1286,3 +1286,126 @@ class TestGetFullContextSnapshot:
         assert "CloudWatch" in system_content
         assert "Tool Usage" in system_content or "Guidelines" in system_content
         assert "current_time" not in system_content  # Should be formatted, not template
+
+
+class TestContextInjectionMerging:
+    """Test that context injection is merged into system prompt (not a separate message)."""
+
+    @pytest.mark.asyncio
+    async def test_context_merged_into_system_prompt_not_separate_message(
+        self, orchestrator, mock_llm_provider
+    ):
+        """Test that context injection is merged into system prompt, not added as second system message."""
+        # Given: Mock LLM response
+        mock_llm_provider.chat.return_value = LLMResponse(content="Test response", tool_calls=None)
+
+        # And: Set up pending context injection
+        context_text = "CONTEXT: User selected log entry:\nTimestamp: 2024-01-01T00:00:00Z\nMessage: Test error\nLevel: ERROR"
+        orchestrator._pending_context_injection = context_text
+
+        # When: Send a message (this triggers context injection)
+        await orchestrator.chat("Analyze this error")
+
+        # Then: Verify LLM was called
+        assert mock_llm_provider.chat.called
+
+        # And: Get the messages that were sent to the LLM
+        call_args = mock_llm_provider.chat.call_args
+        messages = call_args.kwargs["messages"]
+
+        # Count system messages
+        system_messages = [msg for msg in messages if msg["role"] == "system"]
+
+        # Critical assertion: There must be exactly ONE system message
+        assert (
+            len(system_messages) == 1
+        ), f"Expected 1 system message, but found {len(system_messages)}"
+
+        # And: The single system message should contain both the original prompt AND the context
+        system_content = system_messages[0]["content"]
+        assert "observability assistant" in system_content.lower()  # Original prompt content
+        assert "CONTEXT: User selected log entry" in system_content  # Injected context
+        assert "Test error" in system_content  # Part of injected context
+
+    @pytest.mark.asyncio
+    async def test_context_merged_with_separator(self, orchestrator, mock_llm_provider):
+        """Test that context is merged with proper separator."""
+        # Given: Mock LLM response
+        mock_llm_provider.chat.return_value = LLMResponse(content="Test response", tool_calls=None)
+
+        # And: Set up pending context injection
+        context_text = "CONTEXT: Some important context"
+        orchestrator._pending_context_injection = context_text
+
+        # When: Send a message
+        await orchestrator.chat("Test message")
+
+        # Then: Get the messages sent to LLM
+        call_args = mock_llm_provider.chat.call_args
+        messages = call_args.kwargs["messages"]
+        system_messages = [msg for msg in messages if msg["role"] == "system"]
+
+        # The context should be separated by "\n\n---\n\n" from the main prompt
+        system_content = system_messages[0]["content"]
+        assert "\n\n---\n\n" in system_content
+
+    @pytest.mark.asyncio
+    async def test_no_context_injection_single_system_message(
+        self, orchestrator, mock_llm_provider
+    ):
+        """Test that without context injection, there's still only one system message."""
+        # Given: Mock LLM response
+        mock_llm_provider.chat.return_value = LLMResponse(content="Test response", tool_calls=None)
+
+        # And: No pending context injection (default state)
+        assert orchestrator._pending_context_injection is None
+
+        # When: Send a message
+        await orchestrator.chat("Test message")
+
+        # Then: Get the messages sent to LLM
+        call_args = mock_llm_provider.chat.call_args
+        messages = call_args.kwargs["messages"]
+        system_messages = [msg for msg in messages if msg["role"] == "system"]
+
+        # Still only one system message
+        assert len(system_messages) == 1
+
+    @pytest.mark.asyncio
+    async def test_streaming_context_merged_into_system_prompt(
+        self, orchestrator, mock_llm_provider
+    ):
+        """Test that context injection works correctly in streaming mode too."""
+
+        # Given: Mock streaming response
+        async def mock_stream():
+            yield "Test"
+            yield " response"
+
+        mock_llm_provider.chat.return_value = LLMResponse(content="Test response", tool_calls=None)
+
+        # And: Set up pending context injection
+        context_text = "CONTEXT: Streaming context test"
+        orchestrator._pending_context_injection = context_text
+
+        # When: Send a message in streaming mode
+        response_chunks = []
+        async for chunk in orchestrator.chat_stream("Test streaming"):
+            response_chunks.append(chunk)
+
+        # Then: Verify LLM was called
+        assert mock_llm_provider.chat.called
+
+        # And: Get the messages that were sent to the LLM
+        call_args = mock_llm_provider.chat.call_args
+        messages = call_args.kwargs["messages"]
+
+        # Count system messages - must be exactly ONE
+        system_messages = [msg for msg in messages if msg["role"] == "system"]
+        assert (
+            len(system_messages) == 1
+        ), f"Expected 1 system message in streaming mode, but found {len(system_messages)}"
+
+        # And: The single system message should contain the context
+        system_content = system_messages[0]["content"]
+        assert "CONTEXT: Streaming context test" in system_content

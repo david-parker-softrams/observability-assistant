@@ -1,0 +1,330 @@
+╔════════════════════════════════════════════════════════════════════════════╗
+║        CODE MAP: "Add to Context" Bug Investigation & Fixes               ║
+║                    February 19, 2026 - Hans Investigation                 ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+STEP-BY-STEP DATA FLOW WITH EXACT CODE LOCATIONS
+=================================================
+
+┌─ STEP 1: USER CLICKS BUTTON ─────────────────────────────────────────────┐
+│                                                                            │
+│ File: src/logai/ui/screens/log_preview.py                               │
+│ Method: LogPreviewScreen.on_add_to_context()                            │
+│ Lines: 889-904                                                           │
+│                                                                            │
+│ Code:                                                                     │
+│   @on(Button.Pressed, "#add-to-context-btn")                            │
+│   def on_add_to_context(self) -> None:                                  │
+│       selected_events = []                                               │
+│       for idx, event in enumerate(self._events):                        │
+│           entry_id = f"entry-{idx}"                                     │
+│           if entry_id in self._selected_ids:                            │
+│               selected_events.append(event)                             │
+│       result = {                                                         │
+│           "log_group_name": self.log_group_name,  ✓ GROUP NAME         │
+│           "selected_entries": selected_events,     ✓ ENTRIES            │
+│       }                                                                   │
+│       self.dismiss(result)  ✓ RETURN TO CHAT SCREEN                    │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌─ STEP 2: CHAT SCREEN RECEIVES RESULT ────────────────────────────────────┐
+│                                                                            │
+│ File: src/logai/ui/screens/chat.py                                      │
+│ Method: on_log_preview_closed() [implicit via push_screen result]       │
+│ Lines: 351-360                                                           │
+│                                                                            │
+│ Code:                                                                     │
+│   result = await self.app.push_screen(LogPreviewScreen(...))            │
+│   if result:  ✓ USER SELECTED ENTRIES                                   │
+│       await self._inject_log_entries_to_context(result)                 │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌─ STEP 3: FORMAT ENTRIES FOR CONTEXT ──────────────────────────────────────┐
+│                                                                            │
+│ File: src/logai/ui/screens/chat.py                                      │
+│ Method: _format_log_entries_for_context()                               │
+│ Lines: 405-442                                                           │
+│                                                                            │
+│ Code:                                                                     │
+│   def _format_log_entries_for_context(                                   │
+│       self, log_group: str, entries: list[dict[str, Any]]              │
+│   ) -> str:                                                              │
+│       formatted_entries = []                                             │
+│       for entry in entries:                                              │
+│           formatted_entries.append({                                     │
+│               "timestamp": formatted_time,                               │
+│               "message": entry.get("message", ""),                       │
+│               "log_stream": entry.get("log_stream", ""),                │
+│           })                                                             │
+│                                                                            │
+│   return f"""USER-SELECTED LOG ENTRIES for analysis:  ← HEADER           │
+│   Log Group: {log_group}                             ← GROUP             │
+│   Entry Count: {len(entries)}                        ← COUNT             │
+│                                                                            │
+│   ```json                                                                │
+│   {json.dumps(formatted_entries, indent=2)}          ← JSON DATA        │
+│   ```                                                                    │
+│   Please analyze these logs..."""  ← CALL TO ACTION (TOO PASSIVE)      │
+│                                                                            │
+│ 🚨 FIX 2 LOCATION: This message formatting needs to be more commanding   │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌─ STEP 4: INJECT INTO ORCHESTRATOR ───────────────────────────────────────┐
+│                                                                            │
+│ File: src/logai/ui/screens/chat.py                                      │
+│ Method: _inject_log_entries_to_context()                                │
+│ Lines: 370-387                                                           │
+│                                                                            │
+│ Code:                                                                     │
+│   context_message = self._format_log_entries_for_context(               │
+│       log_group, entries                                                │
+│   )                                                                      │
+│                                                                            │
+│   self.orchestrator.inject_context_update(context_message)  ✓ INJECT   │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌─ STEP 5: ORCHESTRATOR STORES CONTEXT ────────────────────────────────────┐
+│                                                                            │
+│ File: src/logai/core/orchestrator.py                                    │
+│ Method: LLMOrchestrator.inject_context_update()                         │
+│ Lines: 423-433                                                           │
+│                                                                            │
+│ Code:                                                                     │
+│   def inject_context_update(self, context_message: str) -> None:       │
+│       """Inject a context update to be included in next LLM call."""    │
+│       self._pending_context_injection = context_message  ✓ STORED      │
+│                                                                            │
+│ Instance Variable:                                                       │
+│   Line 343: self._pending_context_injection: str | None = None          │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌─ STEP 6: USER SENDS NEXT MESSAGE ────────────────────────────────────────┐
+│                                                                            │
+│ File: src/logai/ui/screens/chat.py                                      │
+│ Method: on_input_submitted()                                            │
+│ Lines: 207-240                                                           │
+│                                                                            │
+│ Code:                                                                     │
+│   async def on_input_submitted(self, event: Input.Submitted) -> None:  │
+│       message = event.value.strip()  ← User typed message              │
+│       if not message:                                                    │
+│           return                                                         │
+│       self._process_message(message)  ✓ SEND TO ORCHESTRATOR           │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌─ STEP 7: ORCHESTRATOR RETRIEVES CONTEXT ─────────────────────────────────┐
+│                                                                            │
+│ File: src/logai/core/orchestrator.py                                    │
+│ Method: _get_pending_context_injection()                                │
+│ Lines: 435-478                                                           │
+│                                                                            │
+│ Code:                                                                     │
+│   def _get_pending_context_injection(self) -> str | None:              │
+│       """Get and clear any pending context injection."""                │
+│       injections = []                                                    │
+│                                                                            │
+│       # Cache guidance section (omitted for clarity)                    │
+│                                                                            │
+│       # Include user-selected log entries if available                 │
+│       if self._pending_context_injection:  ✓ CHECK                      │
+│           injection = self._pending_context_injection                   │
+│           self._pending_context_injection = None  ✓ CLEAR               │
+│           injections.append(injection)            ✓ STORE              │
+│                                                                            │
+│       if injections:                                                     │
+│           return "\n\n---\n\n".join(injections)  ✓ RETURN              │
+│       return None                                                        │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌─ STEP 8: CONTEXT APPENDED TO MESSAGES ────────────────────────────────────┐
+│                                                                            │
+│ File: src/logai/core/orchestrator.py                                    │
+│ Method: _chat_complete()                                                │
+│ Lines: 1000-1009                                                         │
+│                                                                            │
+│ Code:                                                                     │
+│   # Prepare messages with system prompt                                 │
+│   messages = [                                                           │
+│       {"role": "system", "content": self._get_system_prompt()}  ← SYSTEM│
+│   ] + self.conversation_history                                ← HISTORY│
+│                                                                            │
+│   # Check for pending context injection  🚨 CRITICAL POINT              │
+│   pending_injection = self._get_pending_context_injection()             │
+│   if pending_injection:                  ✓ CHECK                        │
+│       messages.append({                                                  │
+│           "role": "system",                                              │
+│           "content": pending_injection   ✓ APPEND LOGS TO MESSAGES      │
+│       })                                                                 │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌─ STEP 9: SEND TO LLM PROVIDER ───────────────────────────────────────────┐
+│                                                                            │
+│ File: src/logai/core/orchestrator.py                                    │
+│ Method: _chat_complete()                                                │
+│ Lines: 1030-1032                                                         │
+│                                                                            │
+│ Code:                                                                     │
+│   llm_result = await self.llm_provider.chat(                            │
+│       messages=messages,  ✓ INCLUDES CONTEXT LOGS!                     │
+│       tools=tools,                                                      │
+│       stream=False                                                      │
+│   )                                                                      │
+│                                                                            │
+│ Final message array structure:                                          │
+│ [                                                                         │
+│   {role: "system", content: "You are an expert..."},  ← SYSTEM PROMPT   │
+│   {role: "user", content: "Look at logs..."},          ← USER MESSAGE   │
+│   {role: "system", content: "USER-SELECTED..."}        ← CONTEXT LOGS   │
+│ ]                                                                        │
+│                                                                            │
+│ ✓✓✓ LOGS SUCCESSFULLY DELIVERED TO LLM ✓✓✓                              │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌─ STEP 10: AGENT PROCESSES MESSAGE ───────────────────────────────────────┐
+│                                                                            │
+│ ✗ AGENT IGNORES LOGS DESPITE RECEIVING THEM                             │
+│                                                                            │
+│ Why?                                                                     │
+│ - System prompt never mentions user-provided logs                       │
+│ - System prompt says "Fetch logs before analyzing"                      │
+│ - Agent thinks: "I should fetch logs from CloudWatch"                   │
+│ - Agent doesn't think: "Logs are already provided in context"           │
+│                                                                            │
+│ Result:                                                                  │
+│ Agent: "I need a log group to search. Let me list available groups..."  │
+│ User: "But I just gave you logs!" ✗ BROKEN UX                           │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+
+================================================================================
+THE FIXES NEEDED
+================================================================================
+
+🚨 FIX 1: System Prompt Missing Context Guidance (CRITICAL)
+────────────────────────────────────────────────────────────
+
+File: src/logai/core/orchestrator.py
+Location: After line 300 in SYSTEM_PROMPT constant
+Current: 7 sections ending with "## Context\nCurrent time: {current_time}"
+
+Need to ADD new section:
+
+    ## User-Provided Log Entries
+
+    Users can provide log entries directly through the "Add to Context" feature.
+    When you receive log entries in your context:
+
+    1. **RECOGNITION**: Look for sections marked "USER-SELECTED LOG ENTRIES for analysis"
+    2. **PRIORITY**: ALWAYS analyze provided logs FIRST before making tool calls
+    3. **ANALYSIS**: Provide insights, categorization, or answers based on provided logs
+    4. **TOOL USAGE**: Only use tools if:
+       - User explicitly asks for additional logs
+       - You need to correlate with other log groups
+       - The provided logs are insufficient to answer the question
+
+    **CRITICAL**: Do NOT ignore provided logs and ask to search for log groups.
+    If logs appear in "USER-SELECTED LOG ENTRIES", analyze them first.
+
+Impact: Agent will now know to check for and prioritize context logs
+
+---
+
+🚨 FIX 2: Message Format Too Passive (HIGH)
+────────────────────────────────────────────
+
+File: src/logai/ui/screens/chat.py
+Method: _format_log_entries_for_context()
+Lines: 431-442
+
+Current: "Please analyze these logs and provide insights..."
+Problem: Too polite, reads as suggestion not directive
+
+Change to: "YOU MUST analyze these logs. Do NOT ask for a log group to search."
+           "Do NOT fetch different logs unless specifically requested."
+
+Impact: Message becomes commanding, reinforces system prompt instruction
+
+---
+
+✓ VERIFICATION POINTS
+──────────────────────
+
+After implementing fixes, verify with this test scenario:
+
+1. Open log preview pane
+2. Select 3-5 log entries
+3. Click "Add to Context" button
+4. See confirmation: "Added N entries to context"
+5. Type in chat: "Analyze these logs and categorize them"
+6. EXPECTED: Agent analyzes provided logs immediately
+7. SHOULD NOT SEE: "I need to search..." or "Let me list log groups..."
+
+Success indicators:
+✓ Agent mentions specific content from provided logs
+✓ Agent provides analysis without tool calls
+✓ No suggestion to fetch logs from CloudWatch
+
+---
+
+📊 CODE LOCATION SUMMARY
+────────────────────────
+
+Component                  | File                        | Lines  | Status
+──────────────────────────────────────────────────────────────────────────
+UI Button Handler          | log_preview.py              | 889-904| ✓ Works
+Entry Collection           | log_preview.py              | 896-897| ✓ Works
+Result Creation            | log_preview.py              | 900-904| ✓ Works
+Chat Screen Handler        | chat.py                     | 351-360| ✓ Works
+Formatting Function        | chat.py                     | 405-442| ✓ Works (needs tone)
+Injection to Orchestrator  | chat.py                     | 386    | ✓ Works
+Orchestrator Storage       | orchestrator.py             | 343    | ✓ Works
+Injection Method           | orchestrator.py             | 423-433| ✓ Works
+Retrieval Method           | orchestrator.py             | 435-478| ✓ Works
+Message Building           | orchestrator.py             | 1000-  | ✓ Works
+                           |                             | 1009   |
+Context Appending          | orchestrator.py             | 1008-  | ✓ Works
+                           |                             | 1009   |
+LLM Provider Call          | orchestrator.py             | 1030-  | ✓ Works
+                           |                             | 1032   |
+System Prompt              | orchestrator.py             | 220-304| ✗ BROKEN
+──────────────────────────────────────────────────────────────────────────
+
+TOTAL: 13/14 components working. Only system prompt needs fixing.
+
+---
+
+📋 IMPLEMENTATION CHECKLIST
+────────────────────────────
+
+[ ] Review this analysis with team
+[ ] Implement FIX 1: Add system prompt section (5 min)
+[ ] Implement FIX 2: Update message formatting (5 min)
+[ ] Test with verification scenario (10 min)
+[ ] Commit changes
+[ ] Deploy to test environment
+[ ] Monitor user feedback
+[ ] Deploy to production
+
+Total Time: ~30 minutes
+
+---
+
+🎯 CONCLUSION
+──────────────
+
+The infrastructure for "Add to Context" is working perfectly (13/14 components ✓).
+The only issue is the agent's system prompt doesn't tell it what to do with the
+information it's receiving.
+
+This is fundamentally a **pedagogical issue, not a code issue**.
+
+The fix is simple: add ~20 lines to teach the agent about context logs.
