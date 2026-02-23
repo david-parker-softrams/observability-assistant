@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 from logai.cache.manager import CacheManager
 from logai.config.settings import LogAISettings
 from logai.core.context.budget_tracker import ContextBudgetTracker
-from logai.core.context.result_cache import ResultCacheManager
+from logai.core.context.result_cache import CachedResultSummary, ResultCacheManager
 from logai.core.context.token_counter import TokenCounter
 from logai.core.intent_detector import IntentDetector
 from logai.core.metrics import MetricsCollector, MetricsTimer
@@ -447,49 +447,19 @@ Use this tool to find available log groups before querying logs."""
         logger.info(f"[CONTEXT_DEBUG] Orchestrator stored context: {len(context_message)} chars")
 
     def _get_pending_context_injection(self) -> str | None:
-        """Get and clear any pending context injection."""
-        injections = []
+        """
+        Get and clear any pending context injection.
 
-        # Include cache guidance if available
-        if self._pending_cache_guidance and self.settings.enable_auto_fetch_guidance:
-            guidance = self._pending_cache_guidance
-            self._pending_cache_guidance = None  # Clear after use
-            cache_guidance = f"""SYSTEM INSTRUCTION: The previous tool call returned a large result that was automatically cached.
-
-CACHED RESULT INFORMATION:
-- Cache ID: {guidance["cache_id"]}
-- Total events cached: {guidance["total_events"]}
-
-You MUST now fetch chunks to show the user actual log events:
-
-STEP 1: Fetch first chunk
-Call fetch_cached_result_chunk with these parameters:
-- cache_id: {guidance["cache_id"]} (use this exact value)
-- offset: 0
-- limit: {self.settings.initial_chunk_size}
-
-STEP 2: Analyze and fetch more if needed
-If you need more events, call again with:
-- cache_id: {guidance["cache_id"]} (same value)
-- offset: {self.settings.initial_chunk_size}
-- limit: {self.settings.initial_chunk_size}
-
-IMPORTANT: Always use the exact cache_id value shown above.
-
-DO NOT just acknowledge the cache - fetch and show the user actual events.
-"""
-            injections.append(cache_guidance)
-
+        Note: Cache guidance is no longer injected here. It's now delivered
+        directly in the tool result to avoid confusing the agent.
+        """
         # Include user-selected log entries if available
         if self._pending_context_injection:
             injection = self._pending_context_injection
             self._pending_context_injection = None
             logger.info(f"[CONTEXT_DEBUG] Orchestrator retrieved context: {len(injection)} chars")
-            injections.append(injection)
+            return injection
 
-        # Return combined injections or None if empty
-        if injections:
-            return "\n\n---\n\n".join(injections)
         return None
 
     def _notify_context_event(self, level: str, message: str) -> None:
@@ -531,26 +501,35 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
         tool_name: str,
     ) -> dict[str, Any]:
         """
-        Process a tool result, caching if necessary.
+        Process a tool result, caching large results with improved clarity.
 
-        This is a critical integration point for context management. When a tool
-        returns a large result, we cache it and return a summary instead.
+        This method now implements smart caching that:
+        1. Caches large results (>5000 tokens) to preserve context budget
+        2. Returns a clear summary that makes it obvious logs WERE retrieved
+        3. Includes cache instructions directly in the result (not system prompt)
+        4. Provides representative samples for immediate value
 
-        ENHANCEMENT: Now enforces max_result_tokens setting by force-caching
-        any result that exceeds the configured limit.
+        The key improvement: Cache guidance is delivered WITH the tool result,
+        not merged into the system prompt beforehand. This prevents the agent
+        from getting confused about whether logs were actually returned.
 
         Args:
             tool_result: Raw tool result with tool_call_id and result
             tool_name: Name of the tool that produced this result
 
         Returns:
-            Processed result (possibly modified to a summary) for context
+            Processed result (possibly cached with enhanced summary) for context
         """
         result_data = tool_result["result"]
         tool_call_id = tool_result["tool_call_id"]
 
-        # Skip processing if caching is disabled
+        # Skip caching if disabled
         if not self.settings.enable_result_caching:
+            # Just track tokens and return
+            token_count = TokenCounter.estimate_json_tokens(
+                result_data, self.settings.current_llm_model
+            )
+            self.budget_tracker.add_result_tokens(token_count)
             return tool_result
 
         # Check if result should be cached based on size
@@ -559,9 +538,7 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
             threshold=self.settings.cache_large_results_threshold,
         )
 
-        # ==== NEW: Enforce max_result_tokens ====
-        # Check against max_result_tokens limit to prevent single large results
-        # from consuming all available context
+        # Enforce max_result_tokens limit
         max_allowed = self.settings.max_result_tokens
         force_cache_due_to_size = token_count > max_allowed
 
@@ -579,16 +556,13 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
                 "info",
                 f"Large result ({token_count} tokens) exceeds limit, caching...",
             )
-            # Force caching even if under normal threshold
             should_cache = True
-        # ==== END NEW ====
 
         if should_cache:
             try:
-                # Extract query parameters for cache key (best effort)
+                # Extract query parameters for cache key
                 query_params = {
                     "tool": tool_name,
-                    # Add timestamp to make cache entries unique per invocation
                     "timestamp": int(datetime.now(UTC).timestamp()),
                 }
 
@@ -599,28 +573,14 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
                     result=result_data,
                 )
 
-                # Store pending injection for next LLM call
-                # BUT: Skip cache fetch instructions if result has 0 events
-                # (no point fetching chunks from an empty cache)
-                if summary.total_events > 0:
-                    self._pending_cache_guidance = {
-                        "cache_id": summary.cache_id,
-                        "tool_name": tool_name,
-                        "total_events": summary.total_events,
-                    }
-                else:
-                    # Don't set guidance for empty results - let retry logic handle it
-                    logger.info(
-                        "Skipping cache fetch guidance for empty result (0 events)",
-                        extra={"tool_name": tool_name, "cache_id": summary.cache_id},
-                    )
+                # Create an ENHANCED summary that makes success clear
+                enhanced_summary = self._create_enhanced_cache_summary(
+                    summary, result_data, tool_name
+                )
 
-                # Use summary instead of full result
-                modified_result = summary.to_context_dict()
-
-                # Track the summary tokens
+                # Track the enhanced summary tokens
                 summary_tokens = TokenCounter.estimate_json_tokens(
-                    modified_result, self.settings.current_llm_model
+                    enhanced_summary, self.settings.current_llm_model
                 )
                 self.budget_tracker.add_result_tokens(summary_tokens)
 
@@ -633,7 +593,8 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
                 )
 
                 logger.info(
-                    f"Result cached: {tool_name}, {token_count} tokens → {summary_tokens} token summary",
+                    f"Result cached with enhanced summary: {tool_name}, "
+                    f"{token_count} tokens → {summary_tokens} token summary",
                     extra={
                         "cache_id": summary.cache_id,
                         "original_tokens": token_count,
@@ -653,7 +614,7 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
 
                 return {
                     "tool_call_id": tool_call_id,
-                    "result": modified_result,
+                    "result": enhanced_summary,
                 }
 
             except Exception as e:
@@ -666,7 +627,6 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
                 self._notify_context_event(
                     "warning", "Failed to cache large result, context may fill quickly"
                 )
-
                 # Fall through to use full result
                 self.budget_tracker.add_result_tokens(token_count)
                 return tool_result
@@ -674,6 +634,94 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
             # Result fits in context, use as-is
             self.budget_tracker.add_result_tokens(token_count)
             return tool_result
+
+    def _create_enhanced_cache_summary(
+        self,
+        summary: CachedResultSummary,
+        original_result: dict[str, Any],
+        tool_name: str,
+    ) -> dict[str, Any]:
+        """
+        Create an enhanced summary that makes it crystal clear logs were retrieved.
+
+        The key improvements:
+        - Lead with "Successfully retrieved X events" message
+        - Show representative sample events immediately
+        - Include cache info and fetch instructions inline (not in system prompt)
+        - Make it obvious this IS the query result, not a "need to fetch" message
+
+        Args:
+            summary: Original cached result summary
+            original_result: Original full result (for metadata)
+            tool_name: Name of the tool
+
+        Returns:
+            Enhanced summary dictionary with clear success messaging
+        """
+        # Extract event count
+        event_count = summary.total_events
+
+        # Build a clear success message
+        success_message = f"Successfully retrieved {event_count} log events."
+
+        # Add time range info if available
+        time_range = summary.time_range
+        if time_range.get("start") and time_range.get("end"):
+            success_message += (
+                f" Time range: {time_range['start']} to {time_range['end']} "
+                f"(span: {time_range.get('span_ms', 0)}ms)."
+            )
+
+        # Add statistics summary if available
+        if summary.event_statistics:
+            stats_summary = ", ".join(
+                f"{count} {level}" for level, count in summary.event_statistics.items()
+            )
+            success_message += f" Event breakdown: {stats_summary}."
+
+        # Note about caching for efficiency
+        success_message += (
+            " Due to the large size, full results have been cached for efficient access."
+        )
+
+        # Build the enhanced result structure
+        enhanced = {
+            "success": True,
+            "cached": True,  # Top-level flag for easy detection
+            "message": success_message,
+            "count": event_count,
+            "events": summary.sample_events,  # Show samples directly
+            "sample_note": (
+                f"Showing {len(summary.sample_events)} representative samples from {event_count} total events. "
+                f"These samples are for quick review only."
+            ),
+        }
+
+        # Add statistics if available
+        if summary.event_statistics:
+            enhanced["statistics"] = summary.event_statistics
+
+        # Add time range if available
+        if time_range:
+            enhanced["time_range"] = time_range
+
+        # Add cache information with clear fetch instructions
+        enhanced["cache_info"] = {
+            "cached": True,
+            "cache_id": summary.cache_id,
+            "total_events_available": event_count,
+            "fetch_instructions": (
+                f"To retrieve more events, use the fetch_cached_result_chunk tool:\n"
+                f"  - cache_id: '{summary.cache_id}'\n"
+                f"  - offset: 0 (start index)\n"
+                f"  - limit: 100 (events per chunk)\n"
+                f"Example: fetch_cached_result_chunk(cache_id='{summary.cache_id}', offset=0, limit=100)"
+            ),
+            "expires_at": summary.expires_at,
+            "note": "Fetch additional chunks only if the samples above don't answer your question.",
+        }
+
+        return enhanced
 
     def _should_prune_history(self) -> bool:
         """

@@ -216,11 +216,11 @@ class TestAutomaticResultCaching:
         # Parse the tool result
         tool_result = json.loads(tool_messages[0]["content"])
 
-        # If it was cached, it should have a cache_id and summary info
+        # If it was cached, it should have cache_info with cache_id and instructions
         if "cached" in tool_result and tool_result["cached"]:
-            assert "cache_id" in tool_result
-            assert "summary" in tool_result  # Changed from "dataset" to match simplified structure
-            assert "guidance" in tool_result  # New structure has single guidance field
+            assert "cache_info" in tool_result
+            assert "cache_id" in tool_result["cache_info"]
+            assert "fetch_instructions" in tool_result["cache_info"]
 
     @pytest.mark.asyncio
     async def test_small_result_not_cached(self, orchestrator, mock_llm_provider):
@@ -719,16 +719,15 @@ class TestIntegration:
 
 
 class TestCachedResultGuidance:
-    """Test automatic guidance for fetching cached results."""
+    """Test enhanced cache summaries with inline guidance."""
 
     @pytest.mark.asyncio
-    async def test_cached_result_triggers_guidance_injection(
+    async def test_cached_result_has_inline_guidance(
         self, settings, mock_llm_provider, mock_sanitizer, mock_result_cache
     ):
-        """Test that caching a result triggers guidance injection."""
+        """Test that caching a result includes guidance directly in the result."""
         settings.enable_result_caching = True
         settings.cache_large_results_threshold = 1000
-        settings.enable_auto_fetch_guidance = True
 
         orchestrator = LLMOrchestrator(
             llm_provider=mock_llm_provider,
@@ -751,29 +750,35 @@ class TestCachedResultGuidance:
 
         processed = await orchestrator._process_tool_result(tool_result, "query_logs")
 
-        # Should have cached result
-        assert processed["result"]["cached"] is True
+        # Result should have enhanced summary format
+        result = processed["result"]
+        assert result["success"] is True
+        assert result["cached"] is True
+        assert "Successfully retrieved" in result["message"]
+        assert "1000 log events" in result["message"]
 
-        # Should have pending guidance
-        assert orchestrator._pending_cache_guidance is not None
-        assert "cache_id" in orchestrator._pending_cache_guidance
-        assert orchestrator._pending_cache_guidance["tool_name"] == "query_logs"
-        assert orchestrator._pending_cache_guidance["total_events"] == 1000
+        # Should have cache_info with inline guidance
+        assert "cache_info" in result
+        assert result["cache_info"]["cached"] is True
+        assert "cache_id" in result["cache_info"]
+        assert "fetch_instructions" in result["cache_info"]
+        assert "fetch_cached_result_chunk" in result["cache_info"]["fetch_instructions"]
 
-        # Get the injection
-        injection = orchestrator._get_pending_context_injection()
-        assert injection is not None
-        assert "fetch_cached_result_chunk" in injection
-        assert orchestrator._pending_cache_guidance is None  # Should be cleared
+        # Should have sample events
+        assert "events" in result
+        assert len(result["events"]) > 0  # Has samples
+        assert "sample_note" in result
+
+        # Should NOT set pending cache guidance (that was the old buggy behavior)
+        assert orchestrator._pending_cache_guidance is None
 
     @pytest.mark.asyncio
-    async def test_auto_fetch_guidance_can_be_disabled(
+    async def test_cache_guidance_not_in_system_prompt(
         self, settings, mock_llm_provider, mock_sanitizer, mock_result_cache
     ):
-        """Test that auto-fetch guidance can be disabled via settings."""
+        """Test that cache guidance is NOT injected into system prompt."""
         settings.enable_result_caching = True
         settings.cache_large_results_threshold = 1000
-        settings.enable_auto_fetch_guidance = False  # Disabled
 
         orchestrator = LLMOrchestrator(
             llm_provider=mock_llm_provider,
@@ -796,21 +801,20 @@ class TestCachedResultGuidance:
 
         await orchestrator._process_tool_result(tool_result, "query_logs")
 
-        # Should have pending guidance stored
-        assert orchestrator._pending_cache_guidance is not None
+        # Should NOT have pending guidance (that was the bug)
+        assert orchestrator._pending_cache_guidance is None
 
-        # But injection should NOT be returned when disabled
+        # Get pending injection - should be None (no cache guidance injected)
         injection = orchestrator._get_pending_context_injection()
         assert injection is None
 
     @pytest.mark.asyncio
-    async def test_initial_chunk_size_setting_used_in_guidance(
+    async def test_enhanced_summary_includes_statistics(
         self, settings, mock_llm_provider, mock_sanitizer, mock_result_cache
     ):
-        """Test that initial_chunk_size setting is reflected in guidance."""
+        """Test that enhanced summary includes event statistics."""
         settings.enable_result_caching = True
-        settings.enable_auto_fetch_guidance = True
-        settings.initial_chunk_size = 150  # Custom size
+        settings.cache_large_results_threshold = 1000
 
         orchestrator = LLMOrchestrator(
             llm_provider=mock_llm_provider,
@@ -823,24 +827,24 @@ class TestCachedResultGuidance:
         # Trigger cache
         large_result = {
             "success": True,
-            "events": [{"message": f"log {i}"} for i in range(1000)],
+            "events": [{"message": f"log {i}", "level": "INFO"} for i in range(1000)],
             "count": 1000,
         }
         tool_result = {"tool_call_id": "call_123", "result": large_result}
-        await orchestrator._process_tool_result(tool_result, "query_logs")
+        processed = await orchestrator._process_tool_result(tool_result, "query_logs")
 
-        # Check injection uses custom chunk size
-        injection = orchestrator._get_pending_context_injection()
-        assert injection is not None
-        assert "limit: 150" in injection  # Format changed to match actual implementation
+        result = processed["result"]
+
+        # Should include statistics in the summary
+        assert "statistics" in result
+        assert isinstance(result["statistics"], dict)
 
     @pytest.mark.asyncio
-    async def test_cache_guidance_includes_cache_id_in_injection(
+    async def test_cache_includes_clear_success_message(
         self, settings, mock_llm_provider, mock_sanitizer, mock_result_cache
     ):
-        """Test that cache_id is included in the injection message."""
+        """Test that cache summary has clear success message."""
         settings.enable_result_caching = True
-        settings.enable_auto_fetch_guidance = True
 
         orchestrator = LLMOrchestrator(
             llm_provider=mock_llm_provider,
@@ -859,20 +863,20 @@ class TestCachedResultGuidance:
         tool_result = {"tool_call_id": "call_123", "result": large_result}
         processed = await orchestrator._process_tool_result(tool_result, "query_logs")
 
-        cache_id = processed["result"]["cache_id"]
+        result = processed["result"]
 
-        # Check injection includes the cache_id
-        injection = orchestrator._get_pending_context_injection()
-        assert injection is not None
-        assert f"cache_id: {cache_id}" in injection  # Format changed to match actual implementation
+        # Message should clearly indicate success
+        assert "message" in result
+        assert "Successfully retrieved" in result["message"]
+        assert "1000" in result["message"]
+        assert "log events" in result["message"]
 
     @pytest.mark.asyncio
-    async def test_pending_cache_guidance_cleared_after_use(
+    async def test_user_context_injection_still_works(
         self, settings, mock_llm_provider, mock_sanitizer, mock_result_cache
     ):
-        """Test that pending cache guidance is cleared after being retrieved."""
+        """Test that user context injection still works (not affected by cache changes)."""
         settings.enable_result_caching = True
-        settings.enable_auto_fetch_guidance = True
 
         orchestrator = LLMOrchestrator(
             llm_provider=mock_llm_provider,
@@ -882,49 +886,10 @@ class TestCachedResultGuidance:
             result_cache=mock_result_cache,
         )
 
-        # Trigger cache
-        large_result = {
-            "success": True,
-            "events": [{"message": f"log {i}"} for i in range(1000)],
-            "count": 1000,
-        }
-        tool_result = {"tool_call_id": "call_123", "result": large_result}
-        await orchestrator._process_tool_result(tool_result, "query_logs")
-
-        # Verify pending guidance exists
-        assert orchestrator._pending_cache_guidance is not None
-
-        # Get the injection (should clear it)
-        injection = orchestrator._get_pending_context_injection()
-        assert injection is not None
-
-        # Verify guidance was cleared
-        assert orchestrator._pending_cache_guidance is None
-
-        # Second call should return None
-        injection2 = orchestrator._get_pending_context_injection()
-        assert injection2 is None
-
-    @pytest.mark.asyncio
-    async def test_cache_guidance_and_user_context_combined(
-        self, settings, mock_llm_provider, mock_sanitizer, mock_result_cache
-    ):
-        """Test that cache guidance and user context are BOTH included (bug fix)."""
-        settings.enable_result_caching = True
-        settings.enable_auto_fetch_guidance = True
-
-        orchestrator = LLMOrchestrator(
-            llm_provider=mock_llm_provider,
-            tool_registry=ToolRegistry,
-            sanitizer=mock_sanitizer,
-            settings=settings,
-            result_cache=mock_result_cache,
-        )
-
-        # Set a regular context injection (user-selected logs)
+        # Set user context injection
         orchestrator.inject_context_update("USER-SELECTED LOG ENTRIES:\n\nlog entry 1\nlog entry 2")
 
-        # Trigger cache (should set cache guidance)
+        # Trigger cache
         large_result = {
             "success": True,
             "events": [{"message": f"log {i}"} for i in range(1000)],
@@ -933,53 +898,16 @@ class TestCachedResultGuidance:
         tool_result = {"tool_call_id": "call_123", "result": large_result}
         await orchestrator._process_tool_result(tool_result, "query_logs")
 
-        # Get injection - should contain BOTH cache guidance AND user context
+        # User context injection should still work
         injection = orchestrator._get_pending_context_injection()
         assert injection is not None
-        assert "fetch_cached_result_chunk" in injection  # Cache guidance
-        assert "USER-SELECTED LOG ENTRIES" in injection  # User context
-        assert "---" in injection  # Separator between them
+        assert "USER-SELECTED LOG ENTRIES" in injection
 
-        # Both should be cleared
-        assert orchestrator._pending_cache_guidance is None
+        # But should NOT have cache guidance mixed in (that was the bug)
+        assert "fetch_cached_result_chunk" not in injection
+
+        # After retrieval, should be cleared
         assert orchestrator._pending_context_injection is None
-
-        # Second call should return None (both were cleared)
-        injection2 = orchestrator._get_pending_context_injection()
-        assert injection2 is None
-
-    @pytest.mark.asyncio
-    async def test_get_pending_context_injection_cache_only(
-        self, settings, mock_llm_provider, mock_sanitizer, mock_result_cache
-    ):
-        """Test cache guidance alone works correctly."""
-        settings.enable_result_caching = True
-        settings.enable_auto_fetch_guidance = True
-
-        orchestrator = LLMOrchestrator(
-            llm_provider=mock_llm_provider,
-            tool_registry=ToolRegistry,
-            sanitizer=mock_sanitizer,
-            settings=settings,
-            result_cache=mock_result_cache,
-        )
-
-        # Only set cache guidance
-        large_result = {
-            "success": True,
-            "events": [{"message": f"log {i}"} for i in range(1000)],
-            "count": 1000,
-        }
-        tool_result = {"tool_call_id": "call_456", "result": large_result}
-        processed = await orchestrator._process_tool_result(tool_result, "query_logs")
-
-        # Get injection - should only have cache guidance
-        injection = orchestrator._get_pending_context_injection()
-        assert injection is not None
-        assert "SYSTEM INSTRUCTION" in injection
-        assert "fetch_cached_result_chunk" in injection
-        assert processed["result"]["cache_id"] in injection
-        assert orchestrator._pending_cache_guidance is None
 
     @pytest.mark.asyncio
     async def test_get_pending_context_injection_user_only(
@@ -1003,7 +931,6 @@ class TestCachedResultGuidance:
         injection = orchestrator._get_pending_context_injection()
         assert injection is not None
         assert "USER LOGS" in injection
-        assert "SYSTEM INSTRUCTION" not in injection
         assert "fetch_cached_result_chunk" not in injection
         assert orchestrator._pending_context_injection is None
 
@@ -1025,12 +952,12 @@ class TestCachedResultGuidance:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_get_pending_context_injection_clears_both_variables(
+    async def test_small_results_not_cached(
         self, settings, mock_llm_provider, mock_sanitizer, mock_result_cache
     ):
-        """Test that both variables are cleared after retrieval."""
+        """Test that small results are not cached."""
         settings.enable_result_caching = True
-        settings.enable_auto_fetch_guidance = True
+        settings.cache_large_results_threshold = 10000  # High threshold
 
         orchestrator = LLMOrchestrator(
             llm_provider=mock_llm_provider,
@@ -1040,31 +967,19 @@ class TestCachedResultGuidance:
             result_cache=mock_result_cache,
         )
 
-        # Set both
-        orchestrator.inject_context_update("USER CONTEXT")
-        large_result = {
+        # Small result (should not trigger caching)
+        small_result = {
             "success": True,
-            "events": [{"message": f"log {i}"} for i in range(1000)],
-            "count": 1000,
+            "events": [{"message": f"log {i}"} for i in range(10)],
+            "count": 10,
         }
-        tool_result = {"tool_call_id": "call_789", "result": large_result}
-        await orchestrator._process_tool_result(tool_result, "query_logs")
+        tool_result = {"tool_call_id": "call_small", "result": small_result}
+        processed = await orchestrator._process_tool_result(tool_result, "query_logs")
 
-        # Verify both are set before calling
-        assert orchestrator._pending_cache_guidance is not None
-        assert orchestrator._pending_context_injection is not None
-
-        # Get injection
-        injection = orchestrator._get_pending_context_injection()
-        assert injection is not None
-
-        # Both should be cleared
-        assert orchestrator._pending_cache_guidance is None
-        assert orchestrator._pending_context_injection is None
-
-        # Second call should return None
-        result = orchestrator._get_pending_context_injection()
-        assert result is None
+        # Should return original result, not enhanced summary
+        result = processed["result"]
+        assert result == small_result  # Unchanged
+        assert "cached" not in result or result.get("cached") is False
 
 
 class TestGetFullContextSnapshot:
