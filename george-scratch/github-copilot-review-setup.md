@@ -98,15 +98,15 @@ Reviews appear as:
 
 Copilot provides **quick automated checks**, while Han-Ron (our custom code-reviewer agent) provides **project-specific deep review**:
 
-- **Copilot** (30-90 sec): Security, bugs, style, general best practices
-- **Han-Ron** (custom): Project architecture, design patterns, team standards, contextual review
+- **Copilot** (automatic, 30-90 sec): Security, bugs, style, general best practices
+- **Han-Ron** (manual, 2-10 min): Project architecture, design patterns, team standards, contextual review
 
-Both reviews run in parallel and complement each other.
+Copilot runs automatically on PR events; Han-Ron reviews are requested manually through George as described in `pr-review-workflow.md`.
 
 ## Next Steps
 
 1. Enable Copilot review using one of the options above
-2. Deploy Han-Ron custom review workflow (separate GitHub Action)
+2. Follow the Han-Ron manual review process documented in `pr-review-workflow.md`
 3. Test with a sample PR
 4. Monitor review quality and adjust as needed
 

@@ -5,6 +5,8 @@ This document describes the two-tier PR review process for the observability-ass
 1. **Automated review** by GitHub Copilot (quick checks)
 2. **Manual review** by Han-Ron code-reviewer agent (deep project-specific review)
 
+**Note**: This document focuses on the **PR review stage**. For the complete feature development workflow (including when Han-Ron review is mandatory), see `docs/development/feature-workflow.md`.
+
 ---
 
 ## Automated Reviews: GitHub Copilot
@@ -45,19 +47,17 @@ Han-Ron provides deeper, project-specific code review focusing on:
 
 ### When To Request Han-Ron Review
 
-Request Han-Ron review for:
-- ✅ **Large features** (200+ lines changed)
-- ✅ **Architecture changes** (new patterns, refactoring)
-- ✅ **Complex logic** (algorithms, state management)
-- ✅ **New integrations** (AWS, third-party libraries)
-- ✅ **Security-sensitive code** (authentication, data handling)
-- ✅ **When Copilot raises concerns** and you want deeper analysis
+**For code changes (src/, tests/)**: Per the [feature development workflow](../../docs/development/feature-workflow.md), Han-Ron review is **mandatory** before deployment. Request review for all code PRs.
+
+**For non-code changes**, Han-Ron review is optional but recommended for:
+- ✅ **Large documentation changes** (major rewrites, new guides)
+- ✅ **Workflow/process documentation** (team workflows, standards)
+- ✅ **Configuration changes** (GitHub Actions, pre-commit hooks, etc.)
 
 You can skip Han-Ron review for:
 - ⏭️ **Trivial changes** (typo fixes, formatting)
-- ⏭️ **Documentation only** (unless major docs overhaul)
-- ⏭️ **Dependency updates** (unless breaking changes)
-- ⏭️ **When Copilot approved** and changes are straightforward
+- ⏭️ **Minor documentation updates** (clarifications, small fixes)
+- ⏭️ **When Copilot approved** and changes are straightforward non-code updates
 
 ### How To Request Han-Ron Review
 
