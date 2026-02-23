@@ -1,4 +1,5 @@
 # LogAI 🚀
+<!-- Test comment for release automation -->
 
 **AI-powered observability assistant for AWS CloudWatch logs**
 
