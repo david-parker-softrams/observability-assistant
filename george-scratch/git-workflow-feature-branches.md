@@ -28,6 +28,12 @@ git checkout -b feature/descriptive-name
 - You might miss important fixes or features
 - Merging becomes much harder later
 
+**Pro tip:** Check if you're behind before creating a branch:
+```bash
+git fetch origin
+git status  # Will show "Your branch is behind 'origin/main' by X commits"
+```
+
 ### 2. Branch Naming Conventions
 
 **Format**: `<type>/<short-description>`
