@@ -1,0 +1,25 @@
+name: Release Please
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          # Release type determines how Release Please handles versioning
+          release-type: python
+
+          # Package name for the release
+          package-name: logai
+
+          # Target branch for releases
+          target-branch: main
