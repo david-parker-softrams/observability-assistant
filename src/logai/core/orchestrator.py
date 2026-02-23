@@ -26,6 +26,55 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class ActiveCacheContext:
+    """
+    Tracks active cached dataset for follow-up detection and limit enforcement.
+
+    This dataclass supports Phase 1 (Separate Message Timing) approach where:
+    - Cache is created but no immediate guidance is injected
+    - Follow-up questions are detected and trigger guidance injection
+    - Fetch counts are tracked per cache_id per conversation turn
+    """
+
+    cache_id: str
+    total_events: int
+    created_at: float
+    tool_name: str
+    chunks_fetched: int = 0
+
+    def is_recent(self, max_age_seconds: float = 600) -> bool:
+        """
+        Check if cache is recent enough for follow-up detection.
+
+        Args:
+            max_age_seconds: Maximum age in seconds (default 10 minutes per approved params)
+
+        Returns:
+            True if cache was created within max_age_seconds
+        """
+        import time
+
+        return (time.time() - self.created_at) < max_age_seconds
+
+    def increment_fetch_count(self) -> int:
+        """Increment and return new fetch count."""
+        self.chunks_fetched += 1
+        return self.chunks_fetched
+
+    def is_over_limit(self, max_fetches: int) -> bool:
+        """
+        Check if fetch count exceeds limit.
+
+        Args:
+            max_fetches: Maximum number of fetches allowed
+
+        Returns:
+            True if limit has been reached or exceeded
+        """
+        return self.chunks_fetched >= max_fetches
+
+
 class OrchestratorError(Exception):
     """Raised when orchestrator encounters an error."""
 
@@ -355,8 +404,8 @@ Current time: {current_time}
         # Runtime context injections (for /refresh updates)
         self._pending_context_injection: str | None = None
 
-        # Track pending context injections for cached results
-        self._pending_cache_guidance: dict[str, Any] | None = None
+        # Track active cached result for follow-up detection (Phase 1: Separate Message Timing)
+        self._active_cache: ActiveCacheContext | None = None
 
         # Context management components
         self.budget_tracker = ContextBudgetTracker(
@@ -461,6 +510,118 @@ Use this tool to find available log groups before querying logs."""
             return injection
 
         return None
+
+    def _should_inject_cache_guidance(self, user_message: str) -> bool:
+        """
+        Determine if cache guidance should be injected for this message.
+
+        Phase 1 (Separate Message Timing) approach:
+        - Only inject guidance for follow-up questions about cached data
+        - Requires active cache that's recent (< 10 minutes per approved params)
+        - Detects aggregation keywords or reference words
+
+        Returns True if:
+        - Active cache exists and is recent
+        - Message appears to be a follow-up about cached data
+        - Message requires full dataset analysis
+
+        Args:
+            user_message: The user's message to analyze
+
+        Returns:
+            True if cache guidance should be injected
+        """
+        if not self._active_cache or not self._active_cache.is_recent(max_age_seconds=600):
+            return False
+
+        message_lower = user_message.lower()
+
+        # Check for aggregation keywords (strong signal for needing full dataset)
+        aggregation_keywords = [
+            "how many",
+            "count",
+            "total",
+            "all",
+            "every",
+            "breakdown",
+            "distribution",
+            "summarize",
+            "analyze all",
+            "sum",
+            "average",
+            "percentage",
+            "percent",
+            "proportion",
+        ]
+        has_aggregation = any(kw in message_lower for kw in aggregation_keywords)
+
+        # Check for reference words (indicates talking about previous results)
+        reference_words = [
+            "those",
+            "these",
+            "them",
+            "that data",
+            "the errors",
+            "the logs",
+            "the results",
+            "the events",
+            "above",
+        ]
+        has_reference = any(ref in message_lower for ref in reference_words)
+
+        return has_aggregation or has_reference
+
+    def _get_follow_up_cache_injection(self, user_message: str) -> str | None:
+        """
+        Generate cache guidance injection for follow-up questions about cached data.
+
+        This is part of Phase 1 (Separate Message Timing) where:
+        - Tool result was delivered first (agent saw the preview)
+        - User asks a follow-up question requiring full dataset
+        - We inject explicit guidance to use fetch_cached_result_chunk
+
+        Args:
+            user_message: The user's message (for logging/debugging)
+
+        Returns:
+            Injection text or None if no injection needed
+        """
+        if not self._should_inject_cache_guidance(user_message):
+            return None
+
+        # Type assertion: _should_inject_cache_guidance ensures _active_cache is not None
+        assert self._active_cache is not None
+        cache = self._active_cache
+        chunk_size = self.settings.initial_chunk_size
+        total_chunks = (cache.total_events + chunk_size - 1) // chunk_size
+
+        logger.info(
+            f"Injecting cache guidance for follow-up question "
+            f"(cache_id={cache.cache_id}, {cache.total_events} events)"
+        )
+
+        return f"""CACHED DATA CONTEXT:
+You have an active cached dataset from a previous query:
+- Cache ID: {cache.cache_id}
+- Total Events: {cache.total_events}
+- Chunks Available: {total_chunks} (at {chunk_size} events each)
+
+The user's question requires analyzing the full dataset.
+Use fetch_cached_result_chunk(cache_id="{cache.cache_id}", offset=0, limit={chunk_size})
+to retrieve and analyze all events. Iterate through all chunks for accurate counts.
+
+Do NOT answer based only on preview samples."""
+
+    def _reset_cache_fetch_count(self) -> None:
+        """
+        Reset the chunk fetch count on new user message (new turn).
+
+        Per approved design: fetch count resets per conversation turn,
+        allowing agents to make up to max_auto_chunk_fetches (5) per turn.
+        """
+        if self._active_cache:
+            self._active_cache.chunks_fetched = 0
+            logger.debug(f"Reset fetch count for cache_id={self._active_cache.cache_id}")
 
     def _notify_context_event(self, level: str, message: str) -> None:
         """
@@ -612,6 +773,21 @@ Use this tool to find available log groups before querying logs."""
                     labels={"tool": tool_name, "reason": cache_reason},
                 )
 
+                # Track active cache for follow-up detection (Phase 1: Separate Message Timing)
+                # No immediate guidance injection - let the enhanced tool result speak for itself
+                import time
+
+                self._active_cache = ActiveCacheContext(
+                    cache_id=summary.cache_id,
+                    total_events=summary.total_events,
+                    created_at=time.time(),
+                    tool_name=tool_name,
+                )
+                logger.debug(
+                    f"Tracking active cache for follow-up: cache_id={summary.cache_id}, "
+                    f"total_events={summary.total_events}"
+                )
+
                 return {
                     "tool_call_id": tool_call_id,
                     "result": enhanced_summary,
@@ -642,83 +818,36 @@ Use this tool to find available log groups before querying logs."""
         tool_name: str,
     ) -> dict[str, Any]:
         """
-        Create an enhanced summary that makes it crystal clear logs were retrieved.
+        Create an enhanced summary using the new 5-key structure.
 
-        The key improvements:
-        - Lead with "Successfully retrieved X events" message
-        - Show representative sample events immediately
-        - Include cache info and fetch instructions inline (not in system prompt)
-        - Make it obvious this IS the query result, not a "need to fetch" message
+        Phase 1 (Separate Message Timing) approach:
+        - Return the full summary with clear preview structure
+        - No immediate guidance injection (that comes on follow-up)
+        - Uses CachedResultSummary.to_context_dict() for consistent structure
+
+        The key improvements from Phase 1 design:
+        - Uses new 5-key structure (result_type, full_dataset, preview_events, fetch_more, expires_in_seconds)
+        - Clear separation between "what you have" and "how to get more"
+        - No premature guidance injection
 
         Args:
-            summary: Original cached result summary
+            summary: Cached result summary from cache manager
             original_result: Original full result (for metadata)
             tool_name: Name of the tool
 
         Returns:
-            Enhanced summary dictionary with clear success messaging
+            Enhanced summary dictionary with new 5-key structure
         """
-        # Extract event count
-        event_count = summary.total_events
+        # Use the new to_context_dict() method which implements the 5-key structure
+        base_structure = summary.to_context_dict()
 
-        # Build a clear success message
-        success_message = f"Successfully retrieved {event_count} log events."
-
-        # Add time range info if available
-        time_range = summary.time_range
-        if time_range.get("start") and time_range.get("end"):
-            success_message += (
-                f" Time range: {time_range['start']} to {time_range['end']} "
-                f"(span: {time_range.get('span_ms', 0)}ms)."
-            )
-
-        # Add statistics summary if available
-        if summary.event_statistics:
-            stats_summary = ", ".join(
-                f"{count} {level}" for level, count in summary.event_statistics.items()
-            )
-            success_message += f" Event breakdown: {stats_summary}."
-
-        # Note about caching for efficiency
-        success_message += (
-            " Due to the large size, full results have been cached for efficient access."
-        )
-
-        # Build the enhanced result structure
+        # Wrap it in a success envelope to make it clear the operation succeeded
         enhanced = {
             "success": True,
-            "cached": True,  # Top-level flag for easy detection
-            "message": success_message,
-            "count": event_count,
-            "events": summary.sample_events,  # Show samples directly
-            "sample_note": (
-                f"Showing {len(summary.sample_events)} representative samples from {event_count} total events. "
-                f"These samples are for quick review only."
-            ),
-        }
-
-        # Add statistics if available
-        if summary.event_statistics:
-            enhanced["statistics"] = summary.event_statistics
-
-        # Add time range if available
-        if time_range:
-            enhanced["time_range"] = time_range
-
-        # Add cache information with clear fetch instructions
-        enhanced["cache_info"] = {
-            "cached": True,
-            "cache_id": summary.cache_id,
-            "total_events_available": event_count,
-            "fetch_instructions": (
-                f"To retrieve more events, use the fetch_cached_result_chunk tool:\n"
-                f"  - cache_id: '{summary.cache_id}'\n"
-                f"  - offset: 0 (start index)\n"
-                f"  - limit: 100 (events per chunk)\n"
-                f"Example: fetch_cached_result_chunk(cache_id='{summary.cache_id}', offset=0, limit=100)"
-            ),
-            "expires_at": summary.expires_at,
-            "note": "Fetch additional chunks only if the samples above don't answer your question.",
+            "message": f"Successfully retrieved {summary.total_events} log events. "
+            f"Showing {len(summary.sample_events)} representative samples. "
+            f"Full dataset cached for efficient access.",
+            "cached_result": base_structure,
         }
 
         return enhanced
@@ -1058,6 +1187,9 @@ Use this tool to find available log groups before querying logs."""
         # Add user message to history
         self.conversation_history.append({"role": "user", "content": user_message})
 
+        # Reset cache fetch count for new user message (new turn)
+        self._reset_cache_fetch_count()
+
         # Prune history if needed (before preparing messages)
         self._prune_history_if_needed()
 
@@ -1066,6 +1198,10 @@ Use this tool to find available log groups before querying logs."""
         system_prompt = self._get_system_prompt()
         pending_injection = self._get_pending_context_injection()
 
+        # Check if we should inject cache guidance for follow-up questions (Phase 1)
+        cache_injection = self._get_follow_up_cache_injection(user_message)
+
+        # Merge all injections into system prompt
         if pending_injection:
             logger.info(
                 f"[CONTEXT_DEBUG] Merging context into system prompt: {len(pending_injection)} chars"
@@ -1073,6 +1209,12 @@ Use this tool to find available log groups before querying logs."""
             logger.info(f"[CONTEXT_DEBUG] Context preview: {pending_injection[:500]}...")
             # Merge context injection into the main system prompt
             system_prompt = system_prompt + "\n\n---\n\n" + pending_injection
+
+        if cache_injection:
+            logger.info(
+                f"[CACHE_INJECTION] Injecting cache guidance for follow-up: {len(cache_injection)} chars"
+            )
+            system_prompt = system_prompt + "\n\n---\n\n" + cache_injection
 
         # Prepare messages with complete system prompt (only ONE system message)
         messages = [{"role": "system", "content": system_prompt}]
@@ -1365,6 +1507,9 @@ Use this tool to find available log groups before querying logs."""
         # Add user message to history
         self.conversation_history.append({"role": "user", "content": user_message})
 
+        # Reset cache fetch count for new user message (new turn)
+        self._reset_cache_fetch_count()
+
         # Prune history if needed (before preparing messages)
         self._prune_history_if_needed()
 
@@ -1373,6 +1518,10 @@ Use this tool to find available log groups before querying logs."""
         system_prompt = self._get_system_prompt()
         pending_injection = self._get_pending_context_injection()
 
+        # Check if we should inject cache guidance for follow-up questions (Phase 1)
+        cache_injection = self._get_follow_up_cache_injection(user_message)
+
+        # Merge all injections into system prompt
         if pending_injection:
             logger.info(
                 f"[CONTEXT_DEBUG] Merging context into system prompt: {len(pending_injection)} chars"
@@ -1380,6 +1529,12 @@ Use this tool to find available log groups before querying logs."""
             logger.info(f"[CONTEXT_DEBUG] Context preview: {pending_injection[:500]}...")
             # Merge context injection into the main system prompt
             system_prompt = system_prompt + "\n\n---\n\n" + pending_injection
+
+        if cache_injection:
+            logger.info(
+                f"[CACHE_INJECTION] Injecting cache guidance for follow-up: {len(cache_injection)} chars"
+            )
+            system_prompt = system_prompt + "\n\n---\n\n" + cache_injection
 
         # Prepare messages with complete system prompt (only ONE system message)
         messages = [{"role": "system", "content": system_prompt}]

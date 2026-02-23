@@ -31,47 +31,42 @@ class CachedResultSummary:
 
     def to_context_dict(self) -> dict[str, Any]:
         """
-        Convert to dict suitable for LLM context.
+        Convert to dict optimized for LLM comprehension.
 
-        Returns a simplified structure that's easy for agents to work with:
-        - Maximum 5 top-level keys
-        - Single clear guidance field (no conflicting instructions)
-        - Consistent, intuitive field names
+        Design principles (Phase 1 - Separate Message Timing):
+        - 5 top-level keys maximum
+        - Clear "what you have" vs "how to get more" separation
+        - Preview events clearly marked as samples
+        - Actionable fetch instructions
+        - No premature guidance injection (follows Option A)
 
         Returns:
             Dictionary suitable for LLM context
         """
-        total_chunks = (self.total_events + 99) // 100  # ceiling division with chunk_size=100
+        chunk_size = 100  # Could be made configurable
+        total_chunks = (self.total_events + chunk_size - 1) // chunk_size
 
         return {
-            # Boolean flag indicating this is cached data
-            "cached": True,
-            # Unique identifier for fetching data
-            "cache_id": self.cache_id,
-            # Summary of the dataset
-            "summary": {
+            # Key 1: What type of result this is
+            "result_type": "cached_preview",
+            # Key 2: Full dataset information
+            "full_dataset": {
                 "total_events": self.total_events,
-                "time_range": self.time_range,
+                "cache_id": self.cache_id,
                 "statistics": self.event_statistics,
-                "sample_events": self.sample_events[:5],  # Use configured count (default 5)
+                "time_range": self.time_range,
             },
-            # Cache metadata (expiration info)
-            "metadata": {
-                "cached_at": self.cached_at,
-                "expires_in_seconds": max(0, self.expires_at - int(time.time())),
-                "original_query": {
-                    "tool": self.original_tool,
-                    "parameters": self.original_query,
-                },
+            # Key 3: Preview events (clearly samples)
+            "preview_events": self.sample_events,
+            # Key 4: How to fetch more data (clear, actionable)
+            "fetch_more": {
+                "tool": "fetch_cached_result_chunk",
+                "example": f"fetch_cached_result_chunk(cache_id='{self.cache_id}', offset=0, limit={chunk_size})",
+                "total_chunks": total_chunks,
+                "chunk_size": chunk_size,
             },
-            # Single, clear guidance on how to use this cached data
-            "guidance": (
-                f"This is a summary of cached results containing {self.total_events} events. "
-                f"The sample events above are for preview only - do not use them for counting or analysis. "
-                f"To analyze the full dataset, use fetch_cached_result_chunk() with cache_id='{self.cache_id}'. "
-                f"For counting or aggregation questions, you'll need to iterate through all {total_chunks} chunks "
-                f"(chunk_size=100). Example: fetch_cached_result_chunk(cache_id='{self.cache_id}', offset=0, limit=100)"
-            ),
+            # Key 5: Expiration info (important for agent decision-making)
+            "expires_in_seconds": max(0, self.expires_at - int(time.time())),
         }
 
 
