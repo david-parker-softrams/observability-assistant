@@ -1866,8 +1866,52 @@ Do NOT answer based only on preview samples."""
                 record.status = ToolCallStatus.RUNNING
                 self._notify_tool_call(record)
 
+                # Check fetch limit for cached result chunks (Phase 2)
+                if function_name == "fetch_cached_result_chunk" and self._active_cache:
+                    cache_id = function_args.get("cache_id")
+                    if cache_id == self._active_cache.cache_id:
+                        if (
+                            self._active_cache.chunks_fetched
+                            >= self.settings.max_auto_chunk_fetches
+                        ):
+                            logger.warning(
+                                f"Fetch limit exceeded: {self._active_cache.chunks_fetched} fetches "
+                                f"for cache_id={cache_id} (limit: {self.settings.max_auto_chunk_fetches})"
+                            )
+                            result = {
+                                "success": False,
+                                "error": f"Fetch limit exceeded for this cache ({self.settings.max_auto_chunk_fetches} fetches per turn)",
+                                "hint": "You have already fetched the maximum number of chunks for this cache in this turn. "
+                                "If you need more data, ask the user to re-run the original query or wait for the next turn.",
+                                "chunks_fetched": self._active_cache.chunks_fetched,
+                                "limit": self.settings.max_auto_chunk_fetches,
+                            }
+                            # Update record and notify
+                            record.status = ToolCallStatus.SUCCESS
+                            record.result = result
+                            record.completed_at = datetime.now()
+                            self._notify_tool_call(record)
+
+                            # Add to results and continue to next tool call
+                            tool_result = {"tool_call_id": tool_call_id, "result": result}
+                            processed_result = await self._process_tool_result(
+                                tool_result, function_name
+                            )
+                            results.append(processed_result)
+                            continue
+
                 # Execute tool
                 result = await self.tool_registry.execute(function_name, **function_args)
+
+                # Track successful fetch for limit enforcement (Phase 2)
+                if function_name == "fetch_cached_result_chunk" and result.get("success"):
+                    cache_id = function_args.get("cache_id")
+                    if self._active_cache and cache_id == self._active_cache.cache_id:
+                        self._active_cache.chunks_fetched += 1
+                        logger.debug(
+                            f"Incremented fetch count for cache_id={cache_id}: "
+                            f"{self._active_cache.chunks_fetched}/{self.settings.max_auto_chunk_fetches}"
+                        )
 
                 # Update to SUCCESS
                 record.status = ToolCallStatus.SUCCESS
