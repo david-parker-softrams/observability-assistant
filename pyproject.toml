@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "logai"
-version = "0.1.0"
+version = "0.0.1"
 description = "AI-powered observability assistant for querying AWS CloudWatch logs using natural language"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -78,10 +78,10 @@ dev = [
 logai = "logai.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/logai/logai"
-Documentation = "https://github.com/logai/logai/docs"
-Repository = "https://github.com/logai/logai"
-Issues = "https://github.com/logai/logai/issues"
+Homepage = "https://github.com/david-parker-softrams/observability-assistant"
+Documentation = "https://github.com/david-parker-softrams/observability-assistant/tree/main/docs"
+Repository = "https://github.com/david-parker-softrams/observability-assistant"
+Issues = "https://github.com/david-parker-softrams/observability-assistant/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]

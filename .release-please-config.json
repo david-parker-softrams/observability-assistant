@@ -1,0 +1,11 @@
+{
+  "packages": {
+    ".": {
+      "release-type": "python",
+      "package-name": "logai",
+      "extra-files": [
+        "src/logai/__init__.py"
+      ]
+    }
+  }
+}
