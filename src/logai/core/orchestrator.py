@@ -330,23 +330,43 @@ Before giving up on a search:
 - You MUST have used at least 2 different parameter combinations
 - You SHOULD expand time ranges before concluding "no logs found"
 
-## Cached Result Handling
+===CRITICAL: CACHED RESULTS PROTOCOL===
 
-When you receive a tool result with "cached": true:
-1. The full result was too large for context and has been cached
-2. You MUST immediately use fetch_cached_result_chunk(cache_id, offset, limit) to retrieve events
-3. Start with offset=0, limit=100 for the first chunk
-4. Analyze the chunk and decide if more data is needed to answer the user's question
-5. Fetch additional chunks if necessary (increment offset by limit)
-6. DO NOT wait for the user to ask - proceed automatically with chunk fetching
+⚠️ When you receive ANY tool result with "cached": true, you are seeing ONLY A SMALL PREVIEW (typically 5 samples).
+This preview is NOT sufficient to answer user questions. The full dataset has been cached to protect context limits.
+
+🚨 MANDATORY IMMEDIATE ACTION REQUIRED:
+You MUST call fetch_cached_result_chunk(cache_id, offset=0, limit=100) in your IMMEDIATE next response.
+DO NOT skip this step. DO NOT answer based on preview alone. DO NOT wait for user prompt.
+
+❌ WRONG - These will give INCORRECT answers:
+- Analyzing only the 5 preview samples and answering the user
+- Saying "Based on the logs, I can see..." when you only saw 5 of 100 events
+- Providing statistics or counts from preview data
+- Waiting for the user to ask for more data
+
+✅ CORRECT - Required workflow:
+1. See "cached": true with cache_id "result_abc123" and total_events: 100
+2. IMMEDIATELY call: fetch_cached_result_chunk(cache_id='result_abc123', offset=0, limit=100)
+3. Receive full chunk (100 events)
+4. Analyze the complete data
+5. Answer user's question based on FULL data
+6. Fetch more chunks if needed (offset=100, limit=100, etc.)
+
+EXAMPLE:
+If fetch_logs returns {{"cached": true, "cache_id": "result_6d283cecb68018ad", "total_events": 100, "sample": [5 events]}},
+your immediate next action MUST be calling fetch_cached_result_chunk, NOT providing analysis.
 
 The fetch_cached_result_chunk tool supports:
-- offset: Starting index (0-based)
-- limit: Number of events (max 200)
-- filter_pattern: Text to search for (case-insensitive)
-- time_start/time_end: Unix timestamps to filter by time range
+- cache_id: The cache_id from the cached result (REQUIRED)
+- offset: Starting index, 0-based (start with 0)
+- limit: Number of events, max 200 (use 100 initially)
+- filter_pattern: Optional text search (case-insensitive)
+- time_start/time_end: Optional Unix timestamp filters
 
-Always fetch at least one chunk to provide concrete results to the user.
+CONSEQUENCE OF IGNORING THIS:
+If you answer based only on preview samples, you will provide incomplete, potentially wrong analysis.
+The user expects analysis of ALL events, not just a preview.
 
 ## User-Provided Log Entries
 
