@@ -681,6 +681,15 @@ Do NOT answer based only on preview samples."""
         Returns:
             Processed result (possibly cached with enhanced summary) for context
         """
+        # Never cache fetch results - agent requested full events, not summary
+        if tool_name == "fetch_cached_result_chunk":
+            result_data = tool_result["result"]
+            token_count = TokenCounter.estimate_json_tokens(
+                result_data, self.settings.current_llm_model
+            )
+            self.budget_tracker.add_result_tokens(token_count)
+            return tool_result  # Return as-is, no caching!
+
         result_data = tool_result["result"]
         tool_call_id = tool_result["tool_call_id"]
 
