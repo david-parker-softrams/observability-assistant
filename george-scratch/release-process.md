@@ -221,17 +221,25 @@ git commit --amend -m "feat: correct commit message"
 
 If you need to create a release manually:
 
-1. **Update version in pyproject.toml**
+1. **Update version in both files**
    ```toml
+   # pyproject.toml
    [project]
    version = "0.1.0"
    ```
+
+   ```python
+   # src/logai/__init__.py
+   __version__ = "0.1.0"
+   ```
+
+   **Note**: With Release Please configured via `.release-please-config.json`, automated releases will update both files automatically. Manual updates are only needed for emergency releases outside the normal workflow.
 
 2. **Update CHANGELOG.md** with your changes
 
 3. **Create a git tag**
    ```bash
-   git add pyproject.toml CHANGELOG.md
+   git add pyproject.toml src/logai/__init__.py CHANGELOG.md
    git commit -m "chore: release 0.1.0"
    git tag v0.1.0
    git push origin main --tags

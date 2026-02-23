@@ -16,8 +16,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Context management system for conversation history
 - Text selection and copying capabilities
 - Automated release system using Release Please
-
-### Developer Experience
 - Pre-commit hooks for code quality
 - Comprehensive test suite with pytest
 - Type checking with mypy

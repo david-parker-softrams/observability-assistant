@@ -5,6 +5,10 @@ on:
     branches:
       - main
 
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
 permissions:
   contents: write
   pull-requests: write
@@ -13,13 +17,7 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     steps:
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@v4.4.0
         with:
-          # Release type determines how Release Please handles versioning
-          release-type: python
-
-          # Package name for the release
-          package-name: logai
-
-          # Target branch for releases
+          # Target branch for releases (must match the branch this workflow runs on)
           target-branch: main
