@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1](https://github.com/david-parker-softrams/observability-assistant/compare/logai-v0.2.0...logai-v0.2.1) (2026-02-24)
+
+
+### Bug Fixes
+
+* remove unnecessary startup tip popup ([#10](https://github.com/david-parker-softrams/observability-assistant/issues/10)) ([f66bbd4](https://github.com/david-parker-softrams/observability-assistant/commit/f66bbd4328d1930e2a82ec9fb8225cca97b29ef1))
+
 ## [0.2.0](https://github.com/david-parker-softrams/observability-assistant/compare/logai-v0.1.0...logai-v0.2.0) (2026-02-24)
 
 
