@@ -243,3 +243,144 @@ class TestRegisterMcpTools:
         with patch("logai.cli.ToolRegistry") as mock_registry:
             await register_mcp_tools(mock_client, mock_processor)
             assert mock_registry.register.called
+
+
+# ---------------------------------------------------------------------------
+# --ollama-num-ctx CLI flag tests
+# ---------------------------------------------------------------------------
+
+
+class TestOllamaNumCtxCLIFlag:
+    """Tests for the --ollama-num-ctx CLI flag (num_ctx context window fix).
+
+    Covers:
+    * Parser-level: flag is registered; default is None when omitted
+    * Parser-level: valid integer value is accepted and stored
+    * main() integration: flag overrides settings.ollama_num_ctx
+    * main() integration: when flag is absent, settings value is preserved
+    """
+
+    # ------------------------------------------------------------------ #
+    # Parser-level tests (no main() invocation needed)                   #
+    # ------------------------------------------------------------------ #
+
+    def test_ollama_num_ctx_defaults_to_none_in_parser(self) -> None:
+        """args.ollama_num_ctx is None when --ollama-num-ctx is not supplied."""
+        from unittest.mock import patch
+
+        from logai.cli import _build_parser
+
+        with patch("sys.argv", ["logai"]):
+            parser = _build_parser()
+            args = parser.parse_args()
+            assert args.ollama_num_ctx is None
+
+    def test_ollama_num_ctx_flag_stores_integer(self) -> None:
+        """--ollama-num-ctx 65536 is parsed as integer 65536, not a string."""
+        from unittest.mock import patch
+
+        from logai.cli import _build_parser
+
+        with patch("sys.argv", ["logai", "--ollama-num-ctx", "65536"]):
+            parser = _build_parser()
+            args = parser.parse_args()
+            assert args.ollama_num_ctx == 65536
+            assert isinstance(args.ollama_num_ctx, int)
+
+    def test_ollama_num_ctx_flag_stores_small_value(self) -> None:
+        """--ollama-num-ctx 4096 is accepted and stored correctly."""
+        from unittest.mock import patch
+
+        from logai.cli import _build_parser
+
+        with patch("sys.argv", ["logai", "--ollama-num-ctx", "4096"]):
+            parser = _build_parser()
+            args = parser.parse_args()
+            assert args.ollama_num_ctx == 4096
+
+    def test_ollama_num_ctx_flag_stores_large_value(self) -> None:
+        """--ollama-num-ctx 131072 (max Ollama supports) is accepted."""
+        from unittest.mock import patch
+
+        from logai.cli import _build_parser
+
+        with patch("sys.argv", ["logai", "--ollama-num-ctx", "131072"]):
+            parser = _build_parser()
+            args = parser.parse_args()
+            assert args.ollama_num_ctx == 131072
+
+    # ------------------------------------------------------------------ #
+    # main() integration tests: settings mutation                         #
+    # ------------------------------------------------------------------ #
+
+    @pytest.fixture
+    def mock_components(self) -> None:
+        """Mock heavyweight components to avoid actual initialisation."""
+        from unittest.mock import patch
+
+        with (
+            patch("logai.cli.CloudWatchDataSource"),
+            patch("logai.cli.LogSanitizer"),
+            patch("logai.cli.CacheManager"),
+            patch("logai.cli.ToolRegistry"),
+            patch("logai.cli.LiteLLMProvider"),
+            patch("logai.cli.LLMOrchestrator"),
+            patch("logai.cli.LogAIApp"),
+        ):
+            yield
+
+    def _base_env(self) -> None:
+        """Minimum env vars required for settings validation."""
+        os.environ["LOGAI_ANTHROPIC_API_KEY"] = "sk-ant-test-key"
+        os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
+        os.environ["AWS_ACCESS_KEY_ID"] = "AKIATEST"
+        os.environ["AWS_SECRET_ACCESS_KEY"] = "secrettest"
+
+    def _run_main_with_argv(self, argv):
+        """Run main() with patched settings and return the mutated settings instance."""
+        from io import StringIO
+        from unittest.mock import MagicMock, patch
+
+        from logai.cli import main
+        from logai.config.settings import LogAISettings
+
+        settings = LogAISettings(_env_file=None)  # type: ignore[call-arg]
+        with (
+            patch("sys.argv", argv),
+            patch("logai.cli.get_settings", return_value=settings),
+            patch("sys.stdout", new_callable=StringIO),
+            patch("logai.cli.shutil.which", return_value="/usr/bin/uvx"),
+            patch("logai.cli.LogAIApp") as mock_app,
+        ):
+            mock_app.return_value.run.return_value = None
+            main()
+        return settings
+
+    def test_ollama_num_ctx_cli_flag_overrides_settings(
+        self, clean_env: None, mock_components: None
+    ) -> None:
+        """--ollama-num-ctx CLI flag must override settings.ollama_num_ctx."""
+        self._base_env()
+        # Set a different value in the env so we're truly overriding
+        os.environ["LOGAI_OLLAMA_NUM_CTX"] = "32768"
+        settings = self._run_main_with_argv(["logai", "--ollama-num-ctx", "65536"])
+        assert settings.ollama_num_ctx == 65536
+
+    def test_ollama_num_ctx_settings_value_preserved_when_no_cli_flag(
+        self, clean_env: None, mock_components: None
+    ) -> None:
+        """When --ollama-num-ctx is absent, settings.ollama_num_ctx is not changed."""
+        self._base_env()
+        os.environ["LOGAI_OLLAMA_NUM_CTX"] = "16384"
+        settings = self._run_main_with_argv(["logai"])
+        # The env var value should still be present (not overwritten by CLI)
+        assert settings.ollama_num_ctx == 16384
+
+    def test_ollama_num_ctx_default_32768_when_no_env_or_cli(
+        self, clean_env: None, mock_components: None
+    ) -> None:
+        """When neither LOGAI_OLLAMA_NUM_CTX nor --ollama-num-ctx are set, default is 32768."""
+        self._base_env()
+        # No LOGAI_OLLAMA_NUM_CTX set
+        settings = self._run_main_with_argv(["logai"])
+        assert settings.ollama_num_ctx == 32768

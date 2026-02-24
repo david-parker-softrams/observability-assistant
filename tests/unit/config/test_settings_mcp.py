@@ -4,6 +4,7 @@ import os
 
 import pytest
 from logai.config.settings import LogAISettings
+from pydantic import ValidationError
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -112,3 +113,74 @@ class TestMCPSettingsOverrides:
         # Core fields must retain their defaults
         assert settings.llm_provider == "anthropic"
         assert settings.pii_sanitization_enabled is True
+
+
+# ---------------------------------------------------------------------------
+# ollama_num_ctx field tests (num_ctx context window fix)
+# ---------------------------------------------------------------------------
+
+
+class TestOllamaNumCtxSettings:
+    """Tests for the ollama_num_ctx field introduced by the num_ctx fix."""
+
+    def test_ollama_num_ctx_default_is_32768(self) -> None:
+        """ollama_num_ctx must default to 32768 (not Ollama's built-in 4096)."""
+        settings = LogAISettings(_env_file=None)  # type: ignore[call-arg]
+        assert settings.ollama_num_ctx == 32768
+
+    def test_ollama_num_ctx_env_var_override(self) -> None:
+        """LOGAI_OLLAMA_NUM_CTX env var must override the default."""
+        os.environ["LOGAI_OLLAMA_NUM_CTX"] = "65536"
+        settings = LogAISettings(_env_file=None)  # type: ignore[call-arg]
+        assert settings.ollama_num_ctx == 65536
+
+    def test_ollama_num_ctx_constructor_override(self) -> None:
+        """ollama_num_ctx can be set directly via constructor."""
+        settings = LogAISettings(  # type: ignore[call-arg]
+            _env_file=None,
+            ollama_num_ctx=8192,
+        )
+        assert settings.ollama_num_ctx == 8192
+
+    def test_ollama_num_ctx_minimum_value(self) -> None:
+        """ollama_num_ctx must accept its minimum valid value (1)."""
+        settings = LogAISettings(  # type: ignore[call-arg]
+            _env_file=None,
+            ollama_num_ctx=1,
+        )
+        assert settings.ollama_num_ctx == 1
+
+    def test_ollama_num_ctx_maximum_value(self) -> None:
+        """ollama_num_ctx must accept its maximum valid value (131072)."""
+        settings = LogAISettings(  # type: ignore[call-arg]
+            _env_file=None,
+            ollama_num_ctx=131072,
+        )
+        assert settings.ollama_num_ctx == 131072
+
+    def test_ollama_num_ctx_zero_is_rejected(self) -> None:
+        """ollama_num_ctx=0 must raise a validation error (gt=0 constraint)."""
+        with pytest.raises(ValidationError):
+            LogAISettings(  # type: ignore[call-arg]
+                _env_file=None,
+                ollama_num_ctx=0,
+            )
+
+    def test_ollama_num_ctx_above_max_is_rejected(self) -> None:
+        """ollama_num_ctx > 131072 must raise a validation error (le=131072 constraint)."""
+        with pytest.raises(ValidationError):
+            LogAISettings(  # type: ignore[call-arg]
+                _env_file=None,
+                ollama_num_ctx=131073,
+            )
+
+    def test_ollama_num_ctx_does_not_affect_other_providers(self) -> None:
+        """Changing ollama_num_ctx must not affect llm_provider or other unrelated fields."""
+        settings = LogAISettings(  # type: ignore[call-arg]
+            _env_file=None,
+            ollama_num_ctx=16384,
+        )
+        # Core provider field must still be the default
+        assert settings.llm_provider == "anthropic"
+        # Other Ollama defaults unchanged
+        assert settings.ollama_model == "llama3.1:8b"
