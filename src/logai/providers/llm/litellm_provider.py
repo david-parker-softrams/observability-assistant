@@ -224,10 +224,12 @@ class LiteLLMProvider(BaseLLMProvider):
             # Pass num_ctx to Ollama to override the default 4096-token context window.
             # Without this, Ollama silently truncates prompts even when the model supports
             # a larger context window (e.g. qwen3:32b supports 32768 tokens).
-            # Use setdefault so that any "options" dict already in params is merged
-            # rather than silently overwritten.
+            # IMPORTANT: num_ctx must be passed as a top-level kwarg to litellm.completion(),
+            # NOT as options={"num_ctx": ...}. LiteLLM's Ollama handler only recognises
+            # num_ctx when it arrives via optional_params (i.e. as a direct kwarg); an
+            # "options" dict key is not in get_supported_openai_params and gets dropped.
             if self.provider == "ollama" and self.num_ctx:
-                params.setdefault("options", {})["num_ctx"] = self.num_ctx
+                params["num_ctx"] = self.num_ctx
 
             # Only send tools if the model supports them
             if tools and self._supports_tools():
@@ -324,10 +326,12 @@ class LiteLLMProvider(BaseLLMProvider):
             # Pass num_ctx to Ollama to override the default 4096-token context window.
             # Without this, Ollama silently truncates prompts even when the model supports
             # a larger context window (e.g. qwen3:32b supports 32768 tokens).
-            # Use setdefault so that any "options" dict already in params is merged
-            # rather than silently overwritten.
+            # IMPORTANT: num_ctx must be passed as a top-level kwarg to litellm.completion(),
+            # NOT as options={"num_ctx": ...}. LiteLLM's Ollama handler only recognises
+            # num_ctx when it arrives via optional_params (i.e. as a direct kwarg); an
+            # "options" dict key is not in get_supported_openai_params and gets dropped.
             if self.provider == "ollama" and self.num_ctx:
-                params.setdefault("options", {})["num_ctx"] = self.num_ctx
+                params["num_ctx"] = self.num_ctx
 
             # Only send tools if the model supports them
             if tools and self._supports_tools():
