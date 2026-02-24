@@ -274,6 +274,7 @@ class TestLiteLLMProvider:
         settings.llm_provider = "ollama"
         settings.ollama_base_url = "http://localhost:11434"
         settings.ollama_model = "llama3.1:8b"
+        settings.ollama_num_ctx = 32768
 
         provider = cast(LiteLLMProvider, LiteLLMProvider.from_settings(settings))
 
@@ -281,6 +282,7 @@ class TestLiteLLMProvider:
         assert provider.model == "llama3.1:8b"
         assert provider.api_base == "http://localhost:11434"
         assert provider.api_key == ""
+        assert provider.num_ctx == 32768
 
     def test_ollama_model_name(self):
         """Test Ollama model name formatting."""
@@ -398,3 +400,263 @@ class TestLiteLLMProvider:
         )
 
         assert provider._supports_tools() is False
+
+
+# ---------------------------------------------------------------------------
+# num_ctx injection tests (ollama context window fix)
+# ---------------------------------------------------------------------------
+
+
+def _make_mock_litellm_response(content: str = "ok") -> Mock:
+    """Return a minimal Mock that looks like a litellm ModelResponse."""
+    mock_choice = Mock()
+    mock_choice.message.content = content
+    mock_choice.message.tool_calls = None
+    mock_choice.finish_reason = "stop"
+    mock_response = Mock()
+    mock_response.choices = [mock_choice]
+    mock_response.usage = None
+    return mock_response
+
+
+def _make_mock_stream_chunks(tokens: list[str]) -> list[Mock]:
+    """Return mock streaming chunks for the given token list."""
+    chunks = []
+    for text in tokens:
+        mock_delta = Mock()
+        mock_delta.content = text
+        mock_choice = Mock()
+        mock_choice.delta = mock_delta
+        mock_chunk = Mock()
+        mock_chunk.choices = [mock_choice]
+        chunks.append(mock_chunk)
+    return chunks
+
+
+class TestOllamaNumCtxInjection:
+    """Tests verifying that num_ctx → options injection in chat() and stream_chat()."""
+
+    # ------------------------------------------------------------------
+    # chat() tests
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_chat_injects_options_num_ctx_for_ollama(self) -> None:
+        """chat() must pass options={'num_ctx': N} to litellm.completion for Ollama."""
+        provider = LiteLLMProvider(
+            provider="ollama",
+            api_key="",
+            model="qwen3:32b",
+            api_base="http://localhost:11434",
+            num_ctx=32768,
+        )
+
+        mock_response = _make_mock_litellm_response()
+
+        with patch("litellm.completion", return_value=mock_response) as mock_completion:
+            await provider.chat(messages=[{"role": "user", "content": "Hello"}])
+
+        call_kwargs = mock_completion.call_args[1]
+        assert "options" in call_kwargs, "options must be present in litellm.completion call"
+        assert call_kwargs["options"] == {"num_ctx": 32768}
+
+    @pytest.mark.asyncio
+    async def test_chat_num_ctx_not_injected_for_anthropic(self) -> None:
+        """chat() must NOT pass options= for non-Ollama providers (e.g. Anthropic)."""
+        provider = LiteLLMProvider(
+            provider="anthropic",
+            api_key="sk-ant-test",
+            model="claude-3-5-sonnet-20241022",
+            num_ctx=32768,  # num_ctx set but provider is not Ollama
+        )
+
+        mock_response = _make_mock_litellm_response()
+
+        with patch("litellm.completion", return_value=mock_response) as mock_completion:
+            await provider.chat(messages=[{"role": "user", "content": "Hello"}])
+
+        call_kwargs = mock_completion.call_args[1]
+        assert "options" not in call_kwargs, "options must NOT be forwarded to non-Ollama providers"
+
+    @pytest.mark.asyncio
+    async def test_chat_num_ctx_not_injected_for_openai(self) -> None:
+        """chat() must NOT pass options= for OpenAI provider."""
+        provider = LiteLLMProvider(
+            provider="openai",
+            api_key="sk-openai-test",
+            model="gpt-4-turbo-preview",
+            num_ctx=32768,  # num_ctx set but provider is OpenAI
+        )
+
+        mock_response = _make_mock_litellm_response()
+
+        with patch("litellm.completion", return_value=mock_response) as mock_completion:
+            await provider.chat(messages=[{"role": "user", "content": "Hello"}])
+
+        call_kwargs = mock_completion.call_args[1]
+        assert "options" not in call_kwargs, "options must NOT be forwarded to OpenAI provider"
+
+    @pytest.mark.asyncio
+    async def test_chat_num_ctx_none_skips_options_for_ollama(self) -> None:
+        """chat() must NOT inject options= when num_ctx is None (even for Ollama)."""
+        provider = LiteLLMProvider(
+            provider="ollama",
+            api_key="",
+            model="llama3.1:8b",
+            api_base="http://localhost:11434",
+            num_ctx=None,  # explicitly None — no override desired
+        )
+
+        mock_response = _make_mock_litellm_response()
+
+        with patch("litellm.completion", return_value=mock_response) as mock_completion:
+            await provider.chat(messages=[{"role": "user", "content": "Hello"}])
+
+        call_kwargs = mock_completion.call_args[1]
+        assert "options" not in call_kwargs, "options must not be injected when num_ctx is None"
+
+    @pytest.mark.asyncio
+    async def test_chat_num_ctx_value_is_passed_exactly(self) -> None:
+        """The exact num_ctx value is forwarded, not a default or rounded value."""
+        provider = LiteLLMProvider(
+            provider="ollama",
+            api_key="",
+            model="qwen3:32b",
+            api_base="http://localhost:11434",
+            num_ctx=65536,
+        )
+
+        mock_response = _make_mock_litellm_response()
+
+        with patch("litellm.completion", return_value=mock_response) as mock_completion:
+            await provider.chat(messages=[{"role": "user", "content": "Hello"}])
+
+        call_kwargs = mock_completion.call_args[1]
+        assert call_kwargs["options"]["num_ctx"] == 65536
+
+    # ------------------------------------------------------------------
+    # stream_chat() tests
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_stream_chat_injects_options_num_ctx_for_ollama(self) -> None:
+        """stream_chat() must pass options={'num_ctx': N} to litellm.completion for Ollama."""
+        provider = LiteLLMProvider(
+            provider="ollama",
+            api_key="",
+            model="qwen3:32b",
+            api_base="http://localhost:11434",
+            num_ctx=32768,
+        )
+
+        chunks = _make_mock_stream_chunks(["Hello"])
+
+        with patch("litellm.completion", return_value=iter(chunks)) as mock_completion:
+            tokens = [
+                t async for t in provider.stream_chat(messages=[{"role": "user", "content": "Hi"}])
+            ]
+
+        call_kwargs = mock_completion.call_args[1]
+        assert (
+            "options" in call_kwargs
+        ), "options must be present in streaming litellm.completion call"
+        assert call_kwargs["options"] == {"num_ctx": 32768}
+        assert tokens == ["Hello"]
+
+    @pytest.mark.asyncio
+    async def test_stream_chat_num_ctx_not_injected_for_anthropic(self) -> None:
+        """stream_chat() must NOT inject options= for non-Ollama providers."""
+        provider = LiteLLMProvider(
+            provider="anthropic",
+            api_key="sk-ant-test",
+            model="claude-3-5-sonnet-20241022",
+            num_ctx=32768,
+        )
+
+        chunks = _make_mock_stream_chunks(["Hi"])
+
+        with patch("litellm.completion", return_value=iter(chunks)) as mock_completion:
+            [t async for t in provider.stream_chat(messages=[{"role": "user", "content": "Hi"}])]
+
+        call_kwargs = mock_completion.call_args[1]
+        assert (
+            "options" not in call_kwargs
+        ), "options must NOT be forwarded to non-Ollama providers in stream_chat"
+
+    @pytest.mark.asyncio
+    async def test_stream_chat_num_ctx_none_skips_options_for_ollama(self) -> None:
+        """stream_chat() must NOT inject options= when num_ctx is None."""
+        provider = LiteLLMProvider(
+            provider="ollama",
+            api_key="",
+            model="llama3.1:8b",
+            api_base="http://localhost:11434",
+            num_ctx=None,
+        )
+
+        chunks = _make_mock_stream_chunks(["Hello"])
+
+        with patch("litellm.completion", return_value=iter(chunks)) as mock_completion:
+            [t async for t in provider.stream_chat(messages=[{"role": "user", "content": "Hi"}])]
+
+        call_kwargs = mock_completion.call_args[1]
+        assert (
+            "options" not in call_kwargs
+        ), "options must not be injected when num_ctx is None in stream_chat"
+
+    @pytest.mark.asyncio
+    async def test_stream_chat_passes_stream_true_to_litellm(self) -> None:
+        """stream_chat() must always pass stream=True to litellm.completion."""
+        provider = LiteLLMProvider(
+            provider="ollama",
+            api_key="",
+            model="llama3.1:8b",
+            api_base="http://localhost:11434",
+            num_ctx=32768,
+        )
+
+        chunks = _make_mock_stream_chunks(["token"])
+
+        with patch("litellm.completion", return_value=iter(chunks)) as mock_completion:
+            [t async for t in provider.stream_chat(messages=[{"role": "user", "content": "Hi"}])]
+
+        call_kwargs = mock_completion.call_args[1]
+        assert call_kwargs.get("stream") is True
+
+    # ------------------------------------------------------------------
+    # from_settings() integration — num_ctx wired correctly
+    # ------------------------------------------------------------------
+
+    def test_from_settings_passes_num_ctx_to_ollama_provider(self) -> None:
+        """from_settings() must forward ollama_num_ctx → LiteLLMProvider.num_ctx."""
+        settings = Mock(spec=LogAISettings)
+        settings.llm_provider = "ollama"
+        settings.ollama_base_url = "http://localhost:11434"
+        settings.ollama_model = "qwen3:32b"
+        settings.ollama_num_ctx = 65536
+
+        provider = cast(LiteLLMProvider, LiteLLMProvider.from_settings(settings))
+
+        assert provider.num_ctx == 65536
+
+    def test_from_settings_ollama_num_ctx_default(self) -> None:
+        """from_settings() passes the num_ctx value from settings (default 32768)."""
+        settings = Mock(spec=LogAISettings)
+        settings.llm_provider = "ollama"
+        settings.ollama_base_url = "http://localhost:11434"
+        settings.ollama_model = "llama3.1:8b"
+        settings.ollama_num_ctx = 32768  # the configured default
+
+        provider = cast(LiteLLMProvider, LiteLLMProvider.from_settings(settings))
+
+        assert provider.num_ctx == 32768
+
+    def test_num_ctx_defaults_to_none_when_not_provided(self) -> None:
+        """num_ctx defaults to None when not passed to the constructor."""
+        provider = LiteLLMProvider(
+            provider="ollama",
+            api_key="",
+            model="llama3.1:8b",
+            api_base="http://localhost:11434",
+        )
+        assert provider.num_ctx is None

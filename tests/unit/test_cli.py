@@ -719,3 +719,140 @@ class TestLogLevelIntegration:
         content = log_file.read_text()
         assert "should not appear" not in content
         assert "should appear" in content
+
+
+class TestMCPModeFlags:
+    """Test suite for --no-mcp and --use-mcp CLI flags.
+
+    Covers:
+    * Parser-level defaults (no_mcp and use_mcp are False when omitted)
+    * ``--no-mcp`` forces ``settings.use_mcp_tools = False`` regardless of default
+    * ``--use-mcp`` forces ``settings.use_mcp_tools = True``
+    * Neither flag → settings default (True as of Phase 3) is preserved
+    * ``--no-mcp`` wins when both flags are passed simultaneously
+    """
+
+    # ------------------------------------------------------------------ #
+    # Helpers                                                              #
+    # ------------------------------------------------------------------ #
+
+    @pytest.fixture
+    def mock_components(self) -> None:
+        """Mock all heavyweight components to avoid actual initialisation."""
+        with (
+            patch("logai.cli.CloudWatchDataSource"),
+            patch("logai.cli.LogSanitizer"),
+            patch("logai.cli.CacheManager"),
+            patch("logai.cli.ToolRegistry"),
+            patch("logai.cli.LiteLLMProvider"),
+            patch("logai.cli.LLMOrchestrator"),
+            patch("logai.cli.LogAIApp"),
+        ):
+            yield
+
+    def _base_env(self) -> None:
+        """Set the minimum environment variables required for settings validation."""
+        os.environ["LOGAI_ANTHROPIC_API_KEY"] = "sk-ant-test-key"
+        os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
+        os.environ["AWS_ACCESS_KEY_ID"] = "AKIATEST"
+        os.environ["AWS_SECRET_ACCESS_KEY"] = "secrettest"
+
+    def _run_main_with_argv(self, argv: list[str]):  # type: ignore[return]
+        """Run ``main()`` with the given argv and return the settings object used.
+
+        Patches ``get_settings`` so we can inspect the settings instance that
+        ``main()`` mutated, without relying on any real AWS/LLM connectivity.
+        """
+        from logai.config import LogAISettings
+
+        settings = LogAISettings()  # type: ignore[call-arg]
+        with (
+            patch("sys.argv", argv),
+            patch("logai.cli.get_settings", return_value=settings),
+            patch("sys.stdout", new_callable=StringIO),
+            patch("logai.cli.shutil.which", return_value="/usr/bin/uvx"),
+            patch("logai.cli.LogAIApp") as mock_app,
+        ):
+            mock_app.return_value.run.return_value = None
+            main()
+        return settings
+
+    # ------------------------------------------------------------------ #
+    # Parser-level smoke tests (no full main() invocation needed)         #
+    # ------------------------------------------------------------------ #
+
+    def test_no_mcp_defaults_to_false_in_parser(self) -> None:
+        """``args.no_mcp`` is False when ``--no-mcp`` is not supplied."""
+        from logai.cli import _build_parser
+
+        with patch("sys.argv", ["logai"]):
+            parser = _build_parser()
+            args = parser.parse_args()
+            assert args.no_mcp is False
+
+    def test_use_mcp_defaults_to_false_in_parser(self) -> None:
+        """``args.use_mcp`` is False when ``--use-mcp`` is not supplied."""
+        from logai.cli import _build_parser
+
+        with patch("sys.argv", ["logai"]):
+            parser = _build_parser()
+            args = parser.parse_args()
+            assert args.use_mcp is False
+
+    def test_no_mcp_flag_sets_arg_to_true(self) -> None:
+        """Passing ``--no-mcp`` sets ``args.no_mcp`` to True."""
+        from logai.cli import _build_parser
+
+        with patch("sys.argv", ["logai", "--no-mcp"]):
+            parser = _build_parser()
+            args = parser.parse_args()
+            assert args.no_mcp is True
+
+    def test_use_mcp_flag_sets_arg_to_true(self) -> None:
+        """Passing ``--use-mcp`` sets ``args.use_mcp`` to True."""
+        from logai.cli import _build_parser
+
+        with patch("sys.argv", ["logai", "--use-mcp"]):
+            parser = _build_parser()
+            args = parser.parse_args()
+            assert args.use_mcp is True
+
+    # ------------------------------------------------------------------ #
+    # Full main() integration: settings mutation                          #
+    # ------------------------------------------------------------------ #
+
+    def test_no_mcp_flag_disables_mcp_in_settings(
+        self, clean_env: None, mock_components: None
+    ) -> None:
+        """``--no-mcp`` sets ``settings.use_mcp_tools = False`` even though the default is True."""
+        self._base_env()
+        settings = self._run_main_with_argv(["logai", "--no-mcp"])
+        assert settings.use_mcp_tools is False
+
+    def test_use_mcp_flag_enables_mcp_in_settings(
+        self, clean_env: None, mock_components: None
+    ) -> None:
+        """``--use-mcp`` explicitly sets ``settings.use_mcp_tools = True``."""
+        # Force the env var to False so we can confirm --use-mcp overrides it.
+        self._base_env()
+        os.environ["LOGAI_USE_MCP_TOOLS"] = "false"
+        settings = self._run_main_with_argv(["logai", "--use-mcp"])
+        assert settings.use_mcp_tools is True
+
+    def test_no_flag_retains_default_true(self, clean_env: None, mock_components: None) -> None:
+        """When neither ``--no-mcp`` nor ``--use-mcp`` is passed, the default (True) is kept."""
+        self._base_env()
+        settings = self._run_main_with_argv(["logai"])
+        assert settings.use_mcp_tools is True
+
+    def test_no_mcp_wins_when_both_flags_provided(
+        self, clean_env: None, mock_components: None
+    ) -> None:
+        """``--no-mcp`` takes precedence over ``--use-mcp`` when both are supplied.
+
+        The CLI logic checks ``args.no_mcp`` first (``if/elif``), so ``--no-mcp``
+        always wins in this edge case.
+        """
+        self._base_env()
+        settings = self._run_main_with_argv(["logai", "--no-mcp", "--use-mcp"])
+        assert settings.use_mcp_tools is False

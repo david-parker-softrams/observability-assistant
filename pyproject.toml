@@ -46,6 +46,9 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "PyYAML>=6.0",
 
+    # MCP (Model Context Protocol) — upper-bound to avoid breaking changes in v2
+    "mcp>=1.0.0,<2.0.0",
+
     # Utilities
     "structlog>=24.1.0",
     "tenacity>=8.2.0",
@@ -103,7 +106,7 @@ strict_optional = true
 
 # Ignore missing imports for third-party libraries
 [[tool.mypy.overrides]]
-module = ["boto3.*", "botocore.*", "aiofiles.*", "textual.*", "litellm.*", "moto.*", "respx.*", "yaml"]
+module = ["boto3.*", "botocore.*", "aiofiles.*", "textual.*", "litellm.*", "moto.*", "respx.*", "yaml", "mcp.*"]
 ignore_missing_imports = true
 
 [tool.ruff]

@@ -56,6 +56,16 @@ class LogAISettings(BaseSettings):
         description="Ollama model to use (must support function calling)",
     )
 
+    ollama_num_ctx: int = Field(
+        default=32768,
+        description=(
+            "Ollama context window size (num_ctx). Overrides Ollama's default of 4096 to ensure "
+            "full prompt and tool definitions are processed."
+        ),
+        gt=0,
+        le=131072,
+    )
+
     # === GitHub Copilot Configuration ===
     github_copilot_model: str = Field(
         default="claude-opus-4.5",
@@ -476,6 +486,29 @@ class LogAISettings(BaseSettings):
     context_allocation_strategy: Literal["adaptive", "history-focused", "result-focused"] = Field(
         default="adaptive",
         description="Strategy for allocating context budget between history and results",
+    )
+
+    # === MCP (Model Context Protocol) Configuration ===
+    use_mcp_tools: bool = Field(
+        default=True,
+        description=(
+            "Use MCP server for CloudWatch tools instead of native boto3 tools. "
+            "Defaults to True as of Phase 3 — set to False (or use --no-mcp) to "
+            "fall back to the legacy native boto3 tools."
+        ),
+    )
+    mcp_server_command: str = Field(
+        default="uvx",
+        description="Command used to launch the MCP server subprocess",
+    )
+    mcp_server_args: list[str] = Field(
+        default_factory=lambda: ["awslabs.cloudwatch-mcp-server@latest"],
+        description=(
+            "Arguments passed to the MCP server launch command. "
+            "When overriding via environment variable (LOGAI_MCP_SERVER_ARGS), "
+            "the value must be a JSON array string, e.g. "
+            '\'["awslabs.cloudwatch-mcp-server@latest", "--verbose"]\''
+        ),
     )
 
     @field_validator("anthropic_api_key", "openai_api_key")

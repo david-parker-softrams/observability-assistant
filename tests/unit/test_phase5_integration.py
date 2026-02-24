@@ -46,6 +46,9 @@ def mock_settings(tmp_path):
     settings.tool_fetch_logs_default_limit = 100
     settings.tool_fetch_logs_max_limit = 1000
 
+    # MCP settings (Phase 1 — disabled by default in tests)
+    settings.use_mcp_tools = False
+
     return settings
 
 

@@ -256,6 +256,31 @@ If relevant, expand your search. Otherwise, proceed with your analysis.""",
         return base_prompt
 
 
+# Guidance injected into the system prompt when MCP tools are active.
+# Teaches the LLM the two-call CloudWatch Logs Insights pattern exposed by
+# the AWS CloudWatch MCP server (execute → poll results).
+_MCP_LOGS_INSIGHTS_GUIDANCE = """
+## CloudWatch Logs Insights (MCP Tools) — MANDATORY
+
+Any request to fetch, search, summarize, show, or analyze logs MUST use the two-step pattern below.
+NEVER say you lack a tool for this — these tools ARE available.
+
+### Two-step pattern
+1. Call `execute_log_insights_query` → args: `logGroupNames` (list), `startTime`, `endTime`, `queryString`
+2. Poll `get_logs_insight_query_results` with the `queryId` from step 1; repeat until status is "Complete"
+
+### Example queries
+- Summarize / show recent logs:
+  `fields @timestamp, @message | sort @timestamp desc | limit 100`
+- Show errors:
+  `fields @timestamp, @message | filter @message like /(?i)error/ | sort @timestamp desc | limit 50`
+- Pattern stats:
+  `fields @timestamp, @message | filter @message like /pattern/ | stats count() by bin(5m)`
+
+### Finding log groups
+Use `describe_log_groups` to list or search log groups — do NOT use list_log_groups (not available)."""
+
+
 class LLMOrchestrator:
     """
     Coordinates LLM interactions with tool execution.
@@ -353,7 +378,7 @@ DO NOT skip this step. DO NOT answer based on preview alone. DO NOT wait for use
 6. Fetch more chunks if needed (offset=100, limit=100, etc.)
 
 EXAMPLE:
-If fetch_logs returns {{"cached": true, "cache_id": "result_6d283cecb68018ad", "total_events": 100, "sample": [5 events]}},
+If a log query tool returns {{"cached": true, "cache_id": "result_6d283cecb68018ad", "total_events": 100, "sample": [5 events]}},
 your immediate next action MUST be calling fetch_cached_result_chunk, NOT providing analysis.
 
 The fetch_cached_result_chunk tool supports:
@@ -450,8 +475,13 @@ Current time: {current_time}
         """
         Get the system prompt with current context.
 
+        When MCP tools are active (``settings.use_mcp_tools`` is True), the
+        prompt is extended with guidance for the CloudWatch Logs Insights
+        two-call pattern so the LLM knows how to use the MCP-based tools.
+
         Returns:
-            Formatted system prompt including log group context
+            Formatted system prompt including log group context and, when
+            relevant, MCP-specific tool-usage guidance.
         """
         now = datetime.now(UTC)
 
@@ -459,15 +489,29 @@ Current time: {current_time}
         if self.log_group_manager and self.log_group_manager.is_ready:
             log_groups_context = self.log_group_manager.format_for_prompt()
         else:
-            log_groups_context = """## Log Groups
+            # Name the correct discovery tool based on which path is active.
+            # MCP mode exposes `describe_log_groups`; native mode exposes `list_log_groups`.
+            if self.settings.use_mcp_tools:
+                tool_hint = "`describe_log_groups`"
+            else:
+                tool_hint = "`list_log_groups`"
+            log_groups_context = f"""## Log Groups
 
-Log groups will be discovered via the `list_log_groups` tool.
+Log groups will be discovered via the {tool_hint} tool.
 Use this tool to find available log groups before querying logs."""
 
-        return self.SYSTEM_PROMPT.format(
+        prompt = self.SYSTEM_PROMPT.format(
             current_time=now.strftime("%Y-%m-%d %H:%M:%S UTC"),
             log_groups_context=log_groups_context,
         )
+
+        # Inject MCP-specific guidance only when the MCP path is active.
+        # The native boto3 path does not use Logs Insights, so this guidance
+        # must not appear there — it would mislead the LLM.
+        if self.settings.use_mcp_tools:
+            prompt = prompt + _MCP_LOGS_INSIGHTS_GUIDANCE
+
+        return prompt
 
     def register_tool_listener(self, callback: Callable[[Any], None]) -> None:
         """

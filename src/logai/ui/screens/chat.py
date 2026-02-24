@@ -17,6 +17,7 @@ from textual.widgets import Header, Input
 from logai.cache.manager import CacheManager
 from logai.config import get_settings
 from logai.core.orchestrator import LLMOrchestrator, ToolCallRecord
+from logai.providers.mcp.registry import register_mcp_tools
 from logai.ui.commands import CommandHandler
 from logai.ui.screens.context_viewer import ContextParser, ContextViewerScreen
 from logai.ui.widgets.input_box import ChatInput
@@ -37,6 +38,8 @@ from logai.ui.widgets.tool_sidebar import ToolCallsSidebar
 
 if TYPE_CHECKING:
     from logai.core.log_group_manager import LogGroupManager
+    from logai.providers.mcp.client import MCPClientManager
+    from logai.providers.mcp.sanitization import ResultProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +96,8 @@ class ChatScreen(Screen[None]):
         orchestrator: LLMOrchestrator,
         cache_manager: CacheManager,
         log_group_manager: "LogGroupManager | None" = None,
+        mcp_client: "MCPClientManager | None" = None,
+        result_processor: "ResultProcessor | None" = None,
     ) -> None:
         """
         Initialize chat screen.
@@ -101,11 +106,20 @@ class ChatScreen(Screen[None]):
             orchestrator: LLM orchestrator instance
             cache_manager: Cache manager instance
             log_group_manager: Optional log group manager instance
+            mcp_client: Optional unstarted MCP client manager.  When provided
+                alongside ``result_processor``, this screen will start the MCP
+                server in ``on_mount`` and register MCP tools into the
+                ``ToolRegistry``.  Lifecycle ownership stays with ``LogAIApp``,
+                which calls ``mcp_client.stop()`` in ``action_quit``.
+            result_processor: Optional MCP result post-processor.  Must be
+                supplied alongside ``mcp_client``.
         """
         super().__init__()
         self.orchestrator = orchestrator
         self.cache_manager = cache_manager
         self.log_group_manager = log_group_manager
+        self._mcp_client = mcp_client
+        self._result_processor = result_processor
         self.settings = get_settings()
         self.command_handler = CommandHandler(
             orchestrator, cache_manager, self.settings, self, log_group_manager
@@ -187,6 +201,20 @@ class ChatScreen(Screen[None]):
             chat_input = self.query_one(ChatInput)
             chat_input.focus()
 
+            # If an MCP client was provided (MCP mode), start it now inside
+            # Textual's own event loop via a worker so we never nest asyncio.run().
+            if self._mcp_client is not None and self._result_processor is not None:
+                # Disable input and surface a status message so the user knows
+                # why they cannot type yet.  The worker re-enables input once
+                # all MCP tools are registered (or on failure).  This prevents
+                # the race condition where a message sent during the ~9-second
+                # MCP startup window reaches the LLM with only 1 tool registered.
+                chat_input.disabled = True
+                status_footer = self.query_one(StatusFooter)
+                status_footer.set_status("Connecting to MCP server...")
+                logger.info("Chat input disabled while MCP client starts")
+                self._start_mcp_client()
+
             logger.info("ChatScreen mounted successfully")
 
         except Exception as e:
@@ -200,6 +228,72 @@ class ChatScreen(Screen[None]):
                 # If we can't even show the error, log it and re-raise
                 logger.critical("Failed to display error message to user", exc_info=True)
                 raise
+
+    @work(exclusive=False)
+    async def _start_mcp_client(self) -> None:
+        """
+        Start the MCP server subprocess and register MCP tools.
+
+        Runs as a Textual worker so it executes inside Textual's event loop —
+        avoiding the ``asyncio.run()`` nesting that caused the original crash.
+        If startup fails, the error is surfaced as a TUI notification and the
+        ``ToolRegistry`` retains whatever tools were registered before the TUI
+        launched (i.e. ``fetch_cached_result`` only).  The user can still
+        interact with the app; they'll just see tool-call errors until they
+        restart with ``--no-mcp``.
+        """
+        assert self._mcp_client is not None  # guarded by caller
+        assert self._result_processor is not None
+
+        try:
+            logger.info("Starting MCP client from ChatScreen worker")
+            await self._mcp_client.start()
+
+            mcp_tool_names = await register_mcp_tools(self._mcp_client, self._result_processor)
+            logger.info("Registered %d MCP tools: %s", len(mcp_tool_names), mcp_tool_names)
+
+            # Re-enable the chat input now that all MCP tools are registered.
+            # Safe to call directly because this is an async worker running in
+            # Textual's own event loop (not a thread worker).
+            chat_input = self.query_one(ChatInput)
+            chat_input.disabled = False
+            chat_input.focus()
+
+            status_footer = self.query_one(StatusFooter)
+            status_footer.set_status("Ready")
+            logger.info("Chat input re-enabled after MCP startup")
+
+            # Let the user know MCP is ready without cluttering the chat —
+            # an informational toast is unobtrusive.
+            self.notify(
+                f"MCP tools ready ({len(mcp_tool_names)} tools loaded)",
+                severity="information",
+                timeout=4,
+            )
+
+        except Exception as exc:
+            # Log the full traceback to file; show a concise message in the TUI.
+            logger.warning("MCP startup failed inside ChatScreen worker: %s", exc, exc_info=True)
+
+            # Re-enable the chat input even on failure — the user can still
+            # interact with the app, they just won't have MCP log tools.
+            try:
+                chat_input = self.query_one(ChatInput)
+                chat_input.disabled = False
+                chat_input.focus()
+
+                status_footer = self.query_one(StatusFooter)
+                status_footer.set_status("Ready (MCP unavailable)")
+                logger.info("Chat input re-enabled after MCP startup failure")
+            except Exception as ui_exc:
+                logger.warning("Failed to re-enable chat input after MCP failure: %s", ui_exc)
+
+            self.notify(
+                f"MCP server failed to start ({type(exc).__name__}). "
+                "See log file for details. Restart with --no-mcp to use native tools.",
+                severity="error",
+                timeout=10,
+            )
 
     @on(Input.Submitted)
     async def on_input_submitted(self, event: Input.Submitted) -> None:

@@ -14,6 +14,7 @@ Query your AWS CloudWatch logs using natural language. LogAI uses Large Language
 - 🎨 **Interactive TUI**: Beautiful terminal user interface built with Textual
 - 🔌 **Multiple LLM Providers**: Support for Anthropic Claude, OpenAI GPT, GitHub Copilot (25+ models), and Ollama (local models)
 - 📊 **AWS CloudWatch Integration**: Seamless integration with CloudWatch Logs
+- 🔗 **MCP-Powered Tools**: CloudWatch operations run via `awslabs.cloudwatch-mcp-server` (Model Context Protocol), providing access to CloudWatch Logs Insights and additional capabilities
 - 🛠️ **Tool Execution Sidebar**: Real-time visibility into agent tool execution
 - 🔄 **Agent Self-Direction**: Automatic retry with time range expansion on empty results
 
@@ -21,6 +22,7 @@ Query your AWS CloudWatch logs using natural language. LogAI uses Large Language
 
 - Python 3.11 or higher
 - AWS credentials with CloudWatch Logs read access
+- `uvx` (from the `uv` package manager) — required to run the MCP server (default tool provider)
 - One of the following:
   - API key for Anthropic Claude or OpenAI GPT
   - GitHub Copilot subscription (access to 25+ models)
@@ -41,6 +43,23 @@ pip install -e .
 # Or install with development dependencies
 pip install -e ".[dev]"
 ```
+
+### Install uvx (Required for MCP tools)
+
+LogAI uses the `awslabs.cloudwatch-mcp-server` via `uvx` as the default tool provider for CloudWatch operations. Install `uvx` before running LogAI:
+
+```bash
+# macOS (recommended)
+brew install uv
+
+# Or via pip
+pip install uv
+
+# Or via the official installer
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Once `uv` is installed, the `uvx` command is available. LogAI will automatically download and run `awslabs.cloudwatch-mcp-server` on first use — no manual installation of the MCP server is required.
 
 ### Configuration
 
@@ -227,6 +246,8 @@ LogAI v0.1.0
 |----------|-------------|---------|
 | `--aws-profile PROFILE` | AWS profile name for CloudWatch access | `--aws-profile prod` |
 | `--aws-region REGION` | AWS region for CloudWatch | `--aws-region us-west-2` |
+| `--use-mcp` | Use MCP server for CloudWatch tools (default) | `--use-mcp` |
+| `--no-mcp` | Use native (boto3-based) CloudWatch tools instead of MCP | `--no-mcp` |
 | `--version` | Display LogAI version | `--version` |
 | `--help` | Show help message and examples | `--help` |
 
@@ -257,6 +278,9 @@ Once LogAI is running, try these example queries:
 | `LOGAI_OPENAI_API_KEY` | OpenAI API key | - | If using OpenAI |
 | `LOGAI_OLLAMA_BASE_URL` | Ollama base URL | `http://localhost:11434` | If using Ollama |
 | `LOGAI_OLLAMA_MODEL` | Ollama model name | `llama3.1:8b` | If using Ollama |
+| `LOGAI_USE_MCP_TOOLS` | Enable MCP server for CloudWatch tools | `true` | No |
+| `LOGAI_MCP_SERVER_COMMAND` | Command used to launch the MCP server | `uvx` | No |
+| `LOGAI_MCP_SERVER_ARGS` | MCP server arguments as a JSON array | `["awslabs.cloudwatch-mcp-server"]` | No |
 | `LOGAI_PII_SANITIZATION_ENABLED` | Enable PII redaction | `true` | No |
 | `LOGAI_CACHE_DIR` | Cache directory path | `~/.logai/cache` | No |
 | `LOGAI_CACHE_MAX_SIZE_MB` | Max cache size (MB) | `500` | No |
@@ -269,6 +293,29 @@ Once LogAI is running, try these example queries:
 \* Either provide `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` or `AWS_PROFILE`
 
 **Note:** AWS-related environment variables can be overridden using command-line arguments. See [Command-Line Arguments](#-command-line-arguments) for details.
+
+#### MCP Tool Settings
+
+By default, LogAI routes CloudWatch operations (`list_log_groups`, `fetch_logs`, `search_logs`) through the `awslabs.cloudwatch-mcp-server` via MCP (Model Context Protocol). This provides access to CloudWatch Logs Insights — a more powerful query language than simple filter patterns — and additional capabilities such as metric and alarm queries.
+
+**`LOGAI_USE_MCP_TOOLS`** — Toggle MCP mode on or off.
+
+- **Default:** `true`
+- To disable MCP and use the native boto3-based tools instead, set this to `false` or pass `--no-mcp` at the command line.
+
+**`LOGAI_MCP_SERVER_COMMAND`** — The executable used to launch the MCP server subprocess.
+
+- **Default:** `uvx`
+- Only change this if you have a custom MCP server setup.
+
+**`LOGAI_MCP_SERVER_ARGS`** — Arguments passed to the MCP server command, as a JSON array.
+
+- **Default:** `["awslabs.cloudwatch-mcp-server"]`
+- Example to pin a specific version: `["awslabs.cloudwatch-mcp-server@0.2.0"]`
+
+> **Note on latency:** The MCP server uses CloudWatch Logs Insights queries (async: execute + poll for results), which adds a small amount of latency compared to the native `FilterLogEvents` API. Each log fetch requires two tool calls. This is normal and expected.
+
+> **Note on IAM permissions:** MCP mode requires additional IAM actions beyond basic CloudWatch Logs read access. See the [IAM Permissions](#-security--privacy) section for the full policy.
 
 #### Agent Behavior Settings
 
@@ -332,16 +379,27 @@ LogAI follows a layered architecture:
 ┌─────────────────────────────────────┐
 │   Integration Layer                 │
 │   - LiteLLM (Unified LLM API)       │
-│   - CloudWatch Data Source          │
+│   - MCP Client (default)            │
+│   - Native CloudWatch (--no-mcp)    │
 │   - SQLite Cache Manager            │
 └─────────────────────────────────────┘
                  ↓
 ┌─────────────────────────────────────┐
 │   External Services                 │
 │   - Anthropic/OpenAI APIs           │
+│   - awslabs.cloudwatch-mcp-server   │
+│     (subprocess via uvx)            │
 │   - AWS CloudWatch Logs             │
 └─────────────────────────────────────┘
 ```
+
+### MCP Integration
+
+By default, LogAI spawns a local `awslabs.cloudwatch-mcp-server` subprocess (via `uvx`) and communicates with it over stdio using the [Model Context Protocol](https://modelcontextprotocol.io/). CloudWatch operations — `list_log_groups`, `fetch_logs`, and `search_logs` — are routed through this MCP server, which uses the CloudWatch Logs Insights query API.
+
+The MCP server exposes all of its tools directly to the LLM, including additional capabilities not previously available in LogAI (such as metric queries and alarm status). PII sanitization and result caching are applied to MCP results by the application before they reach the LLM.
+
+To fall back to the original native boto3-based tools, use the `--no-mcp` flag or set `LOGAI_USE_MCP_TOOLS=false`.
 
 ## 🧪 Development
 
@@ -448,10 +506,50 @@ PII sanitization is **enabled by default** but can be disabled via `LOGAI_PII_SA
 - Cache is stored on your local filesystem only
 - No data is sent to external services except the configured LLM provider and AWS CloudWatch
 
+### MCP Subprocess Security
+
+When running in MCP mode (the default), LogAI spawns `awslabs.cloudwatch-mcp-server` as a local subprocess. Only a minimal set of environment variables is passed to the subprocess: AWS credentials and region. LLM API keys and other application secrets are **not** passed to the MCP subprocess.
+
+### IAM Permissions for MCP Mode
+
+MCP mode uses CloudWatch Logs Insights and requires additional IAM actions beyond basic log reading. Add the following to your IAM policy:
+
+```json
+{
+    "Effect": "Allow",
+    "Action": [
+        "logs:StartQuery",
+        "logs:GetQueryResults",
+        "logs:StopQuery",
+        "logs:DescribeLogGroups",
+        "logs:ListLogAnomalyDetectors",
+        "logs:ListAnomalies"
+    ],
+    "Resource": "*"
+}
+```
+
+If you use the optional metrics and alarms tools exposed by the MCP server, you will also need:
+
+```json
+{
+    "Effect": "Allow",
+    "Action": [
+        "cloudwatch:GetMetricData",
+        "cloudwatch:ListMetrics",
+        "cloudwatch:DescribeAlarms",
+        "cloudwatch:DescribeAlarmHistory"
+    ],
+    "Resource": "*"
+}
+```
+
+Users who prefer not to grant these additional permissions can opt out with `--no-mcp`.
+
 ## 🗺️ Roadmap
 
 ### MVP (Current)
-- ✅ AWS CloudWatch Logs integration
+- ✅ AWS CloudWatch Logs integration via MCP (`awslabs.cloudwatch-mcp-server`)
 - ✅ Pre-loaded log group context for faster queries
 - ✅ Anthropic Claude, OpenAI GPT, and GitHub Copilot support (25+ models)
 - ✅ Interactive TUI chat interface with tool execution sidebar
@@ -482,6 +580,7 @@ MIT License - see [LICENSE](LICENSE) file for details
 - Built with [Textual](https://textual.textualize.io/) for the amazing TUI framework
 - Powered by [LiteLLM](https://github.com/BerriAI/litellm) for unified LLM access
 - Uses [boto3](https://boto3.amazonaws.com/v1/documentation/api/latest/index.html) for AWS integration
+- CloudWatch tools powered by [awslabs/mcp](https://github.com/awslabs/mcp) via the [Model Context Protocol](https://modelcontextprotocol.io/)
 
 ## 📞 Support
 

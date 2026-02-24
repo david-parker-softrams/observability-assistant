@@ -1,4 +1,11 @@
-"""CloudWatch-specific LLM tools."""
+"""CloudWatch-specific LLM tools.
+
+.. deprecated::
+    These native boto3-based tools are deprecated as of Phase 3 of the MCP migration.
+    The MCP server (``awslabs.cloudwatch-mcp-server``) is now the default tool path.
+    These classes are retained only as a fallback for ``--no-mcp`` mode and for
+    users who cannot run the MCP server.  They will be removed in a future release.
+"""
 
 from typing import Any
 

@@ -142,7 +142,9 @@ class ContextBudgetTracker:
         # Base allocations (percentage of context window)
         safety_buffer_pct = 0.05  # 5% safety margin
         response_reserve_pct = 0.04  # 4% for response
-        system_prompt_pct = 0.05  # 5% for system prompt
+        system_prompt_pct = (
+            0.15  # 15% for system prompt (covers base prompt + log groups + MCP guidance)
+        )
 
         # Calculate fixed allocations
         safety_buffer = int(self.context_window * safety_buffer_pct)
