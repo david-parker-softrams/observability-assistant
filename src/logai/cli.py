@@ -508,13 +508,20 @@ async def register_mcp_tools(
     return registered
 
 
-async def _run_app(settings: LogAISettings) -> int:
+def _run_app(settings: LogAISettings) -> int:
     """
-    Async application entry point — initialises all components and runs the TUI.
+    Synchronous application entry point — initialises all components and runs the TUI.
 
-    Extracted into an async function so that MCP client startup/shutdown can
-    be managed with a clean ``try/finally`` block, guaranteeing the subprocess
-    is terminated even if an exception occurs during initialisation.
+    MCP client startup/shutdown is intentionally NOT performed here.  Textual's
+    ``App.run()`` creates and owns its own ``asyncio`` event loop, so any
+    ``await`` call before ``app.run()`` would require a *separate* loop via
+    ``asyncio.run()``.  Nesting two ``asyncio.run()`` calls crashes with:
+
+        RuntimeError: asyncio.run() cannot be called from a running event loop
+
+    Instead, an unstarted ``MCPClientManager`` (and its ``ResultProcessor``) are
+    passed into ``LogAIApp``, which starts MCP inside ``ChatScreen.on_mount``
+    using a Textual ``@work`` worker — safely within Textual's own event loop.
 
     Args:
         settings: Fully-resolved application settings.
@@ -526,8 +533,6 @@ async def _run_app(settings: LogAISettings) -> int:
     from logai.core.log_group_manager import LogGroupManager
     from logai.core.metrics import MetricsCollector
     from logai.tools.fetch_cached_result import FetchCachedResultTool
-
-    mcp_client = None
 
     try:
         # ----------------------------------------------------------------
@@ -549,8 +554,15 @@ async def _run_app(settings: LogAISettings) -> int:
         # ----------------------------------------------------------------
         # Tool registration — MCP path or native path
         # ----------------------------------------------------------------
+        # MCP tools (when enabled) are NOT registered here.  Registration
+        # requires an active MCP subprocess, which must be started inside
+        # Textual's event loop.  An unstarted MCPClientManager is passed to
+        # LogAIApp, which starts it in ChatScreen.on_mount via a @work worker.
+        mcp_client = None
+        result_processor = None
+
         if settings.use_mcp_tools:
-            # --- MCP path ---
+            # --- MCP path: build the client/processor but do NOT start ---
             from logai.providers.mcp.client import MCPClientManager
             from logai.providers.mcp.sanitization import ResultProcessor
 
@@ -560,36 +572,9 @@ async def _run_app(settings: LogAISettings) -> int:
                 args=settings.mcp_server_args,
                 env=mcp_env,
             )
-
-            try:
-                print("  Starting MCP server...", end="", flush=True)
-                await mcp_client.start()
-                print(" done")
-
-                result_processor = ResultProcessor(sanitizer=sanitizer, cache=cache_manager)
-                mcp_tool_names = await register_mcp_tools(mcp_client, result_processor)
-                print(f"✓ Registered {len(mcp_tool_names)} MCP tools")
-
-            except Exception as exc:
-                # MCP startup failed — fall back to native tools.
-                print(f"\n⚠ MCP server failed to start: {exc}", file=sys.stderr)
-                print("  Falling back to native CloudWatch tools.", file=sys.stderr)
-                print("  Use --no-mcp to suppress this message.", file=sys.stderr)
-                logger.warning("MCP startup failed, falling back to native tools: %s", exc)
-                settings.use_mcp_tools = False
-                # Ensure the partially-started client is cleaned up.
-                try:
-                    await mcp_client.stop()
-                except Exception:
-                    pass
-                mcp_client = None
-                # Clear any partially-registered MCP tools so the LLM is not
-                # presented with a mixed toolset (some MCP, some native).
-                ToolRegistry.clear()
-                # Register native tools below.
-                _register_native_cloudwatch_tools(datasource, sanitizer, settings, cache_manager)
+            result_processor = ResultProcessor(sanitizer=sanitizer, cache=cache_manager)
         else:
-            # --- Native path (legacy fallback — used when --no-mcp is passed) ---
+            # --- Native path (--no-mcp or MCP unavailable): register immediately ---
             _register_native_cloudwatch_tools(datasource, sanitizer, settings, cache_manager)
 
         # FetchCachedResultTool is always registered natively — it is application-
@@ -602,7 +587,8 @@ async def _run_app(settings: LogAISettings) -> int:
         )
 
         # ----------------------------------------------------------------
-        # Pre-load log groups
+        # Pre-load log groups (sync wrapper around the async call, safe here
+        # because Textual's event loop has NOT been started yet)
         # ----------------------------------------------------------------
         log_group_manager = LogGroupManager(datasource)
 
@@ -610,7 +596,7 @@ async def _run_app(settings: LogAISettings) -> int:
             print(f"\r  {message}", end="", flush=True)
 
         print("  Loading log groups from AWS...", end="", flush=True)
-        load_result = await log_group_manager.load_all(progress_callback=show_progress)
+        load_result = asyncio.run(log_group_manager.load_all(progress_callback=show_progress))
 
         if load_result.success:
             print(
@@ -639,7 +625,16 @@ async def _run_app(settings: LogAISettings) -> int:
         print("✓ All components initialized")
         print("\nStarting TUI...\n")
 
-        app = LogAIApp(orchestrator, cache_manager, log_group_manager)
+        # Pass the unstarted MCP client (and its result processor) into the
+        # app.  LogAIApp will forward them to ChatScreen, which starts the
+        # MCP server asynchronously inside on_mount.
+        app = LogAIApp(
+            orchestrator,
+            cache_manager,
+            log_group_manager,
+            mcp_client=mcp_client,
+            result_processor=result_processor,
+        )
         app.run()
 
         return 0
@@ -650,14 +645,6 @@ async def _run_app(settings: LogAISettings) -> int:
 
         traceback.print_exc()
         return 1
-
-    finally:
-        # Always stop the MCP server subprocess cleanly on exit, even on error.
-        if mcp_client is not None:
-            try:
-                await mcp_client.stop()
-            except Exception:
-                logger.debug("Error stopping MCP client during shutdown", exc_info=True)
 
 
 def _register_native_cloudwatch_tools(
@@ -811,7 +798,7 @@ def main() -> int:
         print("✓ Tool Mode: Native boto3 (legacy — use --use-mcp to enable MCP)")
     print("\nInitializing components...")
 
-    return asyncio.run(_run_app(settings))
+    return _run_app(settings)
 
 
 if __name__ == "__main__":

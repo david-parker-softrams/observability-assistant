@@ -13,6 +13,8 @@ from logai.ui.screens.chat import ChatScreen
 
 if TYPE_CHECKING:
     from logai.core.log_group_manager import LogGroupManager
+    from logai.providers.mcp.client import MCPClientManager
+    from logai.providers.mcp.sanitization import ResultProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +34,8 @@ class LogAIApp(App[None]):
         orchestrator: LLMOrchestrator,
         cache_manager: CacheManager,
         log_group_manager: "LogGroupManager | None" = None,
+        mcp_client: "MCPClientManager | None" = None,
+        result_processor: "ResultProcessor | None" = None,
     ) -> None:
         """
         Initialize LogAI application.
@@ -40,6 +44,12 @@ class LogAIApp(App[None]):
             orchestrator: LLM orchestrator instance
             cache_manager: Cache manager instance
             log_group_manager: Optional log group manager instance
+            mcp_client: Optional unstarted MCP client manager.  When provided
+                (and ``result_processor`` is also given), ``ChatScreen`` will
+                start the MCP server inside its ``on_mount`` worker and register
+                MCP tools into the ``ToolRegistry``.
+            result_processor: Optional MCP result post-processor (sanitization,
+                caching).  Must be supplied alongside ``mcp_client``.
 
         Raises:
             FileNotFoundError: If CSS file does not exist
@@ -48,6 +58,8 @@ class LogAIApp(App[None]):
         self.orchestrator = orchestrator
         self.cache_manager = cache_manager
         self.log_group_manager = log_group_manager
+        self.mcp_client = mcp_client
+        self.result_processor = result_processor
 
         # Validate CSS file exists after initialization
         try:
@@ -70,6 +82,8 @@ class LogAIApp(App[None]):
                 orchestrator=self.orchestrator,
                 cache_manager=self.cache_manager,
                 log_group_manager=self.log_group_manager,
+                mcp_client=self.mcp_client,
+                result_processor=self.result_processor,
             )
         )
 
@@ -84,4 +98,13 @@ class LogAIApp(App[None]):
             logger.error(f"Error during shutdown: {e}", exc_info=True)
             # Still exit even if cleanup fails
         finally:
+            # Stop the MCP server subprocess if one was started.  This is a
+            # no-op if mcp_client is None (native-tools mode) or if start()
+            # was never called (e.g. the TUI exited before on_mount finished).
+            if self.mcp_client is not None:
+                try:
+                    await self.mcp_client.stop()
+                    logger.info("MCP client stopped")
+                except Exception as e:
+                    logger.warning("Error stopping MCP client during shutdown: %s", e)
             self.exit()
