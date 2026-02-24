@@ -274,6 +274,7 @@ class TestLiteLLMProvider:
         settings.llm_provider = "ollama"
         settings.ollama_base_url = "http://localhost:11434"
         settings.ollama_model = "llama3.1:8b"
+        settings.ollama_num_ctx = 32768
 
         provider = cast(LiteLLMProvider, LiteLLMProvider.from_settings(settings))
 
@@ -281,6 +282,7 @@ class TestLiteLLMProvider:
         assert provider.model == "llama3.1:8b"
         assert provider.api_base == "http://localhost:11434"
         assert provider.api_key == ""
+        assert provider.num_ctx == 32768
 
     def test_ollama_model_name(self):
         """Test Ollama model name formatting."""

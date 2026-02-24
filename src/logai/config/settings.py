@@ -56,6 +56,16 @@ class LogAISettings(BaseSettings):
         description="Ollama model to use (must support function calling)",
     )
 
+    ollama_num_ctx: int = Field(
+        default=32768,
+        description=(
+            "Ollama context window size (num_ctx). Overrides Ollama's default of 4096 to ensure "
+            "full prompt and tool definitions are processed."
+        ),
+        gt=0,
+        le=131072,
+    )
+
     # === GitHub Copilot Configuration ===
     github_copilot_model: str = Field(
         default="claude-opus-4.5",

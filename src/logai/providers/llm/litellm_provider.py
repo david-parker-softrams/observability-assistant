@@ -77,6 +77,7 @@ class LiteLLMProvider(BaseLLMProvider):
         temperature: float = 0.7,
         max_tokens: int | None = None,
         api_base: str | None = None,
+        num_ctx: int | None = None,
     ):
         """
         Initialize LiteLLM provider.
@@ -88,6 +89,8 @@ class LiteLLMProvider(BaseLLMProvider):
             temperature: Sampling temperature (0.0 to 1.0)
             max_tokens: Maximum tokens to generate (None for default)
             api_base: Base URL for API (used by Ollama)
+            num_ctx: Ollama context window size. Overrides Ollama's default of 4096 tokens so that
+                     the full prompt (including tool definitions) is never silently truncated.
         """
         self.provider = provider
         self.api_key = api_key
@@ -95,6 +98,7 @@ class LiteLLMProvider(BaseLLMProvider):
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.api_base = api_base
+        self.num_ctx = num_ctx
 
         # Set API key in environment for litellm
         if provider == "anthropic":
@@ -132,6 +136,7 @@ class LiteLLMProvider(BaseLLMProvider):
                 api_key="",  # Ollama doesn't need API key
                 model=settings.ollama_model,
                 api_base=settings.ollama_base_url,
+                num_ctx=settings.ollama_num_ctx,
             )
         elif settings.llm_provider == "github-copilot":
             # Import here to avoid circular dependency
@@ -209,6 +214,12 @@ class LiteLLMProvider(BaseLLMProvider):
 
             if self.max_tokens:
                 params["max_tokens"] = self.max_tokens
+
+            # Pass num_ctx to Ollama to override the default 4096-token context window.
+            # Without this, Ollama silently truncates prompts even when the model supports
+            # a larger context window (e.g. qwen3:32b supports 32768 tokens).
+            if self.provider == "ollama" and self.num_ctx:
+                params["options"] = {"num_ctx": self.num_ctx}
 
             # Only send tools if the model supports them
             if tools and self._supports_tools():
@@ -301,6 +312,12 @@ class LiteLLMProvider(BaseLLMProvider):
 
             if self.max_tokens:
                 params["max_tokens"] = self.max_tokens
+
+            # Pass num_ctx to Ollama to override the default 4096-token context window.
+            # Without this, Ollama silently truncates prompts even when the model supports
+            # a larger context window (e.g. qwen3:32b supports 32768 tokens).
+            if self.provider == "ollama" and self.num_ctx:
+                params["options"] = {"num_ctx": self.num_ctx}
 
             # Only send tools if the model supports them
             if tools and self._supports_tools():

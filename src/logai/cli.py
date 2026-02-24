@@ -278,6 +278,19 @@ For more information, visit: https://github.com/logai/logai
         ),
     )
 
+    parser.add_argument(
+        "--ollama-num-ctx",
+        type=int,
+        default=None,
+        help=(
+            "Override the Ollama context window size (num_ctx). "
+            "Defaults to 32768 when using Ollama (overrides Ollama's built-in default of 4096). "
+            "Increase for larger prompts/tool definitions; decrease to reduce VRAM usage. "
+            "Ignored for non-Ollama providers. (overrides LOGAI_OLLAMA_NUM_CTX)"
+        ),
+        metavar="TOKENS",
+    )
+
     # Add subparsers for commands
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
@@ -739,6 +752,10 @@ def main() -> int:
             settings.use_mcp_tools = True
         # If neither flag is given, settings.use_mcp_tools retains its value from
         # the environment variable or the default (True as of Phase 3).
+
+        # Override Ollama context window if explicitly provided via CLI.
+        if args.ollama_num_ctx is not None:
+            settings.ollama_num_ctx = args.ollama_num_ctx
 
         settings.validate_required_credentials()
         settings.ensure_cache_dir_exists()
