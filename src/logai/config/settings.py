@@ -478,6 +478,29 @@ class LogAISettings(BaseSettings):
         description="Strategy for allocating context budget between history and results",
     )
 
+    # === MCP (Model Context Protocol) Configuration ===
+    use_mcp_tools: bool = Field(
+        default=True,
+        description=(
+            "Use MCP server for CloudWatch tools instead of native boto3 tools. "
+            "Defaults to True as of Phase 3 — set to False (or use --no-mcp) to "
+            "fall back to the legacy native boto3 tools."
+        ),
+    )
+    mcp_server_command: str = Field(
+        default="uvx",
+        description="Command used to launch the MCP server subprocess",
+    )
+    mcp_server_args: list[str] = Field(
+        default=["awslabs.cloudwatch-mcp-server@latest"],
+        description=(
+            "Arguments passed to the MCP server launch command. "
+            "When overriding via environment variable (LOGAI_MCP_SERVER_ARGS), "
+            "the value must be a JSON array string, e.g. "
+            '\'["awslabs.cloudwatch-mcp-server@latest", "--verbose"]\''
+        ),
+    )
+
     @field_validator("anthropic_api_key", "openai_api_key")
     @classmethod
     def validate_api_key_format(cls, v: str | None) -> str | None:

@@ -446,12 +446,33 @@ Current time: {current_time}
 
         logger.info("LLM Orchestrator initialized with context management")
 
+    # Guidance injected into the system prompt when MCP tools are active.
+    # Teaches the LLM the two-call CloudWatch Logs Insights pattern exposed by
+    # the AWS CloudWatch MCP server (execute → poll results).
+    _MCP_LOGS_INSIGHTS_GUIDANCE = """
+## CloudWatch Logs Insights (MCP Tools)
+
+When querying CloudWatch logs, use the two-step CloudWatch Logs Insights pattern:
+1. Call `execute_log_insights_query` with: `logGroupNames` (list), `startTime`, `endTime`, `queryString`
+2. Call `get_logs_insight_query_results` with the `queryId` returned from step 1
+
+Logs Insights query syntax examples:
+  - `fields @timestamp, @message | filter @message like /ERROR/ | sort @timestamp desc | limit 100`
+  - `fields @timestamp, @message | filter @message like /pattern/ | stats count() by bin(5m)`
+
+Use `describe_log_groups` to find available log groups."""
+
     def _get_system_prompt(self) -> str:
         """
         Get the system prompt with current context.
 
+        When MCP tools are active (``settings.use_mcp_tools`` is True), the
+        prompt is extended with guidance for the CloudWatch Logs Insights
+        two-call pattern so the LLM knows how to use the MCP-based tools.
+
         Returns:
-            Formatted system prompt including log group context
+            Formatted system prompt including log group context and, when
+            relevant, MCP-specific tool-usage guidance.
         """
         now = datetime.now(UTC)
 
@@ -459,15 +480,29 @@ Current time: {current_time}
         if self.log_group_manager and self.log_group_manager.is_ready:
             log_groups_context = self.log_group_manager.format_for_prompt()
         else:
-            log_groups_context = """## Log Groups
+            # Name the correct discovery tool based on which path is active.
+            # MCP mode exposes `describe_log_groups`; native mode exposes `list_log_groups`.
+            if self.settings.use_mcp_tools:
+                tool_hint = "`describe_log_groups`"
+            else:
+                tool_hint = "`list_log_groups`"
+            log_groups_context = f"""## Log Groups
 
-Log groups will be discovered via the `list_log_groups` tool.
+Log groups will be discovered via the {tool_hint} tool.
 Use this tool to find available log groups before querying logs."""
 
-        return self.SYSTEM_PROMPT.format(
+        prompt = self.SYSTEM_PROMPT.format(
             current_time=now.strftime("%Y-%m-%d %H:%M:%S UTC"),
             log_groups_context=log_groups_context,
         )
+
+        # Inject MCP-specific guidance only when the MCP path is active.
+        # The native boto3 path does not use Logs Insights, so this guidance
+        # must not appear there — it would mislead the LLM.
+        if self.settings.use_mcp_tools:
+            prompt = prompt + self._MCP_LOGS_INSIGHTS_GUIDANCE
+
+        return prompt
 
     def register_tool_listener(self, callback: Callable[[Any], None]) -> None:
         """

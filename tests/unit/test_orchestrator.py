@@ -49,6 +49,9 @@ def mock_settings(tmp_path):
     settings.orchestrator_retry_delays = "1.0,2.0,4.0"
     settings.orchestrator_retry_delays_list = [1.0, 2.0, 4.0]
 
+    # MCP settings (Phase 1 — disabled by default in tests)
+    settings.use_mcp_tools = False
+
     return settings
 
 
@@ -112,6 +115,9 @@ def create_mock_settings(**overrides):
     settings.emergency_prune_threshold = 0.95
     settings.orchestrator_retry_delays = "1.0,2.0,4.0"
     settings.orchestrator_retry_delays_list = [1.0, 2.0, 4.0]
+
+    # MCP settings (Phase 1 — disabled by default in tests)
+    settings.use_mcp_tools = False
 
     # Apply overrides
     for key, value in overrides.items():

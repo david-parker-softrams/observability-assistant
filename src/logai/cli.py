@@ -3,8 +3,11 @@
 import argparse
 import asyncio
 import logging
+import os
+import shutil
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from logai import __version__
 from logai.cache.manager import CacheManager
@@ -16,6 +19,12 @@ from logai.core.tools.registry import ToolRegistry
 from logai.providers.datasources.cloudwatch import CloudWatchDataSource
 from logai.providers.llm.litellm_provider import LiteLLMProvider
 from logai.ui.app import LogAIApp
+
+if TYPE_CHECKING:
+    from logai.providers.mcp.client import MCPClientManager
+    from logai.providers.mcp.sanitization import ResultProcessor
+
+logger = logging.getLogger(__name__)
 
 # Valid log levels accepted by --loglevel and LOGAI_LOG_LEVEL
 # CRITICAL intentionally omitted — no user scenario requires suppressing ERROR but showing CRITICAL
@@ -247,6 +256,28 @@ For more information, visit: https://github.com/logai/logai
         help="Path to log file (default: ~/.logai/logs/logai.log)",
     )
 
+    parser.add_argument(
+        "--use-mcp",
+        action="store_true",
+        default=False,
+        help=(
+            "Use the AWS CloudWatch MCP server for CloudWatch tools (now the default). "
+            "This flag is a no-op when LOGAI_USE_MCP_TOOLS=true (the default). "
+            "Requires 'uvx' (from the 'uv' package manager) to be on PATH. "
+            "Falls back to native boto3 tools automatically if 'uvx' is not found."
+        ),
+    )
+
+    parser.add_argument(
+        "--no-mcp",
+        action="store_true",
+        default=False,
+        help=(
+            "Disable the MCP server and use the legacy native boto3 CloudWatch tools instead. "
+            "Useful if 'uvx' is unavailable or for troubleshooting MCP connectivity issues."
+        ),
+    )
+
     # Add subparsers for commands
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
@@ -364,6 +395,302 @@ async def handle_auth_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def build_mcp_env(settings: LogAISettings) -> dict[str, str]:
+    """
+    Build the environment dictionary for the MCP server subprocess.
+
+    Uses an explicit allowlist rather than inheriting the full parent
+    environment.  This prevents LLM API keys (``LOGAI_ANTHROPIC_API_KEY``,
+    ``LOGAI_OPENAI_API_KEY``, etc.) and other sensitive credentials from
+    leaking into the MCP server subprocess.
+
+    The allowlist includes:
+    - POSIX/macOS essentials so ``uvx`` and subprocess tools can locate
+      binaries and write temporary files (``PATH``, ``HOME``, ``USER``,
+      ``TMPDIR``/``TEMP``/``TMP``).
+    - All AWS credential/configuration variables the MCP server needs.
+    - ``FASTMCP_LOG_LEVEL`` (set explicitly below).
+
+    AWS profile and region are then overlaid from ``settings`` so that
+    CLI flags (``--aws-profile``, ``--aws-region``) are honoured.
+
+    Args:
+        settings: Application settings containing AWS profile/region.
+
+    Returns:
+        A filtered environment dictionary suitable for passing to
+        ``StdioServerParameters(env=...)``.
+    """
+    # Keys that the MCP subprocess is allowed to inherit from the parent env.
+    # Everything else — including LLM API keys — is excluded.
+    _ALLOWED_ENV_KEYS = {
+        # Shell / OS essentials
+        "PATH",
+        "HOME",
+        "USER",
+        "TMPDIR",
+        "TEMP",
+        "TMP",
+        # AWS credentials and configuration
+        "AWS_DEFAULT_REGION",
+        "AWS_REGION",
+        "AWS_PROFILE",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "AWS_ROLE_ARN",
+        "AWS_WEB_IDENTITY_TOKEN_FILE",
+        # MCP server logging (set explicitly below)
+        "FASTMCP_LOG_LEVEL",
+    }
+
+    env = {k: v for k, v in os.environ.items() if k in _ALLOWED_ENV_KEYS}
+
+    # Overlay AWS settings from LogAI config so CLI flags take precedence
+    # over whatever happens to be in the ambient environment.
+    if settings.aws_profile:
+        env["AWS_PROFILE"] = settings.aws_profile
+    if settings.aws_region:
+        # Use the canonical variable name that the AWS SDK reads by default.
+        env["AWS_DEFAULT_REGION"] = settings.aws_region
+
+    # Keep MCP server logs quiet so they don't interfere with our TUI output.
+    env["FASTMCP_LOG_LEVEL"] = "ERROR"
+
+    return env
+
+
+async def register_mcp_tools(
+    mcp_client: "MCPClientManager",
+    result_processor: "ResultProcessor",
+    exclude_tools: set[str] | None = None,
+) -> list[str]:
+    """
+    Discover MCP tools and register them in the ``ToolRegistry``.
+
+    Fetches the tool list from the connected MCP server, wraps each tool
+    in an ``MCPToolAdapter``, and registers it.  Tools whose names appear
+    in ``exclude_tools`` are skipped (reserved for future use when a native
+    tool should take precedence over its MCP counterpart).
+
+    Args:
+        mcp_client: An already-connected ``MCPClientManager``.
+        result_processor: Post-processing pipeline (sanitization, etc.)
+                          applied to every MCP tool result.
+        exclude_tools: Optional set of MCP tool names to skip.
+
+    Returns:
+        List of registered MCP tool names.
+    """
+    from logai.providers.mcp.tool_adapter import MCPToolAdapter
+
+    exclude = exclude_tools or set()
+    mcp_tools = await mcp_client.list_tools()
+    registered: list[str] = []
+
+    for tool_def in mcp_tools:
+        tool_name: str = tool_def["name"]
+        if tool_name in exclude:
+            logger.info("Skipping MCP tool '%s' (excluded)", tool_name)
+            continue
+
+        adapter = MCPToolAdapter(
+            mcp_client=mcp_client,
+            tool_name=tool_name,
+            tool_description=tool_def["description"],
+            tool_parameters=tool_def["parameters"],
+            result_processor=result_processor,
+        )
+        ToolRegistry.register(adapter)
+        registered.append(tool_name)
+
+    logger.info("Registered %d MCP tools: %s", len(registered), registered)
+    return registered
+
+
+async def _run_app(settings: LogAISettings) -> int:
+    """
+    Async application entry point — initialises all components and runs the TUI.
+
+    Extracted into an async function so that MCP client startup/shutdown can
+    be managed with a clean ``try/finally`` block, guaranteeing the subprocess
+    is terminated even if an exception occurs during initialisation.
+
+    Args:
+        settings: Fully-resolved application settings.
+
+    Returns:
+        Integer exit code (0 = success, 1 = failure).
+    """
+    from logai.core.context.result_cache import ResultCacheManager
+    from logai.core.log_group_manager import LogGroupManager
+    from logai.core.metrics import MetricsCollector
+    from logai.tools.fetch_cached_result import FetchCachedResultTool
+
+    mcp_client = None
+
+    try:
+        # ----------------------------------------------------------------
+        # Core components (always initialised regardless of tool mode)
+        # ----------------------------------------------------------------
+        datasource = CloudWatchDataSource(settings)
+        sanitizer = LogSanitizer(enabled=settings.pii_sanitization_enabled)
+        cache_manager = CacheManager(settings)
+        metrics_collector = MetricsCollector()
+
+        result_cache = ResultCacheManager(
+            cache_dir=settings.cache_dir / "results",
+            ttl_seconds=getattr(settings, "cache_ttl_seconds", 3600),
+            max_size_mb=100,
+            sample_event_count=settings.cache_sample_event_count,
+            metrics_collector=metrics_collector,
+        )
+
+        # ----------------------------------------------------------------
+        # Tool registration — MCP path or native path
+        # ----------------------------------------------------------------
+        if settings.use_mcp_tools:
+            # --- MCP path ---
+            from logai.providers.mcp.client import MCPClientManager
+            from logai.providers.mcp.sanitization import ResultProcessor
+
+            mcp_env = build_mcp_env(settings)
+            mcp_client = MCPClientManager(
+                command=settings.mcp_server_command,
+                args=settings.mcp_server_args,
+                env=mcp_env,
+            )
+
+            try:
+                print("  Starting MCP server...", end="", flush=True)
+                await mcp_client.start()
+                print(" done")
+
+                result_processor = ResultProcessor(sanitizer=sanitizer, cache=cache_manager)
+                mcp_tool_names = await register_mcp_tools(mcp_client, result_processor)
+                print(f"✓ Registered {len(mcp_tool_names)} MCP tools")
+
+            except Exception as exc:
+                # MCP startup failed — fall back to native tools.
+                print(f"\n⚠ MCP server failed to start: {exc}", file=sys.stderr)
+                print("  Falling back to native CloudWatch tools.", file=sys.stderr)
+                print("  Use --no-mcp to suppress this message.", file=sys.stderr)
+                logger.warning("MCP startup failed, falling back to native tools: %s", exc)
+                settings.use_mcp_tools = False
+                # Ensure the partially-started client is cleaned up.
+                try:
+                    await mcp_client.stop()
+                except Exception:
+                    pass
+                mcp_client = None
+                # Clear any partially-registered MCP tools so the LLM is not
+                # presented with a mixed toolset (some MCP, some native).
+                ToolRegistry.clear()
+                # Register native tools below.
+                _register_native_cloudwatch_tools(datasource, sanitizer, settings, cache_manager)
+        else:
+            # --- Native path (legacy fallback — used when --no-mcp is passed) ---
+            _register_native_cloudwatch_tools(datasource, sanitizer, settings, cache_manager)
+
+        # FetchCachedResultTool is always registered natively — it is application-
+        # specific and has no MCP equivalent (design §4.4).
+        ToolRegistry.register(
+            FetchCachedResultTool(
+                result_cache=result_cache,
+                metrics_collector=metrics_collector,
+            )
+        )
+
+        # ----------------------------------------------------------------
+        # Pre-load log groups
+        # ----------------------------------------------------------------
+        log_group_manager = LogGroupManager(datasource)
+
+        def show_progress(count: int, message: str) -> None:
+            print(f"\r  {message}", end="", flush=True)
+
+        print("  Loading log groups from AWS...", end="", flush=True)
+        load_result = await log_group_manager.load_all(progress_callback=show_progress)
+
+        if load_result.success:
+            print(
+                f"\r✓ Found {load_result.count} log groups ({load_result.duration_ms}ms)          "
+            )
+        else:
+            print(f"\r⚠ Failed to load log groups: {load_result.error_message}          ")
+            print("  Agent will discover log groups via tools")
+
+        # ----------------------------------------------------------------
+        # LLM provider + orchestrator
+        # ----------------------------------------------------------------
+        llm_provider = LiteLLMProvider.from_settings(settings)
+
+        orchestrator = LLMOrchestrator(
+            llm_provider=llm_provider,
+            tool_registry=ToolRegistry,
+            sanitizer=sanitizer,
+            settings=settings,
+            cache=cache_manager,
+            metrics_collector=metrics_collector,
+            log_group_manager=log_group_manager,
+            result_cache=result_cache,
+        )
+
+        print("✓ All components initialized")
+        print("\nStarting TUI...\n")
+
+        app = LogAIApp(orchestrator, cache_manager, log_group_manager)
+        app.run()
+
+        return 0
+
+    except Exception as exc:
+        print(f"❌ Failed to initialize: {exc}", file=sys.stderr)
+        import traceback
+
+        traceback.print_exc()
+        return 1
+
+    finally:
+        # Always stop the MCP server subprocess cleanly on exit, even on error.
+        if mcp_client is not None:
+            try:
+                await mcp_client.stop()
+            except Exception:
+                logger.debug("Error stopping MCP client during shutdown", exc_info=True)
+
+
+def _register_native_cloudwatch_tools(
+    datasource: CloudWatchDataSource,
+    sanitizer: LogSanitizer,
+    settings: LogAISettings,
+    cache_manager: CacheManager,
+) -> None:
+    """
+    Register the native boto3-based CloudWatch tools in the ``ToolRegistry``.
+
+    .. deprecated::
+        The native boto3 tools are deprecated as of Phase 3 of the MCP migration.
+        MCP tools are now the default path. This function is retained only as the
+        fallback registered when MCP startup fails or when ``--no-mcp`` is passed.
+        It will be removed in a future release once the MCP path is fully proven.
+
+    Extracted into a helper so it can be called from both the ``--no-mcp`` path
+    and the MCP startup-failure fallback path without code duplication.
+
+    Args:
+        datasource: CloudWatch data source.
+        sanitizer: PII sanitizer.
+        settings: Application settings.
+        cache_manager: Query-level cache.
+    """
+    from logai.core.tools.cloudwatch_tools import FetchLogsTool, ListLogGroupsTool, SearchLogsTool
+
+    ToolRegistry.register(ListLogGroupsTool(datasource, settings, cache=cache_manager))
+    ToolRegistry.register(FetchLogsTool(datasource, sanitizer, settings, cache=cache_manager))
+    ToolRegistry.register(SearchLogsTool(datasource, sanitizer, settings, cache=cache_manager))
+
+
 def main() -> int:
     """Main CLI entry point."""
     parser = _build_parser()
@@ -416,6 +743,15 @@ def main() -> int:
         if args.aws_region is not None:
             settings.aws_region = args.aws_region
 
+        # Apply MCP mode flags to settings (CLI takes precedence over env/default).
+        # --no-mcp explicitly opts out; --use-mcp explicitly opts in.
+        if args.no_mcp:
+            settings.use_mcp_tools = False
+        elif args.use_mcp:
+            settings.use_mcp_tools = True
+        # If neither flag is given, settings.use_mcp_tools retains its value from
+        # the environment variable or the default (True as of Phase 3).
+
         settings.validate_required_credentials()
         settings.ensure_cache_dir_exists()
     except ValueError as e:
@@ -433,6 +769,24 @@ def main() -> int:
         print(f"❌ Unexpected Error: {e}", file=sys.stderr)
         return 1
 
+    # Pre-flight check: if MCP is enabled, verify that the 'uvx' launcher is available.
+    # If not, fall back to native tools with a clear warning.
+    if settings.use_mcp_tools:
+        if not shutil.which(settings.mcp_server_command):
+            print(
+                f"⚠ MCP tools enabled but '{settings.mcp_server_command}' not found on PATH.",
+                file=sys.stderr,
+            )
+            print(
+                "  Install uv: curl -LsSf https://astral.sh/uv/install.sh | sh",
+                file=sys.stderr,
+            )
+            print(
+                "  Falling back to native CloudWatch tools (use --no-mcp to suppress this warning).",
+                file=sys.stderr,
+            )
+            settings.use_mcp_tools = False
+
     # Print configuration summary
     print(f"LogAI v{__version__}")
     print(f"✓ LLM Provider: {settings.llm_provider}")
@@ -449,103 +803,15 @@ def main() -> int:
 
     print(f"✓ PII Sanitization: {'Enabled' if settings.pii_sanitization_enabled else 'Disabled'}")
     print(f"✓ Cache Directory: {settings.cache_dir}")
+    if settings.use_mcp_tools:
+        print(
+            f"✓ Tool Mode: MCP ({settings.mcp_server_command} {' '.join(settings.mcp_server_args)})"
+        )
+    else:
+        print("✓ Tool Mode: Native boto3 (legacy — use --use-mcp to enable MCP)")
     print("\nInitializing components...")
 
-    try:
-        # Initialize components
-        datasource = CloudWatchDataSource(settings)
-        sanitizer = LogSanitizer(enabled=settings.pii_sanitization_enabled)
-        cache_manager = CacheManager(settings)
-
-        # Initialize metrics collector
-        from logai.core.metrics import MetricsCollector
-
-        metrics_collector = MetricsCollector()
-
-        # Import and register tools
-        from logai.core.tools.cloudwatch_tools import (
-            FetchLogsTool,
-            ListLogGroupsTool,
-            SearchLogsTool,
-        )
-        from logai.tools.fetch_cached_result import FetchCachedResultTool
-
-        # Register CloudWatch tools in the registry
-        ToolRegistry.register(ListLogGroupsTool(datasource, settings, cache=cache_manager))
-        ToolRegistry.register(FetchLogsTool(datasource, sanitizer, settings, cache=cache_manager))
-        ToolRegistry.register(SearchLogsTool(datasource, sanitizer, settings, cache=cache_manager))
-
-        # Initialize result cache for large tool results
-        from logai.core.context.result_cache import ResultCacheManager
-
-        result_cache = ResultCacheManager(
-            cache_dir=settings.cache_dir / "results",
-            ttl_seconds=getattr(settings, "cache_ttl_seconds", 3600),
-            max_size_mb=100,
-            sample_event_count=settings.cache_sample_event_count,
-            metrics_collector=metrics_collector,
-        )
-
-        # Register context management tool
-        ToolRegistry.register(
-            FetchCachedResultTool(
-                result_cache=result_cache,
-                metrics_collector=metrics_collector,
-            )
-        )
-
-        # === NEW: Pre-load log groups ===
-        from logai.core.log_group_manager import LogGroupManager
-
-        log_group_manager = LogGroupManager(datasource)
-
-        # Define progress callback for CLI output
-        def show_progress(count: int, message: str) -> None:
-            # Use carriage return to update in place
-            print(f"\r  {message}", end="", flush=True)
-
-        print("  Loading log groups from AWS...", end="", flush=True)
-
-        # Run async load synchronously
-        result = asyncio.run(log_group_manager.load_all(progress_callback=show_progress))
-
-        if result.success:
-            print(f"\r✓ Found {result.count} log groups ({result.duration_ms}ms)          ")
-        else:
-            print(f"\r⚠ Failed to load log groups: {result.error_message}          ")
-            print("  Agent will discover log groups via tools")
-        # === END NEW ===
-
-        # Initialize LLM provider
-        llm_provider = LiteLLMProvider.from_settings(settings)
-
-        # Initialize orchestrator with context management
-        orchestrator = LLMOrchestrator(
-            llm_provider=llm_provider,
-            tool_registry=ToolRegistry,
-            sanitizer=sanitizer,
-            settings=settings,
-            cache=cache_manager,
-            metrics_collector=metrics_collector,
-            log_group_manager=log_group_manager,
-            result_cache=result_cache,
-        )
-
-        print("✓ All components initialized")
-        print("\nStarting TUI...\n")
-
-        # Start TUI (modified to accept log_group_manager)
-        app = LogAIApp(orchestrator, cache_manager, log_group_manager)
-        app.run()
-
-        return 0
-
-    except Exception as e:
-        print(f"❌ Failed to initialize: {e}", file=sys.stderr)
-        import traceback
-
-        traceback.print_exc()
-        return 1
+    return asyncio.run(_run_app(settings))
 
 
 if __name__ == "__main__":
