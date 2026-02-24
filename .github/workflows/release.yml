@@ -33,15 +33,18 @@ jobs:
     # merged by release-please itself — nothing left for us to do.
     if: ${{ needs.release-please.outputs.pr && !needs.release-please.outputs.release_created }}
     runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
+    # No job-level permissions block — inherits workflow-level
+    # `contents: write` + `pull-requests: write`.
     steps:
       - name: Enable auto-merge on release PR
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ needs.release-please.outputs.pr }}
+          # outputs.pr is a JSON object like {"number": 42, ...}, not a bare integer.
+          PR_JSON: ${{ needs.release-please.outputs.pr }}
         run: |
+          PR_NUMBER=$(echo "$PR_JSON" | jq -r '.number')
           gh pr merge "$PR_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
             --auto \
-            --squash
+            --squash \
+          || echo "Auto-merge already set or PR not found — skipping"

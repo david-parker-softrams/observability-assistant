@@ -23,7 +23,7 @@ and cannot be merged.
 | `feat` | A new feature |
 | `fix` | A bug fix |
 | `docs` | Documentation only changes |
-| `style` | Formatting, whitespace, etc. (no logic change) |
+| `style` | Formatting, whitespace, etc. (no code change) |
 | `refactor` | Code restructuring (no new feature, no bug fix) |
 | `test` | Adding or updating tests |
 | `chore` | Maintenance, dependency updates |
@@ -58,3 +58,6 @@ messages on `main` and determines the next version automatically:
 - `Feature: add thing` — `Feature` is not a valid type (use `feat`)
 - `update readme` — missing type prefix
 - `feat add thing` — missing colon after type
+
+> **Note for maintainers:** For this check to block merges, `Validate PR title` must
+> be added as a required status check in **Settings → Branches → Branch protection rules** for `main`.
