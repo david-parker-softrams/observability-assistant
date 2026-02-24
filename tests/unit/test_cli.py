@@ -364,54 +364,35 @@ class TestCLIPrecedenceOrder:
 
 
 class TestLoggingSetup:
-    """Test suite for setup_logging() to verify no console handler when file logging succeeds."""
+    """Test suite for setup_logging() to verify correct handler configuration."""
 
     @pytest.fixture(autouse=True)
     def cleanup_logging(self):
         """Clean up logging handlers after each test to avoid interference."""
-        # Clear existing handlers before test
         logging.getLogger().handlers.clear()
         logging.getLogger().setLevel(logging.WARNING)
-
         yield
-
-        # Clear handlers after test
         logging.getLogger().handlers.clear()
         logging.getLogger().setLevel(logging.WARNING)
 
-    @pytest.mark.parametrize("level", [False, True])
-    def test_setup_logging_no_console_handler_when_file_succeeds(self, tmp_path, level):
-        """Test that StreamHandler is NOT added when file logging succeeds.
-
-        This test verifies Jackie's fix: StreamHandler should only be added when
-        file logging fails, not unconditionally. This prevents debug logs from
-        appearing in the TUI.
-
-        Args:
-            tmp_path: pytest fixture for temporary directory
-            level: False for INFO, True for DEBUG
-        """
-        from logai.cli import setup_logging
-
-        log_file = tmp_path / "test.log"
-
-        # Call setup_logging with valid file path
-        setup_logging(
-            debug=level,
-            log_file=str(log_file),
-        )
-
-        root_logger = logging.getLogger()
-
-        # Filter out pytest's own handlers (LogCaptureHandler, _LiveLoggingNullHandler)
-        app_handlers = [
+    def _app_handlers(self) -> list[logging.Handler]:
+        """Return handlers added by our app, filtering out pytest's internal handlers."""
+        return [
             h
-            for h in root_logger.handlers
+            for h in logging.getLogger().handlers
             if type(h).__name__
             not in ["LogCaptureHandler", "_LiveLoggingNullHandler", "_FileHandler"]
         ]
 
-        # Should have exactly ONE handler from our app (FileHandler)
+    def test_file_handler_only_when_file_succeeds(self, tmp_path):
+        """StreamHandler is NOT added when file logging succeeds (protects TUI)."""
+        from logai.cli import setup_logging
+
+        log_file = tmp_path / "test.log"
+        setup_logging(cli_level="INFO", settings=None, log_file=str(log_file))
+
+        app_handlers = self._app_handlers()
+
         assert len(app_handlers) == 1, (
             f"Expected exactly 1 app handler (FileHandler), but found {len(app_handlers)}. "
             f"Handlers: {[type(h).__name__ for h in app_handlers]}"
@@ -420,7 +401,7 @@ class TestLoggingSetup:
             app_handlers[0], logging.FileHandler
         ), f"Expected FileHandler, but got {type(app_handlers[0]).__name__}"
 
-        # Should NOT have StreamHandler (excluding FileHandler which is a subclass)
+        # No bare StreamHandler — that would corrupt the TUI
         stream_handlers = [
             h
             for h in app_handlers
@@ -428,56 +409,25 @@ class TestLoggingSetup:
         ]
         assert len(stream_handlers) == 0, (
             f"Expected NO StreamHandler, but found {len(stream_handlers)}. "
-            f"This means debug logs will appear in the TUI!"
+            "Debug logs would appear in the TUI!"
         )
 
-        # Verify log file was created
         assert log_file.exists(), "Log file should have been created"
 
-        # Verify correct log level
-        expected_level = logging.DEBUG if level else logging.INFO
-        assert root_logger.level == expected_level, (
-            f"Expected log level {logging.getLevelName(expected_level)}, "
-            f"but got {logging.getLevelName(root_logger.level)}"
-        )
-
-    @pytest.mark.parametrize("level", [False, True])
-    def test_setup_logging_console_handler_when_file_fails(self, level):
-        """Test that StreamHandler IS added when file logging fails.
-
-        This test verifies the fallback behavior: when file logging fails,
-        a StreamHandler should be added as a fallback to ensure logs are
-        not lost.
-
-        Args:
-            level: False for INFO, True for DEBUG
-        """
+    def test_console_fallback_when_file_fails(self):
+        """StreamHandler IS added as emergency fallback when file logging fails."""
         from logai.cli import setup_logging
 
-        # Use invalid path to force file logging to fail
-        # /root typically requires elevated permissions
-        invalid_path = "/root/cannot/write/here/test.log"
-
-        # Capture stderr to verify warning message
         captured_stderr = io.StringIO()
-
         with patch("sys.stderr", captured_stderr):
             setup_logging(
-                debug=level,
-                log_file=invalid_path,
+                cli_level="INFO",
+                settings=None,
+                log_file="/root/cannot/write/here/test.log",
             )
 
-        root_logger = logging.getLogger()
+        app_handlers = self._app_handlers()
 
-        # Filter out pytest's own handlers
-        app_handlers = [
-            h
-            for h in root_logger.handlers
-            if type(h).__name__
-            not in ["LogCaptureHandler", "_LiveLoggingNullHandler", "_FileHandler"]
-        ]
-
-        # Should have exactly ONE handler from our app (StreamHandler as fallback)
         assert len(app_handlers) == 1, (
             f"Expected exactly 1 app handler (StreamHandler), but found {len(app_handlers)}. "
             f"Handlers: {[type(h).__name__ for h in app_handlers]}"
@@ -489,107 +439,280 @@ class TestLoggingSetup:
             app_handlers[0], logging.FileHandler
         ), "Handler should be StreamHandler, not FileHandler"
 
-        # Verify warning message was printed to stderr
         stderr_output = captured_stderr.getvalue()
         assert (
             "Warning: Could not create log file" in stderr_output
         ), "Expected warning message about failed file logging"
         assert "Logging to console only" in stderr_output, "Expected message about console fallback"
 
-        # Verify correct log level
-        expected_level = logging.DEBUG if level else logging.INFO
-        assert root_logger.level == expected_level, (
-            f"Expected log level {logging.getLevelName(expected_level)}, "
-            f"but got {logging.getLevelName(root_logger.level)}"
-        )
-
-    def test_setup_logging_default_log_file_location(self):
-        """Test that default log file location is ~/.logai/logs/logai.log."""
+    def test_default_log_file_location(self):
+        """Default log file resolves to ~/.logai/logs/logai.log."""
         from logai.cli import setup_logging
 
-        # Call without specifying log_file
-        setup_logging(debug=False, log_file=None)
+        setup_logging(cli_level=None, settings=None, log_file=None)
 
-        root_logger = logging.getLogger()
+        app_handlers = self._app_handlers()
 
-        # Filter out pytest's own handlers
-        app_handlers = [
-            h
-            for h in root_logger.handlers
-            if type(h).__name__
-            not in ["LogCaptureHandler", "_LiveLoggingNullHandler", "_FileHandler"]
-        ]
-
-        # Should have exactly ONE handler from our app
         assert len(app_handlers) == 1
         assert isinstance(app_handlers[0], logging.FileHandler)
 
-        # Verify the log file path
-        handler = app_handlers[0]
         expected_path = Path.home() / ".logai" / "logs" / "logai.log"
         assert (
-            Path(handler.baseFilename) == expected_path
-        ), f"Expected log file at {expected_path}, but got {handler.baseFilename}"
+            Path(app_handlers[0].baseFilename) == expected_path
+        ), f"Expected log file at {expected_path}, but got {app_handlers[0].baseFilename}"
 
-    def test_setup_logging_creates_parent_directories(self, tmp_path):
-        """Test that setup_logging creates parent directories if they don't exist."""
+    def test_creates_parent_directories(self, tmp_path):
+        """Parent directories are created automatically when they don't exist."""
         from logai.cli import setup_logging
 
-        # Use a nested path that doesn't exist yet
         log_file = tmp_path / "nested" / "deep" / "logs" / "test.log"
         assert not log_file.parent.exists(), "Parent directory should not exist yet"
 
-        setup_logging(debug=False, log_file=str(log_file))
+        setup_logging(cli_level=None, settings=None, log_file=str(log_file))
 
-        # Verify parent directories were created
         assert log_file.parent.exists(), "Parent directories should have been created"
         assert log_file.exists(), "Log file should have been created"
 
-        # Verify correct handler type
-        root_logger = logging.getLogger()
-        app_handlers = [
-            h
-            for h in root_logger.handlers
-            if type(h).__name__
-            not in ["LogCaptureHandler", "_LiveLoggingNullHandler", "_FileHandler"]
-        ]
-
+        app_handlers = self._app_handlers()
         assert len(app_handlers) == 1
         assert isinstance(app_handlers[0], logging.FileHandler)
 
-    def test_setup_logging_format_includes_required_fields(self, tmp_path):
-        """Test that log format includes timestamp, name, level, and message."""
+    def test_format_includes_required_fields(self, tmp_path):
+        """Log format includes timestamp, logger name, level, and message."""
         from logai.cli import setup_logging
 
         log_file = tmp_path / "test.log"
-        setup_logging(debug=False, log_file=str(log_file))
+        setup_logging(cli_level="INFO", settings=None, log_file=str(log_file))
 
-        # Get the file handler to ensure logs go to the file
-        root_logger = logging.getLogger()
-        app_handlers = [
-            h
-            for h in root_logger.handlers
-            if type(h).__name__
-            not in ["LogCaptureHandler", "_LiveLoggingNullHandler", "_FileHandler"]
-        ]
-
-        # Write a test log message
         test_logger = logging.getLogger("test_module")
         test_logger.info("Test message")
 
-        # Flush the handler to ensure data is written
-        for handler in app_handlers:
+        for handler in self._app_handlers():
             handler.flush()
 
-        # Read the log file
         log_content = log_file.read_text()
 
-        # Verify format includes required components
         assert "test_module" in log_content, "Log should include logger name"
         assert "INFO" in log_content, "Log should include log level"
         assert "Test message" in log_content, "Log should include message"
-        # Check for timestamp pattern (YYYY-MM-DD HH:MM:SS)
+
         import re
 
         timestamp_pattern = r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}"
         assert re.search(timestamp_pattern, log_content), "Log should include timestamp"
+
+
+class TestLogLevelPrecedence:
+    """Test suite for log level resolution in setup_logging()."""
+
+    @pytest.fixture(autouse=True)
+    def cleanup_logging(self):
+        """Clean up logging handlers after each test to avoid interference."""
+        logging.getLogger().handlers.clear()
+        logging.getLogger().setLevel(logging.WARNING)
+        yield
+        logging.getLogger().handlers.clear()
+        logging.getLogger().setLevel(logging.WARNING)
+
+    def test_cli_level_overrides_settings(self, tmp_path, clean_env):
+        """CLI --loglevel takes highest precedence over settings.log_level."""
+        from logai.cli import setup_logging
+        from logai.config import LogAISettings
+
+        os.environ["LOGAI_LOG_LEVEL"] = "INFO"
+        os.environ["LOGAI_ANTHROPIC_API_KEY"] = "sk-test"
+        os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
+        settings = LogAISettings()  # type: ignore
+
+        setup_logging(
+            cli_level="DEBUG",
+            settings=settings,
+            log_file=str(tmp_path / "test.log"),
+        )
+
+        assert logging.getLogger().level == logging.DEBUG
+
+    def test_settings_used_when_no_cli_level(self, tmp_path, clean_env):
+        """settings.log_level (from LOGAI_LOG_LEVEL / .env) is used when CLI flag absent."""
+        from logai.cli import setup_logging
+        from logai.config import LogAISettings
+
+        os.environ["LOGAI_LOG_LEVEL"] = "ERROR"
+        os.environ["LOGAI_ANTHROPIC_API_KEY"] = "sk-test"
+        os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
+        settings = LogAISettings()  # type: ignore
+
+        setup_logging(
+            cli_level=None,
+            settings=settings,
+            log_file=str(tmp_path / "test.log"),
+        )
+
+        assert logging.getLogger().level == logging.ERROR
+
+    def test_default_level_when_nothing_set(self, tmp_path, clean_env):
+        """Default is WARNING when neither CLI flag nor env var is set."""
+        from logai.cli import setup_logging
+
+        setup_logging(
+            cli_level=None,
+            settings=None,
+            log_file=str(tmp_path / "test.log"),
+        )
+
+        assert logging.getLogger().level == logging.WARNING
+
+    def test_default_level_constant_is_warning(self, tmp_path, clean_env):
+        """DEFAULT_LOG_LEVEL constant is WARNING (not the old INFO default)."""
+        from logai.cli import DEFAULT_LOG_LEVEL, setup_logging
+
+        assert DEFAULT_LOG_LEVEL == "WARNING"
+
+        setup_logging(
+            cli_level=None,
+            settings=None,
+            log_file=str(tmp_path / "test.log"),
+        )
+
+        assert logging.getLogger().level == logging.WARNING
+
+    def test_cli_warning_overrides_env_debug(self, tmp_path, clean_env):
+        """CLI WARNING takes precedence even when LOGAI_LOG_LEVEL=DEBUG in env."""
+        from logai.cli import setup_logging
+        from logai.config import LogAISettings
+
+        os.environ["LOGAI_LOG_LEVEL"] = "DEBUG"
+        os.environ["LOGAI_ANTHROPIC_API_KEY"] = "sk-test"
+        os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
+        settings = LogAISettings()  # type: ignore
+
+        setup_logging(
+            cli_level="WARNING",
+            settings=settings,
+            log_file=str(tmp_path / "test.log"),
+        )
+
+        assert logging.getLogger().level == logging.WARNING
+
+    def test_settings_none_falls_back_to_default(self, tmp_path, clean_env):
+        """When settings is None and no CLI flag, falls back to WARNING default."""
+        from logai.cli import setup_logging
+
+        setup_logging(
+            cli_level=None,
+            settings=None,
+            log_file=str(tmp_path / "test.log"),
+        )
+
+        assert logging.getLogger().level == logging.WARNING
+
+
+class TestLogLevelCLIArgument:
+    """Test suite for --loglevel argument parsing via _build_parser()."""
+
+    def test_loglevel_debug_accepted(self):
+        """--loglevel DEBUG is accepted and stored on args."""
+        from logai.cli import _build_parser
+
+        with patch("sys.argv", ["logai", "--loglevel", "DEBUG"]):
+            parser = _build_parser()
+            args = parser.parse_args()
+            assert args.loglevel == "DEBUG"
+
+    def test_loglevel_case_insensitive(self):
+        """--loglevel debug (lowercase) is normalised to DEBUG."""
+        from logai.cli import _build_parser
+
+        with patch("sys.argv", ["logai", "--loglevel", "debug"]):
+            parser = _build_parser()
+            args = parser.parse_args()
+            assert args.loglevel == "DEBUG"
+
+    def test_loglevel_all_valid_levels_accepted(self):
+        """All four valid levels are accepted."""
+        from logai.cli import _build_parser
+
+        for level in ("DEBUG", "INFO", "WARNING", "ERROR"):
+            with patch("sys.argv", ["logai", "--loglevel", level]):
+                parser = _build_parser()
+                args = parser.parse_args()
+                assert args.loglevel == level
+
+    def test_loglevel_default_is_none(self):
+        """When --loglevel is omitted, args.loglevel is None (enables precedence logic)."""
+        from logai.cli import _build_parser
+
+        with patch("sys.argv", ["logai"]):
+            parser = _build_parser()
+            args = parser.parse_args()
+            assert args.loglevel is None
+
+    def test_loglevel_invalid_rejected(self):
+        """Invalid level (e.g. TRACE) is rejected by argparse."""
+        from logai.cli import _build_parser
+
+        with patch("sys.argv", ["logai", "--loglevel", "TRACE"]):
+            parser = _build_parser()
+            with pytest.raises(SystemExit):
+                parser.parse_args()
+
+    def test_debug_flag_gives_clear_error(self):
+        """--debug gives a clear migration error pointing to --loglevel DEBUG."""
+        from logai.cli import _build_parser
+
+        with patch("sys.argv", ["logai", "--debug"]):
+            parser = _build_parser()
+            with pytest.raises(SystemExit):
+                parser.parse_args()
+
+
+class TestLogLevelIntegration:
+    """Integration tests verifying the full CLI → setup_logging() log level flow."""
+
+    @pytest.fixture(autouse=True)
+    def cleanup_logging(self):
+        """Clean up logging handlers after each test to avoid interference."""
+        logging.getLogger().handlers.clear()
+        logging.getLogger().setLevel(logging.WARNING)
+        yield
+        logging.getLogger().handlers.clear()
+        logging.getLogger().setLevel(logging.WARNING)
+
+    def test_loglevel_debug_captures_all_messages(self, tmp_path, clean_env):
+        """--loglevel DEBUG → DEBUG, INFO, and WARNING messages all appear in log file."""
+        from logai.cli import setup_logging
+
+        log_file = tmp_path / "test.log"
+        setup_logging(cli_level="DEBUG", settings=None, log_file=str(log_file))
+
+        test_logger = logging.getLogger("test.integration")
+        test_logger.debug("debug message")
+        test_logger.info("info message")
+        test_logger.warning("warning message")
+
+        for h in logging.getLogger().handlers:
+            h.flush()
+
+        content = log_file.read_text()
+        assert "debug message" in content
+        assert "info message" in content
+        assert "warning message" in content
+
+    def test_loglevel_warning_hides_debug_and_info(self, tmp_path, clean_env):
+        """--loglevel WARNING → DEBUG and INFO messages are suppressed."""
+        from logai.cli import setup_logging
+
+        log_file = tmp_path / "test.log"
+        setup_logging(cli_level="WARNING", settings=None, log_file=str(log_file))
+
+        test_logger = logging.getLogger("test.integration")
+        test_logger.debug("should not appear")
+        test_logger.info("should not appear")
+        test_logger.warning("should appear")
+
+        for h in logging.getLogger().handlers:
+            h.flush()
+
+        content = log_file.read_text()
+        assert "should not appear" not in content
+        assert "should appear" in content
