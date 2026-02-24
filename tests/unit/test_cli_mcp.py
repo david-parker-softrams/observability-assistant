@@ -108,6 +108,18 @@ class TestBuildMcpEnv:
             if original is not None:
                 os.environ["AWS_DEFAULT_REGION"] = original
 
+    def test_build_mcp_env_skips_empty_region(self) -> None:
+        """When settings.aws_region is an empty string, AWS_DEFAULT_REGION is not set."""
+        original = os.environ.pop("AWS_DEFAULT_REGION", None)
+        try:
+            settings = _minimal_settings(aws_region="")
+            env = build_mcp_env(settings)
+            # Empty string is falsy — should not be written to env
+            assert "AWS_DEFAULT_REGION" not in env
+        finally:
+            if original is not None:
+                os.environ["AWS_DEFAULT_REGION"] = original
+
     def test_build_mcp_env_returns_dict(self) -> None:
         """build_mcp_env() must return a plain dict."""
         settings = _minimal_settings()

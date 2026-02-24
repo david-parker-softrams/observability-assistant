@@ -433,7 +433,7 @@ def build_mcp_env(settings: LogAISettings) -> dict[str, str]:
         "TMP",
         # AWS credentials and configuration
         "AWS_DEFAULT_REGION",
-        "AWS_REGION",
+        "AWS_REGION",  # Secondary alias; botocore prefers AWS_DEFAULT_REGION
         "AWS_PROFILE",
         "AWS_ACCESS_KEY_ID",
         "AWS_SECRET_ACCESS_KEY",

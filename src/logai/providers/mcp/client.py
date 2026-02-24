@@ -140,7 +140,9 @@ class MCPClientManager:
             try:
                 await self._session_cm.__aexit__(None, None, None)
             except Exception:
-                logger.debug("Error exiting MCP session context manager", exc_info=True)
+                # Session teardown failure is operator-visible: use WARNING so
+                # it surfaces in production logs even at the default log level.
+                logger.warning("Error exiting MCP session context manager", exc_info=True)
 
         if self._stdio_cm is not None:
             try:

@@ -118,7 +118,9 @@ class MCPToolAdapter(BaseTool):
             raise ToolExecutionError(
                 message=str(exc),
                 tool_name=self._name,
-                details={"source": "mcp", "arguments": kwargs},
+                # Only log argument *keys*, not values — values may contain
+                # user-supplied strings that could include sensitive data.
+                details={"source": "mcp", "argument_keys": list(kwargs.keys())},
             ) from exc
         except ToolExecutionError:
             # Re-raise ToolExecutionErrors from the processor as-is.
@@ -127,5 +129,6 @@ class MCPToolAdapter(BaseTool):
             raise ToolExecutionError(
                 message=f"MCP tool execution failed: {exc}",
                 tool_name=self._name,
-                details={"source": "mcp", "arguments": kwargs},
+                # Same rationale: keys are safe to log; values are not.
+                details={"source": "mcp", "argument_keys": list(kwargs.keys())},
             ) from exc

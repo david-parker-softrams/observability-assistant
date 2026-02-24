@@ -201,3 +201,24 @@ class TestResultProcessorAsyncContract:
     def test_process_is_async(self) -> None:
         """ResultProcessor.process() must be a coroutine function."""
         assert asyncio.iscoroutinefunction(ResultProcessor.process)
+
+
+# ---------------------------------------------------------------------------
+# Non-dict result handling
+# ---------------------------------------------------------------------------
+
+
+class TestResultProcessorNonDictInput:
+    """Tests for how ResultProcessor handles unexpected non-dict results."""
+
+    @pytest.mark.asyncio
+    async def test_non_dict_result_is_wrapped(self, processor: ResultProcessor) -> None:
+        """A non-dict result (e.g. a list) is wrapped in ``{"raw_text": ...}``.
+
+        ``MCPClientManager.call_tool()`` normally returns a dict, but defensive
+        wrapping ensures that any unexpected value type is still returned as a
+        valid dict rather than propagating a type error up the call stack.
+        """
+        result = await processor.process("describe_log_groups", ["unexpected", "list"])
+
+        assert "raw_text" in result
