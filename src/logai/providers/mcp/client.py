@@ -6,7 +6,8 @@ The MCP server communicates over stdio (stdin/stdout) using JSON-RPC.
 
 import json
 import logging
-from typing import Any
+import os
+from typing import IO, Any
 
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
@@ -57,6 +58,7 @@ class MCPClientManager:
         command: str = "uvx",
         args: list[str] | None = None,
         env: dict[str, str] | None = None,
+        log_file_path: str | None = None,
     ) -> None:
         """
         Initialize the MCP client manager.
@@ -70,10 +72,16 @@ class MCPClientManager:
                  ``os.environ`` with AWS settings overlaid. Defaults to an
                  empty dict (i.e., inherits nothing — callers are expected to
                  supply the correct environment via ``build_mcp_env()``).
+            log_file_path: Path to the application log file.  When provided and
+                           openable, the MCP server's stderr is redirected there
+                           (append mode) instead of the terminal, preventing TUI
+                           corruption.  Falls back to ``os.devnull`` if ``None``
+                           or the file cannot be opened.
         """
         self._command = command
         self._args = args or ["awslabs.cloudwatch-mcp-server@latest"]
         self._env = env or {}
+        self._log_file_path = log_file_path
         self._session: ClientSession | None = None
         self._tools_cache: list[dict[str, Any]] | None = None
 
@@ -84,6 +92,10 @@ class MCPClientManager:
         self._session_cm: Any = None
         self._read_stream: Any = None
         self._write_stream: Any = None
+
+        # File handle used to redirect MCP server stderr away from the terminal.
+        # Opened in start() and closed in stop().
+        self._stderr_log: IO[str] | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -96,33 +108,70 @@ class MCPClientManager:
         so the client is ready to list and call tools immediately after this
         method returns.
 
+        The MCP server's stderr is redirected to the application log file
+        (passed as ``log_file_path`` to ``__init__``) so that subprocess
+        output never reaches the terminal and corrupts the Textual TUI.
+        If the log file cannot be opened, stderr is silently discarded via
+        ``os.devnull``.
+
         Raises:
             Exception: If the subprocess cannot be started or the handshake
                        fails.  Callers should catch and fall back to native tools.
         """
-        server_params = StdioServerParameters(
-            command=self._command,
-            args=self._args,
-            env=self._env,
-        )
+        # ------------------------------------------------------------------
+        # Open stderr redirect — must happen before stdio_client() is entered
+        # so the file handle is available for cleanup if anything fails below.
+        # ------------------------------------------------------------------
+        if self._log_file_path is not None:
+            try:
+                self._stderr_log = open(  # noqa: SIM115
+                    self._log_file_path, "a", encoding="utf-8"
+                )
+                logger.debug("MCP server stderr → %s", self._log_file_path)
+            except OSError:
+                logger.debug(
+                    "Could not open log file '%s' for MCP stderr; discarding to devnull",
+                    self._log_file_path,
+                )
+                self._stderr_log = open(os.devnull, "w")  # noqa: SIM115
+        else:
+            # No log file configured — discard stderr so it never hits the terminal.
+            self._stderr_log = open(os.devnull, "w")  # noqa: SIM115
 
-        # Enter the stdio_client context manager — this starts the subprocess
-        # and returns async read/write streams over its stdin/stdout.
-        self._stdio_cm = stdio_client(server_params)
-        self._read_stream, self._write_stream = await self._stdio_cm.__aenter__()
-
-        # Enter the ClientSession context manager — establishes the JSON-RPC layer.
-        self._session_cm = ClientSession(self._read_stream, self._write_stream)
         try:
-            self._session = await self._session_cm.__aenter__()
-        except Exception:
-            # __aenter__ raised before the context manager was fully entered,
-            # so we must NOT call __aexit__ on it in stop() — clear the ref now.
-            self._session_cm = None
-            raise
+            server_params = StdioServerParameters(
+                command=self._command,
+                args=self._args,
+                env=self._env,
+            )
 
-        # Perform the MCP initialization handshake.
-        await self._session.initialize()
+            # Enter the stdio_client context manager — this starts the subprocess
+            # and returns async read/write streams over its stdin/stdout.
+            # Pass our log file (or devnull) as errlog so stderr never hits the TUI.
+            self._stdio_cm = stdio_client(server_params, errlog=self._stderr_log)
+            self._read_stream, self._write_stream = await self._stdio_cm.__aenter__()
+
+            # Enter the ClientSession context manager — establishes the JSON-RPC layer.
+            self._session_cm = ClientSession(self._read_stream, self._write_stream)
+            try:
+                self._session = await self._session_cm.__aenter__()
+            except Exception:
+                # __aenter__ raised before the context manager was fully entered,
+                # so we must NOT call __aexit__ on it in stop() — clear the ref now.
+                self._session_cm = None
+                raise
+
+            # Perform the MCP initialization handshake.
+            await self._session.initialize()
+
+        except Exception:
+            # If anything in start() fails after we opened the stderr log, close it
+            # now so we don't leak the file descriptor.  stop() checks for None, so
+            # this is safe even if stop() is later called by the caller's finally block.
+            if self._stderr_log is not None:
+                self._stderr_log.close()
+                self._stderr_log = None
+            raise
 
         logger.info(
             "MCP client session initialized (command=%s args=%s)",
@@ -135,6 +184,7 @@ class MCPClientManager:
 
         Safe to call even if ``start()`` was never called or failed partway
         through — guards check for ``None`` before exiting each context manager.
+        The stderr log file handle (if any) is always closed here.
         """
         if self._session_cm is not None:
             try:
@@ -149,6 +199,15 @@ class MCPClientManager:
                 await self._stdio_cm.__aexit__(None, None, None)
             except Exception:
                 logger.debug("Error exiting MCP stdio context manager", exc_info=True)
+
+        # Close the stderr redirect file handle now that the subprocess is gone.
+        if self._stderr_log is not None:
+            try:
+                self._stderr_log.close()
+            except OSError:
+                logger.debug("Error closing MCP stderr log file handle", exc_info=True)
+            finally:
+                self._stderr_log = None
 
         self._session = None
         self._tools_cache = None

@@ -571,6 +571,7 @@ def _run_app(settings: LogAISettings) -> int:
                 command=settings.mcp_server_command,
                 args=settings.mcp_server_args,
                 env=mcp_env,
+                log_file_path=str(settings.log_file) if settings.log_file is not None else None,
             )
             result_processor = ResultProcessor(sanitizer=sanitizer, cache=cache_manager)
         else:

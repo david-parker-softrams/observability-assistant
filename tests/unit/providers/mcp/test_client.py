@@ -1,7 +1,7 @@
 """Unit tests for MCPClientManager."""
 
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, mock_open, patch
 
 import pytest
 from logai.providers.mcp.client import MCPClientManager, MCPToolError
@@ -392,3 +392,182 @@ class TestMCPClientManagerStartStop:
         assert manager._write_stream is None
         assert manager._stdio_cm is None
         assert manager._session_cm is None
+
+
+# ---------------------------------------------------------------------------
+# stderr redirect / TUI-safety tests
+# ---------------------------------------------------------------------------
+
+
+class TestMCPClientManagerStderrRedirect:
+    """Tests that MCP server stderr is routed away from the terminal."""
+
+    @pytest.mark.asyncio
+    async def test_start_passes_errlog_to_stdio_client_when_log_file_given(self) -> None:
+        """When log_file_path is provided and openable, stdio_client receives a
+        non-sys.stderr file handle as errlog, preventing TUI corruption."""
+        import sys
+
+        mock_read, mock_write = MagicMock(), MagicMock()
+        mock_session = AsyncMock()
+        mock_session.initialize = AsyncMock(return_value=None)
+
+        stdio_cm = _make_stdio_cm(mock_read, mock_write)
+        session_cm = _make_session_cm(mock_session)
+
+        # A fake file handle returned by open()
+        fake_file = MagicMock()
+
+        manager = MCPClientManager(
+            command="uvx",
+            args=["test-server"],
+            env={},
+            log_file_path="/tmp/logai-test.log",
+        )
+
+        with patch("builtins.open", return_value=fake_file) as mock_open_fn:
+            with patch("logai.providers.mcp.client.stdio_client", return_value=stdio_cm) as mock_sc:
+                with patch("logai.providers.mcp.client.ClientSession", return_value=session_cm):
+                    await manager.start()
+
+        # open() must have been called with the given path in append mode
+        mock_open_fn.assert_called_once_with("/tmp/logai-test.log", "a", encoding="utf-8")
+
+        # stdio_client must have received errlog= and it must NOT be sys.stderr
+        _, kwargs = mock_sc.call_args
+        assert "errlog" in kwargs, "stdio_client must be called with errlog= keyword argument"
+        assert (
+            kwargs["errlog"] is not sys.stderr
+        ), "errlog must not be sys.stderr — that would corrupt the TUI"
+        assert kwargs["errlog"] is fake_file
+
+        await manager.stop()
+
+    @pytest.mark.asyncio
+    async def test_start_falls_back_to_devnull_when_log_file_path_is_none(self) -> None:
+        """When log_file_path=None, stdio_client still receives an errlog that
+        is not sys.stderr (i.e. devnull), so the TUI is protected regardless."""
+        import sys
+
+        mock_read, mock_write = MagicMock(), MagicMock()
+        mock_session = AsyncMock()
+        mock_session.initialize = AsyncMock(return_value=None)
+
+        stdio_cm = _make_stdio_cm(mock_read, mock_write)
+        session_cm = _make_session_cm(mock_session)
+
+        manager = MCPClientManager(
+            command="uvx",
+            args=["test-server"],
+            env={},
+            log_file_path=None,
+        )
+
+        with patch("logai.providers.mcp.client.stdio_client", return_value=stdio_cm) as mock_sc:
+            with patch("logai.providers.mcp.client.ClientSession", return_value=session_cm):
+                await manager.start()
+
+        _, kwargs = mock_sc.call_args
+        assert "errlog" in kwargs, "stdio_client must always receive an errlog= argument"
+        assert (
+            kwargs["errlog"] is not sys.stderr
+        ), "errlog must never be sys.stderr, even when log_file_path=None"
+
+        await manager.stop()
+
+    @pytest.mark.asyncio
+    async def test_start_falls_back_to_devnull_when_open_raises(self) -> None:
+        """If opening the log file raises OSError, start() falls back to devnull
+        and does NOT propagate the error."""
+        import os
+
+        mock_read, mock_write = MagicMock(), MagicMock()
+        mock_session = AsyncMock()
+        mock_session.initialize = AsyncMock(return_value=None)
+
+        stdio_cm = _make_stdio_cm(mock_read, mock_write)
+        session_cm = _make_session_cm(mock_session)
+
+        manager = MCPClientManager(
+            command="uvx",
+            args=["test-server"],
+            env={},
+            log_file_path="/nonexistent/path/logai.log",
+        )
+
+        devnull_handle = MagicMock()
+
+        def _open_side_effect(path, *args, **kwargs):
+            if path == "/nonexistent/path/logai.log":
+                raise OSError("Permission denied")
+            # devnull fallback
+            assert path == os.devnull
+            return devnull_handle
+
+        with patch("builtins.open", side_effect=_open_side_effect):
+            with patch("logai.providers.mcp.client.stdio_client", return_value=stdio_cm) as mock_sc:
+                with patch("logai.providers.mcp.client.ClientSession", return_value=session_cm):
+                    # Must not raise — OSError is swallowed and devnull is used
+                    await manager.start()
+
+        _, kwargs = mock_sc.call_args
+        assert kwargs.get("errlog") is devnull_handle
+
+        await manager.stop()
+
+    @pytest.mark.asyncio
+    async def test_stderr_log_closed_in_stop(self) -> None:
+        """The stderr log file handle must be closed when stop() is called."""
+        mock_read, mock_write = MagicMock(), MagicMock()
+        mock_session = AsyncMock()
+        mock_session.initialize = AsyncMock(return_value=None)
+
+        stdio_cm = _make_stdio_cm(mock_read, mock_write)
+        session_cm = _make_session_cm(mock_session)
+
+        fake_file = MagicMock()
+
+        manager = MCPClientManager(
+            command="uvx",
+            args=["test-server"],
+            env={},
+            log_file_path="/tmp/logai-test.log",
+        )
+
+        with patch("builtins.open", return_value=fake_file):
+            with patch("logai.providers.mcp.client.stdio_client", return_value=stdio_cm):
+                with patch("logai.providers.mcp.client.ClientSession", return_value=session_cm):
+                    await manager.start()
+
+        assert manager._stderr_log is fake_file  # handle is open while running
+
+        await manager.stop()
+
+        fake_file.close.assert_called_once()
+        assert manager._stderr_log is None  # cleared after close
+
+    @pytest.mark.asyncio
+    async def test_stderr_log_closed_when_start_fails_after_open(self) -> None:
+        """If start() fails after opening the stderr log, the file is closed
+        immediately (no file descriptor leak)."""
+        fake_file = MagicMock()
+
+        # stdio_client raises to simulate subprocess launch failure
+        with patch("builtins.open", return_value=fake_file):
+            with patch(
+                "logai.providers.mcp.client.stdio_client",
+                side_effect=RuntimeError("subprocess failed"),
+            ):
+                manager = MCPClientManager(
+                    command="uvx",
+                    args=["test-server"],
+                    env={},
+                    log_file_path="/tmp/logai-test.log",
+                )
+
+                with pytest.raises(RuntimeError, match="subprocess failed"):
+                    await manager.start()
+
+        # File must have been closed despite the failure
+        fake_file.close.assert_called_once()
+        assert manager._stderr_log is None
