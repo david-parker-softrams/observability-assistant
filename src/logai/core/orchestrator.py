@@ -353,7 +353,7 @@ DO NOT skip this step. DO NOT answer based on preview alone. DO NOT wait for use
 6. Fetch more chunks if needed (offset=100, limit=100, etc.)
 
 EXAMPLE:
-If fetch_logs returns {{"cached": true, "cache_id": "result_6d283cecb68018ad", "total_events": 100, "sample": [5 events]}},
+If a log query tool returns {{"cached": true, "cache_id": "result_6d283cecb68018ad", "total_events": 100, "sample": [5 events]}},
 your immediate next action MUST be calling fetch_cached_result_chunk, NOT providing analysis.
 
 The fetch_cached_result_chunk tool supports:
@@ -450,17 +450,25 @@ Current time: {current_time}
     # Teaches the LLM the two-call CloudWatch Logs Insights pattern exposed by
     # the AWS CloudWatch MCP server (execute → poll results).
     _MCP_LOGS_INSIGHTS_GUIDANCE = """
-## CloudWatch Logs Insights (MCP Tools)
+## CloudWatch Logs Insights (MCP Tools) — MANDATORY
 
-When querying CloudWatch logs, use the two-step CloudWatch Logs Insights pattern:
-1. Call `execute_log_insights_query` with: `logGroupNames` (list), `startTime`, `endTime`, `queryString`
-2. Call `get_logs_insight_query_results` with the `queryId` returned from step 1
+Any request to fetch, search, summarize, show, or analyze logs MUST use the two-step pattern below.
+NEVER say you lack a tool for this — these tools ARE available.
 
-Logs Insights query syntax examples:
-  - `fields @timestamp, @message | filter @message like /ERROR/ | sort @timestamp desc | limit 100`
-  - `fields @timestamp, @message | filter @message like /pattern/ | stats count() by bin(5m)`
+### Two-step pattern
+1. Call `execute_log_insights_query` → args: `logGroupNames` (list), `startTime`, `endTime`, `queryString`
+2. Poll `get_logs_insight_query_results` with the `queryId` from step 1; repeat until status is "Complete"
 
-Use `describe_log_groups` to find available log groups."""
+### Example queries
+- Summarize / show recent logs:
+  `fields @timestamp, @message | sort @timestamp desc | limit 100`
+- Show errors:
+  `fields @timestamp, @message | filter @message like /(?i)error/ | sort @timestamp desc | limit 50`
+- Pattern stats:
+  `fields @timestamp, @message | filter @message like /pattern/ | stats count() by bin(5m)`
+
+### Finding log groups
+Use `describe_log_groups` to list or search log groups — do NOT use list_log_groups (not available)."""
 
     def _get_system_prompt(self) -> str:
         """
