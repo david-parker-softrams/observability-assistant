@@ -17,7 +17,7 @@ Fixed critical cache system bug causing **100% cache miss rate**. The root cause
 fix: Prevent debug logs from appearing in TUI
 ```
 
-**Problem:** When running with `--debug`, debug logs were appearing in the TUI, disrupting the interface.
+**Problem:** When running with `--loglevel DEBUG`, debug logs were appearing in the TUI, disrupting the interface.
 
 **Root Cause:** Unconditional `StreamHandler` added to logging at `src/logai/cli.py` line 49, which writes to stderr. Textual captures stderr and displays it in the TUI.
 
@@ -87,7 +87,7 @@ The LLM truncates the cache_id when parsing this to generate JSON tool calls.
 
 1. **Start the application with debug logging:**
    ```bash
-   python -m logai --debug
+   python -m logai --loglevel DEBUG
    ```
 
 2. **Perform large log query** (triggers caching):
@@ -110,7 +110,7 @@ The LLM truncates the cache_id when parsing this to generate JSON tool calls.
    - Second fetch should be from cache
 
 6. **Verify no debug logs in TUI:**
-   - With `--debug`, logs should go to file only
+   - With `--loglevel DEBUG`, logs should go to file only
    - TUI should remain clean without debug messages popping up
 
 ### Expected Results

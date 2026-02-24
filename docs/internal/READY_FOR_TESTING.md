@@ -71,7 +71,7 @@ george-scratch/MANUAL_TESTING_PLAN.md
 
 ### Quick Test Summary:
 
-1. **Start app:** `python -m logai --debug`
+1. **Start app:** `python -m logai --loglevel DEBUG`
 2. **Verify:** No debug logs in TUI (should be clean)
 3. **Run query:** Perform a large log query (>100 events)
 4. **Check logs:** Verify cache storage with correct 23-char cache_id

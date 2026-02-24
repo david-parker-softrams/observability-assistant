@@ -512,7 +512,7 @@ Use this tool to find available log groups before querying logs."""
             context_message: Message to inject as system context
         """
         self._pending_context_injection = context_message
-        logger.info(f"[CONTEXT_DEBUG] Orchestrator stored context: {len(context_message)} chars")
+        logger.debug(f"Orchestrator stored context: {len(context_message)} chars")
 
     def _get_pending_context_injection(self) -> str | None:
         """
@@ -525,7 +525,7 @@ Use this tool to find available log groups before querying logs."""
         if self._pending_context_injection:
             injection = self._pending_context_injection
             self._pending_context_injection = None
-            logger.info(f"[CONTEXT_DEBUG] Orchestrator retrieved context: {len(injection)} chars")
+            logger.debug(f"Orchestrator retrieved context: {len(injection)} chars")
             return injection
 
         return None
@@ -620,7 +620,7 @@ Use this tool to find available log groups before querying logs."""
         chunk_size = self.settings.initial_chunk_size
         total_chunks = (cache.total_events + chunk_size - 1) // chunk_size
 
-        logger.info(
+        logger.debug(
             f"Injecting cache guidance for follow-up question "
             f"(cache_id={cache.cache_id}, {cache.total_events} events)"
         )
@@ -715,7 +715,7 @@ Do NOT answer based only on preview samples."""
             )
 
         logger.debug(
-            f"[DIAGNOSTIC] Processing tool result: tool_name={tool_name}, "
+            f"Processing tool result: tool_name={tool_name}, "
             f"event_count={event_count}, "
             f"has_result={bool(result_data_temp)}"
         )
@@ -728,7 +728,7 @@ Do NOT answer based only on preview samples."""
             )
             self.budget_tracker.add_result_tokens(token_count)
             logger.debug(
-                f"[FETCH_LOGS_DEBUG] Bypassing cache for fetch_cached_result_chunk, "
+                f"Bypassing cache for fetch_cached_result_chunk, "
                 f"result keys: {list(result_data.keys())}, "
                 f"event count: {len(result_data.get('events', []))}, "
                 f"tokens: {token_count}"
@@ -754,7 +754,7 @@ Do NOT answer based only on preview samples."""
         )
 
         logger.debug(
-            f"[DIAGNOSTIC] Cache decision: tool_name={tool_name}, "
+            f"Cache decision: tool_name={tool_name}, "
             f"should_cache={should_cache}, tokens={token_count}, "
             f"threshold={self.settings.cache_large_results_threshold}"
         )
@@ -795,7 +795,7 @@ Do NOT answer based only on preview samples."""
                 )
 
                 logger.debug(
-                    f"[DIAGNOSTIC] CACHED: tool_name={tool_name}, "
+                    f"CACHED: tool_name={tool_name}, "
                     f"cache_id={summary.cache_id}, "
                     f"total_events={summary.total_events}, "
                     f"samples={len(summary.sample_events)}"
@@ -1269,7 +1269,7 @@ Do NOT answer based only on preview samples."""
                 or ``"_chat_stream"``, included in log output for easy grepping.
         """
         logger.debug(
-            f"[DIAGNOSTIC] Message to agent ({caller}): role=tool, "
+            f"Message to agent ({caller}): role=tool, "
             f"tool_call_id={tool_result['tool_call_id']}, "
             f"content_length={len(tool_message['content'])}, "
             f"content_preview={tool_message['content'][:200]}..."
@@ -1289,27 +1289,20 @@ Do NOT answer based only on preview samples."""
         # Deeper per-field logging for uncached fetch_logs results.
         stream_label = " (STREAM)" if caller == "_chat_stream" else ""
         logger.debug(
-            f"[FETCH_LOGS_DEBUG] ===== FINAL MESSAGE TO LLM{stream_label} ===== "
-            "Tool result being sent to LLM"
+            f"===== FINAL MESSAGE TO LLM{stream_label} ===== Tool result being sent to LLM"
         )
-        logger.debug(f"[FETCH_LOGS_DEBUG] Message role: {tool_message['role']}")
-        logger.debug(f"[FETCH_LOGS_DEBUG] Message tool_call_id: {tool_message['tool_call_id']}")
-        logger.debug(
-            f"[FETCH_LOGS_DEBUG] Message content length: {len(tool_message['content'])} chars"
-        )
-        logger.debug("[FETCH_LOGS_DEBUG] Content is JSON-serialized: True")
+        logger.debug(f"Message role: {tool_message['role']}")
+        logger.debug(f"Message tool_call_id: {tool_message['tool_call_id']}")
+        logger.debug(f"Message content length: {len(tool_message['content'])} chars")
+        logger.debug("Content is JSON-serialized: True")
 
         try:
             content_parsed = json.loads(tool_message["content"])
-            logger.debug(f"[FETCH_LOGS_DEBUG] Parsed content keys: {list(content_parsed.keys())}")
-            logger.debug(
-                f"[FETCH_LOGS_DEBUG] Event count in message: {len(content_parsed.get('events', []))}"
-            )
-            logger.debug(
-                f"[FETCH_LOGS_DEBUG] Content preview (first 300 chars): {tool_message['content'][:300]}..."
-            )
+            logger.debug(f"Parsed content keys: {list(content_parsed.keys())}")
+            logger.debug(f"Event count in message: {len(content_parsed.get('events', []))}")
+            logger.debug(f"Content preview (first 300 chars): {tool_message['content'][:300]}...")
         except json.JSONDecodeError:
-            logger.warning("[FETCH_LOGS_DEBUG] Failed to parse message content as JSON")
+            logger.warning("Failed to parse tool message content as JSON")
 
     async def _chat_complete(self, user_message: str) -> str:
         """Process message and return complete response.
@@ -1367,11 +1360,11 @@ Do NOT answer based only on preview samples."""
         tools = self.tool_registry.to_function_definitions()
 
         # Log message summary before LLM call
-        logger.info(f"[CONTEXT_DEBUG] Sending {len(messages)} messages to LLM")
+        logger.debug(f"Sending {len(messages)} messages to LLM")
         for i, msg in enumerate(messages):
             content_preview = msg["content"][:100] if len(msg["content"]) > 100 else msg["content"]
-            logger.info(
-                f"[CONTEXT_DEBUG] Message {i}: role={msg['role']}, length={len(msg['content'])} chars, preview={content_preview}..."
+            logger.debug(
+                f"Message {i}: role={msg['role']}, length={len(msg['content'])} chars, preview={content_preview}..."
             )
 
         # Initialize retry state for this turn
@@ -1662,17 +1655,13 @@ Do NOT answer based only on preview samples."""
 
         # Merge all injections into system prompt
         if pending_injection:
-            logger.info(
-                f"[CONTEXT_DEBUG] Merging context into system prompt: {len(pending_injection)} chars"
-            )
-            logger.info(f"[CONTEXT_DEBUG] Context preview: {pending_injection[:500]}...")
+            logger.debug(f"Merging context into system prompt: {len(pending_injection)} chars")
+            logger.debug(f"Context preview: {pending_injection[:500]}...")
             # Merge context injection into the main system prompt
             system_prompt = system_prompt + "\n\n---\n\n" + pending_injection
 
         if cache_injection:
-            logger.info(
-                f"[CACHE_INJECTION] Injecting cache guidance for follow-up: {len(cache_injection)} chars"
-            )
+            logger.debug(f"Injecting cache guidance for follow-up: {len(cache_injection)} chars")
             system_prompt = system_prompt + "\n\n---\n\n" + cache_injection
 
         # Prepare messages with complete system prompt (only ONE system message)
@@ -1690,11 +1679,11 @@ Do NOT answer based only on preview samples."""
         tools = self.tool_registry.to_function_definitions()
 
         # Log message summary before LLM call
-        logger.info(f"[CONTEXT_DEBUG] Sending {len(messages)} messages to LLM")
+        logger.debug(f"Sending {len(messages)} messages to LLM")
         for i, msg in enumerate(messages):
             content_preview = msg["content"][:100] if len(msg["content"]) > 100 else msg["content"]
-            logger.info(
-                f"[CONTEXT_DEBUG] Message {i}: role={msg['role']}, length={len(msg['content'])} chars, preview={content_preview}..."
+            logger.debug(
+                f"Message {i}: role={msg['role']}, length={len(msg['content'])} chars, preview={content_preview}..."
             )
 
         # Initialize retry state for this turn
@@ -2029,13 +2018,10 @@ Do NOT answer based only on preview samples."""
 
                 # DIAGNOSTIC: Log raw tool result immediately after execution
                 if function_name == "fetch_logs":
+                    logger.debug(f"===== RAW TOOL EXECUTION ===== Tool executed: {function_name}")
+                    logger.debug(f"Raw result type: {type(result).__name__}")
                     logger.debug(
-                        f"[FETCH_LOGS_DEBUG] ===== RAW TOOL EXECUTION ===== "
-                        f"Tool executed: {function_name}"
-                    )
-                    logger.debug(f"[FETCH_LOGS_DEBUG] Raw result type: {type(result).__name__}")
-                    logger.debug(
-                        f"[FETCH_LOGS_DEBUG] Raw result keys: {list(result.keys()) if isinstance(result, dict) else 'non-dict'}"
+                        f"Raw result keys: {list(result.keys()) if isinstance(result, dict) else 'non-dict'}"
                     )
                     if isinstance(result, dict):
                         # Type-safe event count extraction
@@ -2043,13 +2029,9 @@ Do NOT answer based only on preview samples."""
                         events = result.get("events") or result.get("logs")
                         if events and isinstance(events, list):
                             event_count = len(events)
-                        logger.debug(f"[FETCH_LOGS_DEBUG] Raw event count: {event_count}")
-                        logger.debug(
-                            f"[FETCH_LOGS_DEBUG] Raw result size: {len(str(result))} chars"
-                        )
-                        logger.debug(
-                            f"[FETCH_LOGS_DEBUG] Raw success flag: {result.get('success', 'N/A')}"
-                        )
+                        logger.debug(f"Raw event count: {event_count}")
+                        logger.debug(f"Raw result size: {len(str(result))} chars")
+                        logger.debug(f"Raw success flag: {result.get('success', 'N/A')}")
 
                 # Track successful fetch for limit enforcement (Phase 2)
                 if function_name == "fetch_cached_result_chunk" and result.get("success"):
@@ -2074,23 +2056,18 @@ Do NOT answer based only on preview samples."""
                 # DIAGNOSTIC: Log what's being added to results after processing
                 if function_name == "fetch_logs":
                     logger.debug(
-                        "[FETCH_LOGS_DEBUG] ===== AFTER PROCESSING ===== "
-                        "Result processed by _process_tool_result"
+                        "===== AFTER PROCESSING ===== Result processed by _process_tool_result"
                     )
-                    logger.debug(
-                        f"[FETCH_LOGS_DEBUG] Processed result keys: {list(processed_result.keys())}"
-                    )
+                    logger.debug(f"Processed result keys: {list(processed_result.keys())}")
                     processed_data = processed_result.get("result", {})
                     logger.debug(
-                        f"[FETCH_LOGS_DEBUG] Processed data keys: {list(processed_data.keys()) if isinstance(processed_data, dict) else 'non-dict'}"
+                        f"Processed data keys: {list(processed_data.keys()) if isinstance(processed_data, dict) else 'non-dict'}"
                     )
                     if isinstance(processed_data, dict):
                         logger.debug(
-                            f"[FETCH_LOGS_DEBUG] Processed event count: {len(processed_data.get('events', []))}"
+                            f"Processed event count: {len(processed_data.get('events', []))}"
                         )
-                        logger.debug(
-                            f"[FETCH_LOGS_DEBUG] Is cached: {processed_data.get('cached', False)}"
-                        )
+                        logger.debug(f"Is cached: {processed_data.get('cached', False)}")
 
                 results.append(processed_result)
 

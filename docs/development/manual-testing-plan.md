@@ -24,7 +24,7 @@ All 4 critical bugs have been **fixed and committed**:
 
 ```bash
 cd /Users/David.Parker/src/observability-assistant
-python -m logai --debug
+python -m logai --loglevel DEBUG
 ```
 
 **Expected:** Application starts normally, TUI displays cleanly

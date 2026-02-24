@@ -22,7 +22,7 @@ class TestLogAISettings:
         assert settings.pii_sanitization_enabled is True
         assert settings.cache_max_size_mb == 500
         assert settings.cache_ttl_seconds == 86400
-        assert settings.log_level == "INFO"
+        assert settings.log_level == "WARNING"
 
     def test_environment_variable_loading(
         self, clean_env: None, set_env_vars: dict[str, str]

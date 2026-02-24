@@ -9,6 +9,7 @@ from pathlib import Path
 from logai import __version__
 from logai.cache.manager import CacheManager
 from logai.config import get_settings
+from logai.config.settings import LogAISettings
 from logai.core.orchestrator import LLMOrchestrator
 from logai.core.sanitizer import LogSanitizer
 from logai.core.tools.registry import ToolRegistry
@@ -16,24 +17,103 @@ from logai.providers.datasources.cloudwatch import CloudWatchDataSource
 from logai.providers.llm.litellm_provider import LiteLLMProvider
 from logai.ui.app import LogAIApp
 
+# Valid log levels accepted by --loglevel and LOGAI_LOG_LEVEL
+# CRITICAL intentionally omitted — no user scenario requires suppressing ERROR but showing CRITICAL
+VALID_LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 
-def setup_logging(debug: bool = False, log_file: str | None = None) -> None:
+# Default log level when neither --loglevel nor LOGAI_LOG_LEVEL is configured
+DEFAULT_LOG_LEVEL = "WARNING"
+
+
+class DeprecatedDebugAction(argparse.Action):
+    """Custom argparse action that gives a clear error when --debug is used.
+
+    Users who have --debug in their aliases or scripts will see an actionable
+    migration message instead of a confusing "unrecognized argument" error.
+    """
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        parser.error("The --debug flag has been removed. Use --loglevel DEBUG instead.")
+
+
+def setup_logging(
+    cli_level: str | None = None,
+    settings: LogAISettings | None = None,
+    log_file: str | None = None,
+) -> None:
     """
     Configure application logging.
 
+    Precedence (highest to lowest):
+        1. cli_level (from --loglevel flag)
+        2. settings.log_level (from LOGAI_LOG_LEVEL env var / .env file)
+        3. DEFAULT_LOG_LEVEL ("WARNING")
+
+    All log output goes to a file only — never to stdout or stderr — to
+    preserve TUI integrity. A StreamHandler is added only as an emergency
+    fallback when the log file cannot be created.
+
     Args:
-        debug: Enable DEBUG level logging (default: INFO)
-        log_file: Path to log file (default: ~/.logai/logs/logai.log)
+        cli_level: Log level from the CLI flag (e.g., "DEBUG", "INFO").
+                   None means --loglevel was not provided.
+        settings: Application settings instance. If None, only cli_level
+                  and DEFAULT_LOG_LEVEL are considered.
+        log_file: Path to log file. Defaults to ~/.logai/logs/logai.log.
+                  If settings.log_file is set, that is used as a secondary
+                  source before falling back to the default path.
     """
-    level = logging.DEBUG if debug else logging.INFO
+    # --- Resolve effective log level ---
+    effective_level_name: str
+    level_source: str
+
+    if cli_level is not None:
+        # CLI flag takes highest precedence
+        effective_level_name = cli_level.upper()
+        level_source = "CLI --loglevel"
+    elif settings is not None and settings.log_level != DEFAULT_LOG_LEVEL:
+        # Settings (.env) takes second precedence, but only if it differs
+        # from the default. Note: if settings.log_level is "WARNING" (the
+        # new default), we can't distinguish "user explicitly set WARNING"
+        # from "no env var set". This is acceptable — the result is correct
+        # either way.
+        # NOTE: If LOGAI_LOG_LEVEL=WARNING is set explicitly in .env, source will
+        # show 'default' since WARNING == DEFAULT_LOG_LEVEL. The level is still
+        # correct; only the diagnostic label is slightly misleading.
+        effective_level_name = settings.log_level
+        level_source = "LOGAI_LOG_LEVEL env var"
+    elif settings is not None:
+        # Settings exist but log_level is at default
+        effective_level_name = settings.log_level
+        level_source = "default"
+    else:
+        effective_level_name = DEFAULT_LOG_LEVEL
+        level_source = "default"
+
+    # Validate the resolved level. argparse choices= and Pydantic's Literal
+    # should prevent invalid values in practice, but guard defensively here.
+    if effective_level_name not in VALID_LOG_LEVELS:
+        print(
+            f"⚠️  Warning: Invalid log level '{effective_level_name}', "
+            f"falling back to {DEFAULT_LOG_LEVEL}",
+            file=sys.stderr,
+        )
+        effective_level_name = DEFAULT_LOG_LEVEL
+        level_source = "default (fallback)"
+
+    level = getattr(logging, effective_level_name)
+
+    # --- Set up file handler ---
     handlers: list[logging.Handler] = []
 
-    # Try to set up file logging
     try:
         if log_file is None:
-            log_dir = Path.home() / ".logai" / "logs"
-            log_dir.mkdir(parents=True, exist_ok=True)
-            log_file = str(log_dir / "logai.log")
+            # Use settings.log_file if available, otherwise fall back to default
+            if settings is not None and settings.log_file is not None:
+                log_file = str(settings.log_file)
+            else:
+                log_dir = Path.home() / ".logai" / "logs"
+                log_dir.mkdir(parents=True, exist_ok=True)
+                log_file = str(log_dir / "logai.log")
         else:
             log_path = Path(log_file)
             log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -43,22 +123,156 @@ def setup_logging(debug: bool = False, log_file: str | None = None) -> None:
     except (PermissionError, OSError) as e:
         print(f"⚠️  Warning: Could not create log file: {e}", file=sys.stderr)
         print("   Logging to console only", file=sys.stderr)
-        log_file = None  # Mark that file logging failed
-        # Add console handler as fallback when file logging fails
+        log_file = None
+        # Emergency fallback to console ONLY when file creation fails.
+        # Under normal operation nothing goes to the console, preserving TUI.
         handlers.append(logging.StreamHandler())
 
     logging.basicConfig(
         level=level,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         handlers=handlers,
-        force=True,  # Clear existing handlers (e.g., from pytest)
+        force=True,  # Clear any existing handlers (e.g., from pytest)
     )
 
     logger = logging.getLogger(__name__)
     if log_file:
-        logger.info(f"Logging initialized: level={logging.getLevelName(level)}, file={log_file}")
+        logger.info(
+            f"Logging initialized: level={effective_level_name} "
+            f"(source={level_source}), file={log_file}"
+        )
     else:
-        logger.info(f"Logging initialized: level={logging.getLevelName(level)}, console only")
+        logger.info(
+            f"Logging initialized: level={effective_level_name} "
+            f"(source={level_source}), console only"
+        )
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    """
+    Build and return the CLI argument parser.
+
+    Extracted into its own function so that tests can exercise argument
+    parsing in isolation without running main().
+    """
+    parser = argparse.ArgumentParser(
+        prog="logai",
+        description="AI-powered observability assistant for AWS CloudWatch logs",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  logai                                      # Start with default configuration
+  logai --aws-profile my-profile             # Use specific AWS profile
+  logai --aws-profile prod --aws-region us-west-2  # Use profile and region
+  logai --loglevel DEBUG                     # Enable debug logging
+  logai --loglevel INFO                      # Standard operational logging
+  logai --version                            # Show version information
+  logai --help                               # Show this help message
+
+  # Authentication commands
+  logai auth login                           # Authenticate with GitHub Copilot
+  logai auth status                          # Check authentication status
+  logai auth logout                          # Remove stored credentials
+  logai auth list                            # List authenticated providers
+
+Environment Variables:
+  LOGAI_LLM_PROVIDER              # LLM provider: anthropic (default) or openai
+  LOGAI_ANTHROPIC_API_KEY         # Anthropic API key
+  LOGAI_OPENAI_API_KEY            # OpenAI API key
+  LOGAI_PII_SANITIZATION_ENABLED  # Enable PII sanitization (default: true)
+  LOGAI_CACHE_DIR                 # Cache directory (default: ~/.logai/cache)
+  LOGAI_LOG_LEVEL                 # Log level: DEBUG, INFO, WARNING, ERROR (default: WARNING)
+  AWS_DEFAULT_REGION              # AWS region (can be overridden with --aws-region)
+  AWS_PROFILE                     # AWS profile (can be overridden with --aws-profile)
+  AWS_ACCESS_KEY_ID               # AWS credentials
+  AWS_SECRET_ACCESS_KEY           # AWS credentials
+
+Note: Command-line arguments take precedence over environment variables.
+
+For more information, visit: https://github.com/logai/logai
+        """,
+    )
+
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+    )
+
+    parser.add_argument(
+        "--config",
+        type=Path,
+        help="Path to configuration file (future feature)",
+        default=None,
+    )
+
+    parser.add_argument(
+        "--aws-profile",
+        type=str,
+        help="AWS profile name to use for CloudWatch access (overrides AWS_PROFILE)",
+        default=None,
+        metavar="PROFILE",
+    )
+
+    parser.add_argument(
+        "--aws-region",
+        type=str,
+        help="AWS region for CloudWatch (overrides AWS_DEFAULT_REGION)",
+        default=None,
+        metavar="REGION",
+    )
+
+    parser.add_argument(
+        "--loglevel",
+        type=str.upper,  # Normalize to uppercase so --loglevel debug works
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        default=None,  # None = "not provided via CLI" (essential for precedence logic)
+        help="Set log level (default: WARNING). Overrides LOGAI_LOG_LEVEL env var.",
+        metavar="LEVEL",
+    )
+
+    # Keep --debug registered but redirect users to --loglevel with a clear message.
+    # Hidden from --help output so it doesn't appear as a supported option.
+    parser.add_argument(
+        "--debug",
+        nargs=0,
+        action=DeprecatedDebugAction,
+        help=argparse.SUPPRESS,
+    )
+
+    parser.add_argument(
+        "--log-file",
+        type=str,
+        default=None,
+        help="Path to log file (default: ~/.logai/logs/logai.log)",
+    )
+
+    # Add subparsers for commands
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+
+    # Auth subcommand group
+    auth_parser = subparsers.add_parser("auth", help="Manage authentication")
+    auth_subparsers = auth_parser.add_subparsers(dest="auth_command", help="Auth commands")
+
+    # logai auth login
+    login_parser = auth_subparsers.add_parser("login", help="Authenticate with GitHub Copilot")
+    login_parser.add_argument(
+        "--timeout",
+        type=int,
+        default=900,
+        help="Authentication timeout in seconds (default: 900)",
+    )
+
+    # logai auth logout
+    auth_subparsers.add_parser("logout", help="Remove GitHub Copilot credentials")
+
+    # logai auth status
+    auth_subparsers.add_parser("status", help="Show authentication status")
+
+    # logai auth list
+    auth_subparsers.add_parser("list", help="List authenticated providers")
+
+    return parser
 
 
 async def handle_auth_login(args: argparse.Namespace) -> int:
@@ -152,115 +366,28 @@ async def handle_auth_list(args: argparse.Namespace) -> int:
 
 def main() -> int:
     """Main CLI entry point."""
-    parser = argparse.ArgumentParser(
-        prog="logai",
-        description="AI-powered observability assistant for AWS CloudWatch logs",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  logai                                      # Start with default configuration
-  logai --aws-profile my-profile             # Use specific AWS profile
-  logai --aws-profile prod --aws-region us-west-2  # Use profile and region
-  logai --version                            # Show version information
-  logai --help                               # Show this help message
-
-  # Authentication commands
-  logai auth login                           # Authenticate with GitHub Copilot
-  logai auth status                          # Check authentication status
-  logai auth logout                          # Remove stored credentials
-  logai auth list                            # List authenticated providers
-
-Environment Variables:
-  LOGAI_LLM_PROVIDER              # LLM provider: anthropic (default) or openai
-  LOGAI_ANTHROPIC_API_KEY         # Anthropic API key
-  LOGAI_OPENAI_API_KEY            # OpenAI API key
-  LOGAI_PII_SANITIZATION_ENABLED  # Enable PII sanitization (default: true)
-  LOGAI_CACHE_DIR                 # Cache directory (default: ~/.logai/cache)
-  AWS_DEFAULT_REGION              # AWS region (can be overridden with --aws-region)
-  AWS_PROFILE                     # AWS profile (can be overridden with --aws-profile)
-  AWS_ACCESS_KEY_ID               # AWS credentials
-  AWS_SECRET_ACCESS_KEY           # AWS credentials
-
-Note: Command-line arguments take precedence over environment variables.
-
-For more information, visit: https://github.com/logai/logai
-        """,
-    )
-
-    parser.add_argument(
-        "--version",
-        action="version",
-        version=f"%(prog)s {__version__}",
-    )
-
-    parser.add_argument(
-        "--config",
-        type=Path,
-        help="Path to configuration file (future feature)",
-        default=None,
-    )
-
-    parser.add_argument(
-        "--aws-profile",
-        type=str,
-        help="AWS profile name to use for CloudWatch access (overrides AWS_PROFILE)",
-        default=None,
-        metavar="PROFILE",
-    )
-
-    parser.add_argument(
-        "--aws-region",
-        type=str,
-        help="AWS region for CloudWatch (overrides AWS_DEFAULT_REGION)",
-        default=None,
-        metavar="REGION",
-    )
-
-    parser.add_argument(
-        "--debug",
-        action="store_true",
-        help="Enable debug logging (default: INFO level)",
-    )
-
-    parser.add_argument(
-        "--log-file",
-        type=str,
-        default=None,
-        help="Path to log file (default: ~/.logai/logs/logai.log)",
-    )
-
-    # Add subparsers for commands
-    subparsers = parser.add_subparsers(dest="command", help="Available commands")
-
-    # Auth subcommand group
-    auth_parser = subparsers.add_parser("auth", help="Manage authentication")
-    auth_subparsers = auth_parser.add_subparsers(dest="auth_command", help="Auth commands")
-
-    # logai auth login
-    login_parser = auth_subparsers.add_parser("login", help="Authenticate with GitHub Copilot")
-    login_parser.add_argument(
-        "--timeout",
-        type=int,
-        default=900,
-        help="Authentication timeout in seconds (default: 900)",
-    )
-
-    # logai auth logout
-    auth_subparsers.add_parser("logout", help="Remove GitHub Copilot credentials")
-
-    # logai auth status
-    auth_subparsers.add_parser("status", help="Show authentication status")
-
-    # logai auth list
-    auth_subparsers.add_parser("list", help="List authenticated providers")
+    parser = _build_parser()
 
     # Parse arguments
     args = parser.parse_args()
 
-    # Setup logging FIRST (before any other operations)
-    setup_logging(debug=args.debug, log_file=args.log_file)
+    # Load settings FIRST — we need settings.log_level for full precedence
+    # resolution in setup_logging(). If loading fails we pass settings=None,
+    # which causes setup_logging() to fall back to cli_level or DEFAULT_LOG_LEVEL.
+    settings = None
+    try:
+        settings = get_settings()
+    except Exception as e:
+        print(
+            f"Warning: Could not load settings before logging init "
+            f"({type(e).__name__}: {e}). Using defaults.",
+            file=sys.stderr,
+        )
 
-    # Handle auth commands
+    # Setup logging (uses settings if available for log_level from .env)
+    setup_logging(cli_level=args.loglevel, settings=settings, log_file=args.log_file)
+
+    # Handle auth commands (logging is available from this point forward)
     if args.command == "auth":
         if args.auth_command == "login":
             return asyncio.run(handle_auth_login(args))
@@ -271,19 +398,19 @@ For more information, visit: https://github.com/logai/logai
         elif args.auth_command == "list":
             return asyncio.run(handle_auth_list(args))
         elif args.auth_command is None:
-            auth_parser.print_help()
-            return 1
+            parser.error("Usage: logai auth {login,logout,status,list}")
         else:
             print(f"❌ Unknown auth command: {args.auth_command}", file=sys.stderr)
-            auth_parser.print_help()
             return 1
 
-    # Load and validate configuration
+    # Load and validate configuration (settings may have already loaded above)
     try:
-        settings = get_settings()
+        if settings is None:
+            # First attempt failed; retry now that logging is initialized
+            settings = get_settings()
 
-        # Override AWS settings from CLI arguments if provided
-        # CLI arguments take precedence over environment variables
+        # Override AWS settings from CLI arguments if provided.
+        # CLI arguments take precedence over environment variables.
         if args.aws_profile is not None:
             settings.aws_profile = args.aws_profile
         if args.aws_region is not None:

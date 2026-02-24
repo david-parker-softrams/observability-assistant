@@ -312,9 +312,10 @@ class LogAISettings(BaseSettings):
     )
 
     # === Logging Configuration ===
+    # Keep in sync with VALID_LOG_LEVELS in src/logai/cli.py
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = Field(
-        default="INFO",
-        description="Application log level",
+        default="WARNING",
+        description="Application log level (DEBUG, INFO, WARNING, ERROR)",
     )
 
     log_file: Path | None = Field(
