@@ -726,7 +726,13 @@ class TestCachedResultGuidance:
     async def test_cached_result_has_inline_guidance(
         self, settings, mock_llm_provider, mock_sanitizer, mock_result_cache
     ):
-        """Test that caching a result includes guidance directly in the result."""
+        """Test that caching a result embeds fetch guidance inline in the cached payload.
+
+        Phase 1 (Separate Message Timing) behaviour: guidance is NOT injected into
+        the system prompt immediately after caching. Instead, fetch instructions are
+        carried inside the cached result itself so the LLM sees them when it reads
+        the tool response, without any extra system-prompt round-trip.
+        """
         settings.enable_result_caching = True
         settings.cache_large_results_threshold = 1000
 
