@@ -187,13 +187,6 @@ class ChatScreen(Screen[None]):
             chat_input = self.query_one(ChatInput)
             chat_input.focus()
 
-            # Show paste tip on startup
-            self.notify(
-                "💡 Tip: Use Cmd+V (Mac) or Ctrl+Shift+V (Linux) to paste. Press Ctrl+Q to quit.",
-                severity="information",
-                timeout=5,
-            )
-
             logger.info("ChatScreen mounted successfully")
 
         except Exception as e:
