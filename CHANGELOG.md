@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0](https://github.com/david-parker-softrams/observability-assistant/compare/logai-v0.1.0...logai-v0.2.0) (2026-02-24)
+
+
+### Features
+
+* replace --debug with structured --loglevel system (DEBUG/INFO/WARNING/ERROR) ([#7](https://github.com/david-parker-softrams/observability-assistant/issues/7)) ([6966415](https://github.com/david-parker-softrams/observability-assistant/commit/696641598c69757d9176a18e8575b893277d5492))
+
 ## [0.1.0](https://github.com/david-parker-softrams/observability-assistant/compare/logai-v0.0.1...logai-v0.1.0) (2026-02-23)
 
 
