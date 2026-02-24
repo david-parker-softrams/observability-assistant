@@ -16,8 +16,35 @@ permissions:
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      pr: ${{ steps.release.outputs.pr }}
     steps:
       - uses: googleapis/release-please-action@v4.4.0
+        id: release
         with:
           # Target branch for releases (must match the branch this workflow runs on)
           target-branch: main
+
+  auto-merge:
+    needs: release-please
+    # Only run when release-please created/updated a PR but has NOT yet cut a
+    # final release. When release_created is true, the Release PR was already
+    # merged by release-please itself — nothing left for us to do.
+    if: ${{ needs.release-please.outputs.pr && !needs.release-please.outputs.release_created }}
+    runs-on: ubuntu-latest
+    # No job-level permissions block — inherits workflow-level
+    # `contents: write` + `pull-requests: write`.
+    steps:
+      - name: Enable auto-merge on release PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # outputs.pr is a JSON object like {"number": 42, ...}, not a bare integer.
+          PR_JSON: ${{ needs.release-please.outputs.pr }}
+        run: |
+          PR_NUMBER=$(echo "$PR_JSON" | jq -r '.number')
+          gh pr merge "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --auto \
+            --squash \
+          || echo "Auto-merge already set or PR not found -- skipping"
