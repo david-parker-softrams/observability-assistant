@@ -56,7 +56,7 @@ class TestCachedResultSummary:
     """Tests for CachedResultSummary dataclass."""
 
     def test_to_context_dict(self) -> None:
-        """Test conversion to context dictionary."""
+        """Test conversion to context dictionary with new 5-key structure (Phase 1)."""
         summary = CachedResultSummary(
             cache_id="result_abc123",
             total_events=100,
@@ -71,16 +71,22 @@ class TestCachedResultSummary:
 
         context_dict = summary.to_context_dict()
 
-        assert context_dict["cached"] is True
-        assert context_dict["cache_id"] == "result_abc123"
-        assert context_dict["summary"]["total_events"] == 100
-        assert context_dict["summary"]["time_range"]["start"] == 1707750000000
-        assert context_dict["summary"]["statistics"] == {"ERROR": 10, "INFO": 90}
-        assert context_dict["metadata"]["original_query"]["tool"] == "fetch_logs"
-        assert "fetch_cached_result_chunk" in context_dict["guidance"]
+        # Verify new 5-key structure
+        assert context_dict["result_type"] == "cached_preview"
+        assert context_dict["full_dataset"]["cache_id"] == "result_abc123"
+        assert context_dict["full_dataset"]["total_events"] == 100
+        assert context_dict["full_dataset"]["time_range"]["start"] == 1707750000000
+        assert context_dict["full_dataset"]["statistics"] == {"ERROR": 10, "INFO": 90}
+        assert context_dict["preview_events"] == [
+            {"timestamp": 1707750000000, "message": "Test event"}
+        ]
+        assert context_dict["fetch_more"]["tool"] == "fetch_cached_result_chunk"
+        assert "result_abc123" in context_dict["fetch_more"]["example"]
+        assert context_dict["fetch_more"]["total_chunks"] == 1  # 100 events / 100 per chunk = 1
+        assert "expires_in_seconds" in context_dict
 
     def test_to_context_dict_expires_in_seconds(self) -> None:
-        """Test expires_in_seconds calculation."""
+        """Test expires_in_seconds calculation with new structure."""
         now = int(time.time())
         expires_at = now + 1800  # 30 minutes from now
 
@@ -97,7 +103,7 @@ class TestCachedResultSummary:
         )
 
         context_dict = summary.to_context_dict()
-        expires_in = context_dict["metadata"]["expires_in_seconds"]
+        expires_in = context_dict["expires_in_seconds"]
 
         # Should be approximately 1800 seconds (allow some test execution time)
         assert 1795 <= expires_in <= 1805

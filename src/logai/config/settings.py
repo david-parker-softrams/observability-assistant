@@ -465,7 +465,7 @@ class LogAISettings(BaseSettings):
     )
 
     max_auto_chunk_fetches: int = Field(
-        default=3,
+        default=5,
         ge=1,
         le=10,
         description="Maximum number of automatic chunk fetches per turn",

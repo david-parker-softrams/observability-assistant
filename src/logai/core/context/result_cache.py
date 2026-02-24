@@ -23,7 +23,7 @@ class CachedResultSummary:
     total_events: int
     time_range: dict[str, Any]
     sample_events: list[dict[str, Any]]
-    event_statistics: dict[str, int]
+    event_statistics: dict[str, Any]  # Changed to Any to include metadata (_confidence, _method)
     original_tool: str
     original_query: dict[str, Any]
     cached_at: int
@@ -31,47 +31,49 @@ class CachedResultSummary:
 
     def to_context_dict(self) -> dict[str, Any]:
         """
-        Convert to dict suitable for LLM context.
+        Convert to dict optimized for LLM comprehension.
 
-        Returns a simplified structure that's easy for agents to work with:
-        - Maximum 5 top-level keys
-        - Single clear guidance field (no conflicting instructions)
-        - Consistent, intuitive field names
+        .. deprecated::
+            This method is no longer used in production. The orchestrator now builds
+            the cache summary directly via ``_create_enhanced_cache_summary()`` which
+            produces a flat structure better suited for LLM consumption.
+            This method is retained because existing tests cover its behaviour and it
+            may still be useful for debugging / offline tooling.
+
+        Design principles (Phase 1 - Separate Message Timing):
+        - 5 top-level keys maximum
+        - Clear "what you have" vs "how to get more" separation
+        - Preview events clearly marked as samples
+        - Actionable fetch instructions
+        - No premature guidance injection (follows Option A)
 
         Returns:
             Dictionary suitable for LLM context
         """
-        total_chunks = (self.total_events + 99) // 100  # ceiling division with chunk_size=100
+        chunk_size = 100  # Could be made configurable
+        total_chunks = (self.total_events + chunk_size - 1) // chunk_size
 
         return {
-            # Boolean flag indicating this is cached data
-            "cached": True,
-            # Unique identifier for fetching data
-            "cache_id": self.cache_id,
-            # Summary of the dataset
-            "summary": {
+            # Key 1: What type of result this is
+            "result_type": "cached_preview",
+            # Key 2: Full dataset information
+            "full_dataset": {
                 "total_events": self.total_events,
-                "time_range": self.time_range,
+                "cache_id": self.cache_id,
                 "statistics": self.event_statistics,
-                "sample_events": self.sample_events[:5],  # Use configured count (default 5)
+                "time_range": self.time_range,
             },
-            # Cache metadata (expiration info)
-            "metadata": {
-                "cached_at": self.cached_at,
-                "expires_in_seconds": max(0, self.expires_at - int(time.time())),
-                "original_query": {
-                    "tool": self.original_tool,
-                    "parameters": self.original_query,
-                },
+            # Key 3: Preview events (clearly samples)
+            "preview_events": self.sample_events,
+            # Key 4: How to fetch more data (clear, actionable)
+            "fetch_more": {
+                "tool": "fetch_cached_result_chunk",
+                "example": f"fetch_cached_result_chunk(cache_id='{self.cache_id}', offset=0, limit={chunk_size})",
+                "total_chunks": total_chunks,
+                "chunk_size": chunk_size,
             },
-            # Single, clear guidance on how to use this cached data
-            "guidance": (
-                f"This is a summary of cached results containing {self.total_events} events. "
-                f"The sample events above are for preview only - do not use them for counting or analysis. "
-                f"To analyze the full dataset, use fetch_cached_result_chunk() with cache_id='{self.cache_id}'. "
-                f"For counting or aggregation questions, you'll need to iterate through all {total_chunks} chunks "
-                f"(chunk_size=100). Example: fetch_cached_result_chunk(cache_id='{self.cache_id}', offset=0, limit=100)"
-            ),
+            # Key 5: Expiration info (important for agent decision-making)
+            "expires_in_seconds": max(0, self.expires_at - int(time.time())),
         }
 
 
@@ -246,7 +248,7 @@ class ResultCacheManager:
 
     def _count_by_structured_field(
         self, events: list[dict[str, Any]], field_name: str
-    ) -> dict[str, int]:
+    ) -> dict[str, Any]:
         """
         Count events by structured log level field.
 
@@ -257,7 +259,7 @@ class ResultCacheManager:
         Returns:
             Statistics dictionary with counts by normalized log level
         """
-        stats: dict[str, int] = {}
+        stats: dict[str, Any] = {}
 
         for event in events:
             level = event.get(field_name, "").upper()
@@ -280,7 +282,7 @@ class ResultCacheManager:
 
         return stats
 
-    def _count_by_text_heuristics(self, events: list[dict[str, Any]]) -> dict[str, int]:
+    def _count_by_text_heuristics(self, events: list[dict[str, Any]]) -> dict[str, Any]:
         """
         Count events by text heuristics (fallback method).
 
@@ -292,7 +294,7 @@ class ResultCacheManager:
         Returns:
             Statistics dictionary with counts by detected log level
         """
-        stats: dict[str, int] = {}
+        stats: dict[str, Any] = {}
 
         for event in events:
             message = event.get("message", "")
@@ -340,31 +342,37 @@ class ResultCacheManager:
 
         return stats
 
-    def _extract_event_statistics(self, events: list[dict[str, Any]]) -> dict[str, int]:
+    def _extract_event_statistics(self, events: list[dict[str, Any]]) -> dict[str, Any]:
         """
-        Extract statistics from events for the summary.
+        Extract statistics from events with confidence indicator.
 
-        Uses structured log level fields when available, falls back to text heuristics.
-        This provides more reliable statistics than pure text analysis.
+        Uses structured log level fields when available (high confidence),
+        falls back to text heuristics (estimated confidence).
 
         Args:
             events: List of event dictionaries
 
         Returns:
-            Statistics dictionary with counts by log level
+            Statistics dictionary with counts and confidence metadata
         """
         if not events:
-            return {}
+            return {"_confidence": "none", "_method": "no_events"}
 
         # Try to detect structured log level field
         level_field = self._detect_level_field(events)
 
         if level_field:
-            logger.debug(f"Using structured field '{level_field}' for statistics (reliable method)")
-            return self._count_by_structured_field(events, level_field)
+            stats = self._count_by_structured_field(events, level_field)
+            stats["_confidence"] = "high"
+            stats["_method"] = f"structured_field:{level_field}"
+            logger.debug(f"Statistics from structured field '{level_field}' (high confidence)")
         else:
-            logger.debug("No structured log level field found, using text heuristics (fallback)")
-            return self._count_by_text_heuristics(events)
+            stats = self._count_by_text_heuristics(events)
+            stats["_confidence"] = "estimated"
+            stats["_method"] = "text_heuristics"
+            logger.debug("Statistics from text heuristics (estimated confidence)")
+
+        return stats
 
     def _extract_time_range(self, events: list[dict[str, Any]]) -> dict[str, Any]:
         """
@@ -397,21 +405,61 @@ class ResultCacheManager:
             "span_ms": max_ts - min_ts,
         }
 
+    def _select_time_diverse(
+        self, events: list[dict[str, Any]], count: int
+    ) -> list[dict[str, Any]]:
+        """
+        Select events with time diversity (first, distributed middle, last).
+
+        Args:
+            events: List of events (should be pre-filtered by category)
+            count: Number to select
+
+        Returns:
+            Time-diverse selection of events
+        """
+        if len(events) <= count:
+            return events
+
+        # Sort by timestamp first
+        sorted_events = sorted(events, key=lambda e: e.get("timestamp", 0))
+
+        selected = []
+
+        # Always include first
+        selected.append(sorted_events[0])
+
+        # Add evenly distributed middle events
+        if count > 2:
+            step = len(sorted_events) // (count - 1)
+            for i in range(1, count - 1):
+                idx = min(i * step, len(sorted_events) - 1)
+                if sorted_events[idx] not in selected:
+                    selected.append(sorted_events[idx])
+
+        # Always include last
+        if sorted_events[-1] not in selected:
+            selected.append(sorted_events[-1])
+
+        return selected[:count]
+
     def _sample_events(
         self, events: list[dict[str, Any]], count: int | None = None
     ) -> list[dict[str, Any]]:
         """
-        Sample representative events for the summary.
+        Sample representative events with diversity awareness.
 
-        Strategy: Take first, last, and evenly distributed middle samples.
-        This gives the agent a sense of the data distribution.
+        Strategy:
+        1. Categorize by log level (ERROR > WARN > INFO > other)
+        2. Allocate slots proportionally with priority to errors/warnings
+        3. Within each category, select for time diversity
 
         Args:
             events: List of event dictionaries
             count: Number of samples to return (defaults to self.sample_event_count)
 
         Returns:
-            List of sampled events
+            List of diverse, representative sample events
         """
         if count is None:
             count = self.sample_event_count
@@ -419,22 +467,54 @@ class ResultCacheManager:
         if len(events) <= count:
             return events
 
-        sampled = []
+        # Categorize events by log level
+        errors: list[dict[str, Any]] = []
+        warnings: list[dict[str, Any]] = []
+        info: list[dict[str, Any]] = []
+        other: list[dict[str, Any]] = []
 
-        # Always include first event
-        sampled.append(events[0])
+        error_patterns = ["ERROR", "EXCEPTION", "FATAL", "CRITICAL"]
+        warn_patterns = ["WARN", "WARNING"]
+        info_patterns = ["INFO"]
 
-        # Include evenly distributed middle events
-        if count > 2:
-            step = len(events) // (count - 1)
-            for i in range(1, count - 1):
-                idx = min(i * step, len(events) - 1)
-                if events[idx] not in sampled:
-                    sampled.append(events[idx])
+        for event in events:
+            message = event.get("message", "").upper()
+            level = event.get("level", event.get("log_level", "")).upper()
+            combined = f"{level} {message}"
 
-        # Always include last event
-        if events[-1] not in sampled:
-            sampled.append(events[-1])
+            if any(p in combined for p in error_patterns):
+                errors.append(event)
+            elif any(p in combined for p in warn_patterns):
+                warnings.append(event)
+            elif any(p in combined for p in info_patterns):
+                info.append(event)
+            else:
+                other.append(event)
+
+        # Allocate slots (prioritize errors and warnings)
+        sampled: list[dict[str, Any]] = []
+        remaining = count
+
+        # Errors get priority (up to 40% of slots, min 1 if any exist)
+        if errors and remaining > 0:
+            error_slots = max(1, min(len(errors), remaining * 2 // 5))
+            sampled.extend(self._select_time_diverse(errors, error_slots))
+            remaining = count - len(sampled)
+
+        # Warnings get second priority (up to 30% of remaining)
+        if warnings and remaining > 0:
+            warn_slots = max(1, min(len(warnings), remaining * 3 // 10 + 1))
+            sampled.extend(self._select_time_diverse(warnings, warn_slots))
+            remaining = count - len(sampled)
+
+        # Fill remaining with info and other
+        if remaining > 0:
+            rest = info + other
+            if rest:
+                sampled.extend(self._select_time_diverse(rest, remaining))
+
+        # Sort by timestamp for chronological presentation
+        sampled.sort(key=lambda e: e.get("timestamp", 0))
 
         return sampled[:count]
 

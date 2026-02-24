@@ -218,11 +218,12 @@ class TestFetchCachedResultTool:
 
     @pytest.mark.asyncio
     async def test_execute_cache_not_found(self, fetch_tool: FetchCachedResultTool) -> None:
-        """Test execute with non-existent cache_id."""
-        result = await fetch_tool.execute(cache_id="result_nonexistent")
+        """Test execute with non-existent but valid format cache_id."""
+        # Use valid format (result_[16 hex chars]) but non-existent ID
+        result = await fetch_tool.execute(cache_id="result_0000000000000000")
 
         assert result["success"] is False
-        assert "not found" in result["error"]
+        assert "not found" in result["error"].lower()
         assert "hint" in result
 
     @pytest.mark.asyncio
@@ -255,8 +256,9 @@ class TestFetchCachedResultTool:
 
         tool = FetchCachedResultTool(result_cache=mock_cache)
 
+        # Use valid format cache_id
         with pytest.raises(ToolExecutionError) as exc_info:
-            await tool.execute(cache_id="result_test")
+            await tool.execute(cache_id="result_1234567890abcdef")
 
         assert "Failed to fetch cached result" in str(exc_info.value)
         assert exc_info.value.tool_name == "fetch_cached_result_chunk"

@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import time
 from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -11,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 from logai.cache.manager import CacheManager
 from logai.config.settings import LogAISettings
 from logai.core.context.budget_tracker import ContextBudgetTracker
-from logai.core.context.result_cache import ResultCacheManager
+from logai.core.context.result_cache import CachedResultSummary, ResultCacheManager
 from logai.core.context.token_counter import TokenCounter
 from logai.core.intent_detector import IntentDetector
 from logai.core.metrics import MetricsCollector, MetricsTimer
@@ -24,6 +25,53 @@ if TYPE_CHECKING:
 
 # Set up logger for retry behavior monitoring
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ActiveCacheContext:
+    """
+    Tracks active cached dataset for follow-up detection and limit enforcement.
+
+    This dataclass supports Phase 1 (Separate Message Timing) approach where:
+    - Cache is created but no immediate guidance is injected
+    - Follow-up questions are detected and trigger guidance injection
+    - Fetch counts are tracked per cache_id per conversation turn
+    """
+
+    cache_id: str
+    total_events: int
+    created_at: float
+    tool_name: str
+    chunks_fetched: int = 0
+
+    def is_recent(self, max_age_seconds: float = 600) -> bool:
+        """
+        Check if cache is recent enough for follow-up detection.
+
+        Args:
+            max_age_seconds: Maximum age in seconds (default 10 minutes per approved params)
+
+        Returns:
+            True if cache was created within max_age_seconds
+        """
+        return (time.time() - self.created_at) < max_age_seconds
+
+    def increment_fetch_count(self) -> int:
+        """Increment and return new fetch count."""
+        self.chunks_fetched += 1
+        return self.chunks_fetched
+
+    def is_over_limit(self, max_fetches: int) -> bool:
+        """
+        Check if fetch count exceeds limit.
+
+        Args:
+            max_fetches: Maximum number of fetches allowed
+
+        Returns:
+            True if limit has been reached or exceeded
+        """
+        return self.chunks_fetched >= max_fetches
 
 
 class OrchestratorError(Exception):
@@ -281,23 +329,43 @@ Before giving up on a search:
 - You MUST have used at least 2 different parameter combinations
 - You SHOULD expand time ranges before concluding "no logs found"
 
-## Cached Result Handling
+===CRITICAL: CACHED RESULTS PROTOCOL===
 
-When you receive a tool result with "cached": true:
-1. The full result was too large for context and has been cached
-2. You MUST immediately use fetch_cached_result_chunk(cache_id, offset, limit) to retrieve events
-3. Start with offset=0, limit=100 for the first chunk
-4. Analyze the chunk and decide if more data is needed to answer the user's question
-5. Fetch additional chunks if necessary (increment offset by limit)
-6. DO NOT wait for the user to ask - proceed automatically with chunk fetching
+⚠️ When you receive ANY tool result with "cached": true, you are seeing ONLY A SMALL PREVIEW (typically 5 samples).
+This preview is NOT sufficient to answer user questions. The full dataset has been cached to protect context limits.
+
+🚨 MANDATORY IMMEDIATE ACTION REQUIRED:
+You MUST call fetch_cached_result_chunk(cache_id, offset=0, limit=100) in your IMMEDIATE next response.
+DO NOT skip this step. DO NOT answer based on preview alone. DO NOT wait for user prompt.
+
+❌ WRONG - These will give INCORRECT answers:
+- Analyzing only the 5 preview samples and answering the user
+- Saying "Based on the logs, I can see..." when you only saw 5 of 100 events
+- Providing statistics or counts from preview data
+- Waiting for the user to ask for more data
+
+✅ CORRECT - Required workflow:
+1. See "cached": true with cache_id "result_abc123" and total_events: 100
+2. IMMEDIATELY call: fetch_cached_result_chunk(cache_id='result_abc123', offset=0, limit=100)
+3. Receive full chunk (100 events)
+4. Analyze the complete data
+5. Answer user's question based on FULL data
+6. Fetch more chunks if needed (offset=100, limit=100, etc.)
+
+EXAMPLE:
+If fetch_logs returns {{"cached": true, "cache_id": "result_6d283cecb68018ad", "total_events": 100, "sample": [5 events]}},
+your immediate next action MUST be calling fetch_cached_result_chunk, NOT providing analysis.
 
 The fetch_cached_result_chunk tool supports:
-- offset: Starting index (0-based)
-- limit: Number of events (max 200)
-- filter_pattern: Text to search for (case-insensitive)
-- time_start/time_end: Unix timestamps to filter by time range
+- cache_id: The cache_id from the cached result (REQUIRED)
+- offset: Starting index, 0-based (start with 0)
+- limit: Number of events, max 200 (use 100 initially)
+- filter_pattern: Optional text search (case-insensitive)
+- time_start/time_end: Optional Unix timestamp filters
 
-Always fetch at least one chunk to provide concrete results to the user.
+CONSEQUENCE OF IGNORING THIS:
+If you answer based only on preview samples, you will provide incomplete, potentially wrong analysis.
+The user expects analysis of ALL events, not just a preview.
 
 ## User-Provided Log Entries
 
@@ -355,8 +423,8 @@ Current time: {current_time}
         # Runtime context injections (for /refresh updates)
         self._pending_context_injection: str | None = None
 
-        # Track pending context injections for cached results
-        self._pending_cache_guidance: dict[str, Any] | None = None
+        # Track active cached result for follow-up detection (Phase 1: Separate Message Timing)
+        self._active_cache: ActiveCacheContext | None = None
 
         # Context management components
         self.budget_tracker = ContextBudgetTracker(
@@ -447,50 +515,138 @@ Use this tool to find available log groups before querying logs."""
         logger.info(f"[CONTEXT_DEBUG] Orchestrator stored context: {len(context_message)} chars")
 
     def _get_pending_context_injection(self) -> str | None:
-        """Get and clear any pending context injection."""
-        injections = []
+        """
+        Get and clear any pending context injection.
 
-        # Include cache guidance if available
-        if self._pending_cache_guidance and self.settings.enable_auto_fetch_guidance:
-            guidance = self._pending_cache_guidance
-            self._pending_cache_guidance = None  # Clear after use
-            cache_guidance = f"""SYSTEM INSTRUCTION: The previous tool call returned a large result that was automatically cached.
-
-CACHED RESULT INFORMATION:
-- Cache ID: {guidance["cache_id"]}
-- Total events cached: {guidance["total_events"]}
-
-You MUST now fetch chunks to show the user actual log events:
-
-STEP 1: Fetch first chunk
-Call fetch_cached_result_chunk with these parameters:
-- cache_id: {guidance["cache_id"]} (use this exact value)
-- offset: 0
-- limit: {self.settings.initial_chunk_size}
-
-STEP 2: Analyze and fetch more if needed
-If you need more events, call again with:
-- cache_id: {guidance["cache_id"]} (same value)
-- offset: {self.settings.initial_chunk_size}
-- limit: {self.settings.initial_chunk_size}
-
-IMPORTANT: Always use the exact cache_id value shown above.
-
-DO NOT just acknowledge the cache - fetch and show the user actual events.
-"""
-            injections.append(cache_guidance)
-
+        Note: Cache guidance is no longer injected here. It's now delivered
+        directly in the tool result to avoid confusing the agent.
+        """
         # Include user-selected log entries if available
         if self._pending_context_injection:
             injection = self._pending_context_injection
             self._pending_context_injection = None
             logger.info(f"[CONTEXT_DEBUG] Orchestrator retrieved context: {len(injection)} chars")
-            injections.append(injection)
+            return injection
 
-        # Return combined injections or None if empty
-        if injections:
-            return "\n\n---\n\n".join(injections)
         return None
+
+    def _should_inject_cache_guidance(self, user_message: str) -> bool:
+        """
+        Determine if cache guidance should be injected for this message.
+
+        Phase 1 (Separate Message Timing) approach:
+        - Only inject guidance for follow-up questions about cached data
+        - Requires active cache that's recent (< 10 minutes per approved params)
+        - Detects aggregation keywords or reference words
+
+        Returns True if:
+        - ``enable_auto_fetch_guidance`` setting is enabled
+        - Active cache exists and is recent
+        - Message appears to be a follow-up about cached data
+        - Message requires full dataset analysis
+
+        Args:
+            user_message: The user's message to analyze
+
+        Returns:
+            True if cache guidance should be injected
+        """
+        # Respect the feature flag — allows disabling guidance injection via config
+        if not self.settings.enable_auto_fetch_guidance:
+            return False
+
+        if not self._active_cache or not self._active_cache.is_recent(max_age_seconds=600):
+            return False
+
+        message_lower = user_message.lower()
+
+        # Check for aggregation keywords (strong signal for needing full dataset)
+        aggregation_keywords = [
+            "how many",
+            "count",
+            "total",
+            "every",
+            "breakdown",
+            "distribution",
+            "summarize",
+            "analyze all",
+            "sum",
+            "average",
+            "percentage",
+            "percent",
+            "proportion",
+        ]
+        has_aggregation = any(kw in message_lower for kw in aggregation_keywords)
+
+        # Check for reference words (indicates talking about previous results)
+        reference_words = [
+            "those",
+            "these",
+            "them",
+            "that data",
+            "the errors",
+            "the logs",
+            "the results",
+            "the events",
+            "above",
+        ]
+        has_reference = any(ref in message_lower for ref in reference_words)
+
+        return has_aggregation or has_reference
+
+    def _get_follow_up_cache_injection(self, user_message: str) -> str | None:
+        """
+        Generate cache guidance injection for follow-up questions about cached data.
+
+        This is part of Phase 1 (Separate Message Timing) where:
+        - Tool result was delivered first (agent saw the preview)
+        - User asks a follow-up question requiring full dataset
+        - We inject explicit guidance to use fetch_cached_result_chunk
+
+        Args:
+            user_message: The user's message (for logging/debugging)
+
+        Returns:
+            Injection text or None if no injection needed
+        """
+        if not self._should_inject_cache_guidance(user_message):
+            return None
+
+        # _should_inject_cache_guidance guarantees _active_cache is set; guard defensively
+        # against any future refactor that might call this method directly.
+        if self._active_cache is None:
+            return None
+        cache = self._active_cache
+        chunk_size = self.settings.initial_chunk_size
+        total_chunks = (cache.total_events + chunk_size - 1) // chunk_size
+
+        logger.info(
+            f"Injecting cache guidance for follow-up question "
+            f"(cache_id={cache.cache_id}, {cache.total_events} events)"
+        )
+
+        return f"""CACHED DATA CONTEXT:
+You have an active cached dataset from a previous query:
+- Cache ID: {cache.cache_id}
+- Total Events: {cache.total_events}
+- Chunks Available: {total_chunks} (at {chunk_size} events each)
+
+The user's question requires analyzing the full dataset.
+Use fetch_cached_result_chunk(cache_id="{cache.cache_id}", offset=0, limit={chunk_size})
+to retrieve and analyze all events. Iterate through all chunks for accurate counts.
+
+Do NOT answer based only on preview samples."""
+
+    def _reset_cache_fetch_count(self) -> None:
+        """
+        Reset the chunk fetch count on new user message (new turn).
+
+        Per approved design: fetch count resets per conversation turn,
+        allowing agents to make up to max_auto_chunk_fetches (5) per turn.
+        """
+        if self._active_cache:
+            self._active_cache.chunks_fetched = 0
+            logger.debug(f"Reset fetch count for cache_id={self._active_cache.cache_id}")
 
     def _notify_context_event(self, level: str, message: str) -> None:
         """
@@ -531,26 +687,64 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
         tool_name: str,
     ) -> dict[str, Any]:
         """
-        Process a tool result, caching if necessary.
+        Process a tool result, caching large results with improved clarity.
 
-        This is a critical integration point for context management. When a tool
-        returns a large result, we cache it and return a summary instead.
+        This method now implements smart caching that:
+        1. Caches large results (>5000 tokens) to preserve context budget
+        2. Returns a clear summary that makes it obvious logs WERE retrieved
+        3. Includes cache instructions directly in the result (not system prompt)
+        4. Provides representative samples for immediate value
 
-        ENHANCEMENT: Now enforces max_result_tokens setting by force-caching
-        any result that exceeds the configured limit.
+        The key improvement: Cache guidance is delivered WITH the tool result,
+        not merged into the system prompt beforehand. This prevents the agent
+        from getting confused about whether logs were actually returned.
 
         Args:
             tool_result: Raw tool result with tool_call_id and result
             tool_name: Name of the tool that produced this result
 
         Returns:
-            Processed result (possibly modified to a summary) for context
+            Processed result (possibly cached with enhanced summary) for context
         """
+        # DIAGNOSTIC: Log what tool we're processing
+        result_data_temp = tool_result.get("result", {})
+        event_count = 0
+        if isinstance(result_data_temp, dict):
+            event_count = len(result_data_temp.get("events", [])) or len(
+                result_data_temp.get("logs", [])
+            )
+
+        logger.debug(
+            f"[DIAGNOSTIC] Processing tool result: tool_name={tool_name}, "
+            f"event_count={event_count}, "
+            f"has_result={bool(result_data_temp)}"
+        )
+
+        # Never cache fetch_cached_result_chunk - agent requested full events, not summary
+        if tool_name == "fetch_cached_result_chunk":
+            result_data = tool_result["result"]
+            token_count = TokenCounter.estimate_json_tokens(
+                result_data, self.settings.current_llm_model
+            )
+            self.budget_tracker.add_result_tokens(token_count)
+            logger.debug(
+                f"[FETCH_LOGS_DEBUG] Bypassing cache for fetch_cached_result_chunk, "
+                f"result keys: {list(result_data.keys())}, "
+                f"event count: {len(result_data.get('events', []))}, "
+                f"tokens: {token_count}"
+            )
+            return tool_result  # Return as-is, no caching!
+
         result_data = tool_result["result"]
         tool_call_id = tool_result["tool_call_id"]
 
-        # Skip processing if caching is disabled
+        # Skip caching if disabled
         if not self.settings.enable_result_caching:
+            # Just track tokens and return
+            token_count = TokenCounter.estimate_json_tokens(
+                result_data, self.settings.current_llm_model
+            )
+            self.budget_tracker.add_result_tokens(token_count)
             return tool_result
 
         # Check if result should be cached based on size
@@ -559,9 +753,13 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
             threshold=self.settings.cache_large_results_threshold,
         )
 
-        # ==== NEW: Enforce max_result_tokens ====
-        # Check against max_result_tokens limit to prevent single large results
-        # from consuming all available context
+        logger.debug(
+            f"[DIAGNOSTIC] Cache decision: tool_name={tool_name}, "
+            f"should_cache={should_cache}, tokens={token_count}, "
+            f"threshold={self.settings.cache_large_results_threshold}"
+        )
+
+        # Enforce max_result_tokens limit
         max_allowed = self.settings.max_result_tokens
         force_cache_due_to_size = token_count > max_allowed
 
@@ -579,16 +777,13 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
                 "info",
                 f"Large result ({token_count} tokens) exceeds limit, caching...",
             )
-            # Force caching even if under normal threshold
             should_cache = True
-        # ==== END NEW ====
 
         if should_cache:
             try:
-                # Extract query parameters for cache key (best effort)
+                # Extract query parameters for cache key
                 query_params = {
                     "tool": tool_name,
-                    # Add timestamp to make cache entries unique per invocation
                     "timestamp": int(datetime.now(UTC).timestamp()),
                 }
 
@@ -599,28 +794,21 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
                     result=result_data,
                 )
 
-                # Store pending injection for next LLM call
-                # BUT: Skip cache fetch instructions if result has 0 events
-                # (no point fetching chunks from an empty cache)
-                if summary.total_events > 0:
-                    self._pending_cache_guidance = {
-                        "cache_id": summary.cache_id,
-                        "tool_name": tool_name,
-                        "total_events": summary.total_events,
-                    }
-                else:
-                    # Don't set guidance for empty results - let retry logic handle it
-                    logger.info(
-                        "Skipping cache fetch guidance for empty result (0 events)",
-                        extra={"tool_name": tool_name, "cache_id": summary.cache_id},
-                    )
+                logger.debug(
+                    f"[DIAGNOSTIC] CACHED: tool_name={tool_name}, "
+                    f"cache_id={summary.cache_id}, "
+                    f"total_events={summary.total_events}, "
+                    f"samples={len(summary.sample_events)}"
+                )
 
-                # Use summary instead of full result
-                modified_result = summary.to_context_dict()
+                # Create an ENHANCED summary that makes success clear
+                enhanced_summary = self._create_enhanced_cache_summary(
+                    summary, result_data, tool_name
+                )
 
-                # Track the summary tokens
+                # Track the enhanced summary tokens
                 summary_tokens = TokenCounter.estimate_json_tokens(
-                    modified_result, self.settings.current_llm_model
+                    enhanced_summary, self.settings.current_llm_model
                 )
                 self.budget_tracker.add_result_tokens(summary_tokens)
 
@@ -633,7 +821,8 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
                 )
 
                 logger.info(
-                    f"Result cached: {tool_name}, {token_count} tokens → {summary_tokens} token summary",
+                    f"Result cached with enhanced summary: {tool_name}, "
+                    f"{token_count} tokens → {summary_tokens} token summary",
                     extra={
                         "cache_id": summary.cache_id,
                         "original_tokens": token_count,
@@ -651,9 +840,22 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
                     labels={"tool": tool_name, "reason": cache_reason},
                 )
 
+                # Track active cache for follow-up detection (Phase 1: Separate Message Timing)
+                # No immediate guidance injection - let the enhanced tool result speak for itself
+                self._active_cache = ActiveCacheContext(
+                    cache_id=summary.cache_id,
+                    total_events=summary.total_events,
+                    created_at=time.time(),
+                    tool_name=tool_name,
+                )
+                logger.debug(
+                    f"Tracking active cache for follow-up: cache_id={summary.cache_id}, "
+                    f"total_events={summary.total_events}"
+                )
+
                 return {
                     "tool_call_id": tool_call_id,
-                    "result": modified_result,
+                    "result": enhanced_summary,
                 }
 
             except Exception as e:
@@ -666,7 +868,6 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
                 self._notify_context_event(
                     "warning", "Failed to cache large result, context may fill quickly"
                 )
-
                 # Fall through to use full result
                 self.budget_tracker.add_result_tokens(token_count)
                 return tool_result
@@ -674,6 +875,62 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
             # Result fits in context, use as-is
             self.budget_tracker.add_result_tokens(token_count)
             return tool_result
+
+    def _create_enhanced_cache_summary(
+        self,
+        summary: CachedResultSummary,
+        original_result: dict[str, Any],
+        tool_name: str,
+    ) -> dict[str, Any]:
+        """
+        Create an enhanced summary optimized for LLM consumption.
+
+        Phase 1 (Separate Message Timing) approach:
+        - Returns flat structure that LLMs can parse efficiently
+        - Events visible at top level, not buried in nested structure
+        - Cache info and fetch instructions included but clearly separated
+        - No premature guidance injection (that comes on follow-up)
+
+        The key improvements from Phase 1 design:
+        - Flat structure for LLM parsing (not nested 3 levels deep)
+        - Events at top-level "events" key for agent visibility
+        - Clear total_events vs sample_events distinction
+        - Fetch instructions at top level
+        - Success message clearly indicates preview vs total
+
+        Args:
+            summary: Cached result summary from cache manager
+            original_result: Original full result (for metadata)
+            tool_name: Name of the tool
+
+        Returns:
+            Enhanced summary dictionary flattened for LLM consumption
+        """
+        # Return flat structure for LLM parsing
+        # The 5-key structure is used internally but must be unwrapped for tool messages
+        enhanced = {
+            "success": True,
+            "events": summary.sample_events,  # ✅ Flat top-level key
+            "count": len(summary.sample_events),  # Number of sample events
+            "total_events": summary.total_events,  # Total events in cache
+            "sample_note": f"Showing {len(summary.sample_events)} representative samples of {summary.total_events} total events",
+            "statistics": summary.event_statistics,  # Event breakdown by level
+            "time_range": summary.time_range,  # Time span of events
+            # Cache information (top-level for clarity)
+            "cached": True,
+            "cache_id": summary.cache_id,
+            "expires_at": summary.expires_at,
+            # Fetch instructions (clear and actionable)
+            "fetch_instructions": {
+                "available": True,
+                "tool": "fetch_cached_result_chunk",
+                "cache_id": summary.cache_id,
+                "example": f"fetch_cached_result_chunk(cache_id='{summary.cache_id}', offset=0, limit=100)",
+                "note": "Use to retrieve additional events from the full cached dataset",
+            },
+        }
+
+        return enhanced
 
     def _should_prune_history(self) -> bool:
         """
@@ -991,6 +1248,69 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
         async for token in self._chat_stream(user_message):
             yield token
 
+    def _log_tool_call_diagnostic(
+        self,
+        tool_message: dict[str, Any],
+        tool_result: dict[str, Any],
+        caller: str,
+    ) -> None:
+        """Log diagnostic information about a tool result being sent to the LLM.
+
+        Emits a brief summary log followed by deeper FETCH_LOGS_DEBUG detail when
+        the result looks like an uncached ``fetch_logs`` response (i.e. it contains
+        both ``events`` and ``success`` keys and is not a cache hit).
+
+        Args:
+            tool_message: The assembled message dict that will be appended to the
+                conversation (contains ``role``, ``tool_call_id``, and ``content``).
+            tool_result: The raw tool result dict (contains ``result`` payload used
+                to decide whether deep logging applies).
+            caller: Short label identifying the call site, e.g. ``"_chat_complete"``
+                or ``"_chat_stream"``, included in log output for easy grepping.
+        """
+        logger.debug(
+            f"[DIAGNOSTIC] Message to agent ({caller}): role=tool, "
+            f"tool_call_id={tool_result['tool_call_id']}, "
+            f"content_length={len(tool_message['content'])}, "
+            f"content_preview={tool_message['content'][:200]}..."
+        )
+
+        tool_result_data = tool_result.get("result", {})
+        if not isinstance(tool_result_data, dict):
+            return
+
+        has_events = "events" in tool_result_data
+        has_success = "success" in tool_result_data
+        is_cached = tool_result_data.get("cached", False)
+
+        if not (has_events and has_success and not is_cached):
+            return
+
+        # Deeper per-field logging for uncached fetch_logs results.
+        stream_label = " (STREAM)" if caller == "_chat_stream" else ""
+        logger.debug(
+            f"[FETCH_LOGS_DEBUG] ===== FINAL MESSAGE TO LLM{stream_label} ===== "
+            "Tool result being sent to LLM"
+        )
+        logger.debug(f"[FETCH_LOGS_DEBUG] Message role: {tool_message['role']}")
+        logger.debug(f"[FETCH_LOGS_DEBUG] Message tool_call_id: {tool_message['tool_call_id']}")
+        logger.debug(
+            f"[FETCH_LOGS_DEBUG] Message content length: {len(tool_message['content'])} chars"
+        )
+        logger.debug("[FETCH_LOGS_DEBUG] Content is JSON-serialized: True")
+
+        try:
+            content_parsed = json.loads(tool_message["content"])
+            logger.debug(f"[FETCH_LOGS_DEBUG] Parsed content keys: {list(content_parsed.keys())}")
+            logger.debug(
+                f"[FETCH_LOGS_DEBUG] Event count in message: {len(content_parsed.get('events', []))}"
+            )
+            logger.debug(
+                f"[FETCH_LOGS_DEBUG] Content preview (first 300 chars): {tool_message['content'][:300]}..."
+            )
+        except json.JSONDecodeError:
+            logger.warning("[FETCH_LOGS_DEBUG] Failed to parse message content as JSON")
+
     async def _chat_complete(self, user_message: str) -> str:
         """Process message and return complete response.
 
@@ -999,32 +1319,38 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
         - Automatically retries on empty results
         - Tracks retry state across the conversation turn
         - Prunes history when context fills
-        - Caches large tool results
 
         Args:
-            user_message: User's message
+            user_message: User's input message
 
         Returns:
             Complete response text
+
+        Raises:
+            OrchestratorError: If orchestration fails
         """
-        # Add user message to history
-        self.conversation_history.append({"role": "user", "content": user_message})
+        # Track cache fetch count per turn (Phase 1)
+        self._reset_cache_fetch_count()
 
         # Prune history if needed (before preparing messages)
         self._prune_history_if_needed()
 
-        # Build complete system prompt with context injection merged in
-        # This ensures only ONE system message is created (OpenAI API ignores subsequent system messages)
-        system_prompt = self._get_system_prompt()
-        pending_injection = self._get_pending_context_injection()
+        # Get pending context to inject (user-provided logs, etc.)
+        context_to_inject = self._get_pending_context_injection()
 
-        if pending_injection:
-            logger.info(
-                f"[CONTEXT_DEBUG] Merging context into system prompt: {len(pending_injection)} chars"
-            )
-            logger.info(f"[CONTEXT_DEBUG] Context preview: {pending_injection[:500]}...")
-            # Merge context injection into the main system prompt
-            system_prompt = system_prompt + "\n\n---\n\n" + pending_injection
+        # Build system prompt with any context injection
+        system_prompt = self._get_system_prompt()
+        if context_to_inject:
+            system_prompt = f"{system_prompt}\n\n---\n\n{context_to_inject}"
+
+        # Inject follow-up cache guidance if needed (Phase 1 - Separate Message Timing)
+        follow_up_injection = self._get_follow_up_cache_injection(user_message)
+        if follow_up_injection:
+            system_prompt = f"{system_prompt}\n\n{follow_up_injection}"
+
+        # Add user message to history
+        user_msg = {"role": "user", "content": user_message}
+        self.conversation_history.append(user_msg)
 
         # Prepare messages with complete system prompt (only ONE system message)
         messages = [{"role": "system", "content": system_prompt}]
@@ -1105,6 +1431,9 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
                         }
                         self.conversation_history.append(tool_message)
                         messages.append(tool_message)
+
+                        # Log diagnostic information about the tool result being sent to the LLM.
+                        self._log_tool_call_diagnostic(tool_message, tool_result, "_chat_complete")
 
                         # Track the tool result tokens for mid-loop budget management
                         result_content = tool_message["content"]
@@ -1317,6 +1646,9 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
         # Add user message to history
         self.conversation_history.append({"role": "user", "content": user_message})
 
+        # Reset cache fetch count for new user message (new turn)
+        self._reset_cache_fetch_count()
+
         # Prune history if needed (before preparing messages)
         self._prune_history_if_needed()
 
@@ -1325,6 +1657,10 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
         system_prompt = self._get_system_prompt()
         pending_injection = self._get_pending_context_injection()
 
+        # Check if we should inject cache guidance for follow-up questions (Phase 1)
+        cache_injection = self._get_follow_up_cache_injection(user_message)
+
+        # Merge all injections into system prompt
         if pending_injection:
             logger.info(
                 f"[CONTEXT_DEBUG] Merging context into system prompt: {len(pending_injection)} chars"
@@ -1332,6 +1668,12 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
             logger.info(f"[CONTEXT_DEBUG] Context preview: {pending_injection[:500]}...")
             # Merge context injection into the main system prompt
             system_prompt = system_prompt + "\n\n---\n\n" + pending_injection
+
+        if cache_injection:
+            logger.info(
+                f"[CACHE_INJECTION] Injecting cache guidance for follow-up: {len(cache_injection)} chars"
+            )
+            system_prompt = system_prompt + "\n\n---\n\n" + cache_injection
 
         # Prepare messages with complete system prompt (only ONE system message)
         messages = [{"role": "system", "content": system_prompt}]
@@ -1412,6 +1754,9 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
                         }
                         self.conversation_history.append(tool_message)
                         messages.append(tool_message)
+
+                        # Log diagnostic information about the tool result being sent to the LLM.
+                        self._log_tool_call_diagnostic(tool_message, tool_result, "_chat_stream")
 
                         # Track the tool result tokens for mid-loop budget management
                         result_content = tool_message["content"]
@@ -1648,8 +1993,73 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
                 record.status = ToolCallStatus.RUNNING
                 self._notify_tool_call(record)
 
+                # Check fetch limit for cached result chunks (Phase 2)
+                if function_name == "fetch_cached_result_chunk" and self._active_cache:
+                    cache_id = function_args.get("cache_id")
+                    if cache_id == self._active_cache.cache_id:
+                        if self._active_cache.is_over_limit(self.settings.max_auto_chunk_fetches):
+                            logger.warning(
+                                f"Fetch limit exceeded: {self._active_cache.chunks_fetched} fetches "
+                                f"for cache_id={cache_id} (limit: {self.settings.max_auto_chunk_fetches})"
+                            )
+                            result = {
+                                "success": False,
+                                "error": f"Fetch limit exceeded for this cache ({self.settings.max_auto_chunk_fetches} fetches per turn)",
+                                "hint": "You have already fetched the maximum number of chunks for this cache in this turn. "
+                                "If you need more data, ask the user to re-run the original query or wait for the next turn.",
+                                "chunks_fetched": self._active_cache.chunks_fetched,
+                                "limit": self.settings.max_auto_chunk_fetches,
+                            }
+                            # Update record and notify
+                            record.status = ToolCallStatus.SUCCESS
+                            record.result = result
+                            record.completed_at = datetime.now()
+                            self._notify_tool_call(record)
+
+                            # Add to results and continue to next tool call
+                            tool_result = {"tool_call_id": tool_call_id, "result": result}
+                            processed_result = await self._process_tool_result(
+                                tool_result, function_name
+                            )
+                            results.append(processed_result)
+                            continue
+
                 # Execute tool
                 result = await self.tool_registry.execute(function_name, **function_args)
+
+                # DIAGNOSTIC: Log raw tool result immediately after execution
+                if function_name == "fetch_logs":
+                    logger.debug(
+                        f"[FETCH_LOGS_DEBUG] ===== RAW TOOL EXECUTION ===== "
+                        f"Tool executed: {function_name}"
+                    )
+                    logger.debug(f"[FETCH_LOGS_DEBUG] Raw result type: {type(result).__name__}")
+                    logger.debug(
+                        f"[FETCH_LOGS_DEBUG] Raw result keys: {list(result.keys()) if isinstance(result, dict) else 'non-dict'}"
+                    )
+                    if isinstance(result, dict):
+                        # Type-safe event count extraction
+                        event_count = 0
+                        events = result.get("events") or result.get("logs")
+                        if events and isinstance(events, list):
+                            event_count = len(events)
+                        logger.debug(f"[FETCH_LOGS_DEBUG] Raw event count: {event_count}")
+                        logger.debug(
+                            f"[FETCH_LOGS_DEBUG] Raw result size: {len(str(result))} chars"
+                        )
+                        logger.debug(
+                            f"[FETCH_LOGS_DEBUG] Raw success flag: {result.get('success', 'N/A')}"
+                        )
+
+                # Track successful fetch for limit enforcement (Phase 2)
+                if function_name == "fetch_cached_result_chunk" and result.get("success"):
+                    cache_id = function_args.get("cache_id")
+                    if self._active_cache and cache_id == self._active_cache.cache_id:
+                        new_count = self._active_cache.increment_fetch_count()
+                        logger.debug(
+                            f"Incremented fetch count for cache_id={cache_id}: "
+                            f"{new_count}/{self.settings.max_auto_chunk_fetches}"
+                        )
 
                 # Update to SUCCESS
                 record.status = ToolCallStatus.SUCCESS
@@ -1660,6 +2070,27 @@ DO NOT just acknowledge the cache - fetch and show the user actual events.
                 # Process through context manager (may cache large results)
                 tool_result = {"tool_call_id": tool_call_id, "result": result}
                 processed_result = await self._process_tool_result(tool_result, function_name)
+
+                # DIAGNOSTIC: Log what's being added to results after processing
+                if function_name == "fetch_logs":
+                    logger.debug(
+                        "[FETCH_LOGS_DEBUG] ===== AFTER PROCESSING ===== "
+                        "Result processed by _process_tool_result"
+                    )
+                    logger.debug(
+                        f"[FETCH_LOGS_DEBUG] Processed result keys: {list(processed_result.keys())}"
+                    )
+                    processed_data = processed_result.get("result", {})
+                    logger.debug(
+                        f"[FETCH_LOGS_DEBUG] Processed data keys: {list(processed_data.keys()) if isinstance(processed_data, dict) else 'non-dict'}"
+                    )
+                    if isinstance(processed_data, dict):
+                        logger.debug(
+                            f"[FETCH_LOGS_DEBUG] Processed event count: {len(processed_data.get('events', []))}"
+                        )
+                        logger.debug(
+                            f"[FETCH_LOGS_DEBUG] Is cached: {processed_data.get('cached', False)}"
+                        )
 
                 results.append(processed_result)
 
