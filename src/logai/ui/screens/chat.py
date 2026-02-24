@@ -17,6 +17,7 @@ from textual.widgets import Header, Input
 from logai.cache.manager import CacheManager
 from logai.config import get_settings
 from logai.core.orchestrator import LLMOrchestrator, ToolCallRecord
+from logai.providers.mcp.registry import register_mcp_tools
 from logai.ui.commands import CommandHandler
 from logai.ui.screens.context_viewer import ContextParser, ContextViewerScreen
 from logai.ui.widgets.input_box import ChatInput
@@ -241,8 +242,6 @@ class ChatScreen(Screen[None]):
         interact with the app; they'll just see tool-call errors until they
         restart with ``--no-mcp``.
         """
-        from logai.cli import register_mcp_tools
-
         assert self._mcp_client is not None  # guarded by caller
         assert self._result_processor is not None
 
@@ -290,9 +289,8 @@ class ChatScreen(Screen[None]):
                 logger.warning("Failed to re-enable chat input after MCP failure: %s", ui_exc)
 
             self.notify(
-                f"MCP server failed to start: {exc}\n"
-                "CloudWatch MCP tools are unavailable. "
-                "Restart with --no-mcp to use native tools.",
+                f"MCP server failed to start ({type(exc).__name__}). "
+                "See log file for details. Restart with --no-mcp to use native tools.",
                 severity="error",
                 timeout=10,
             )

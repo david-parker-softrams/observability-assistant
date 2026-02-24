@@ -256,6 +256,31 @@ If relevant, expand your search. Otherwise, proceed with your analysis.""",
         return base_prompt
 
 
+# Guidance injected into the system prompt when MCP tools are active.
+# Teaches the LLM the two-call CloudWatch Logs Insights pattern exposed by
+# the AWS CloudWatch MCP server (execute → poll results).
+_MCP_LOGS_INSIGHTS_GUIDANCE = """
+## CloudWatch Logs Insights (MCP Tools) — MANDATORY
+
+Any request to fetch, search, summarize, show, or analyze logs MUST use the two-step pattern below.
+NEVER say you lack a tool for this — these tools ARE available.
+
+### Two-step pattern
+1. Call `execute_log_insights_query` → args: `logGroupNames` (list), `startTime`, `endTime`, `queryString`
+2. Poll `get_logs_insight_query_results` with the `queryId` from step 1; repeat until status is "Complete"
+
+### Example queries
+- Summarize / show recent logs:
+  `fields @timestamp, @message | sort @timestamp desc | limit 100`
+- Show errors:
+  `fields @timestamp, @message | filter @message like /(?i)error/ | sort @timestamp desc | limit 50`
+- Pattern stats:
+  `fields @timestamp, @message | filter @message like /pattern/ | stats count() by bin(5m)`
+
+### Finding log groups
+Use `describe_log_groups` to list or search log groups — do NOT use list_log_groups (not available)."""
+
+
 class LLMOrchestrator:
     """
     Coordinates LLM interactions with tool execution.
@@ -446,30 +471,6 @@ Current time: {current_time}
 
         logger.info("LLM Orchestrator initialized with context management")
 
-    # Guidance injected into the system prompt when MCP tools are active.
-    # Teaches the LLM the two-call CloudWatch Logs Insights pattern exposed by
-    # the AWS CloudWatch MCP server (execute → poll results).
-    _MCP_LOGS_INSIGHTS_GUIDANCE = """
-## CloudWatch Logs Insights (MCP Tools) — MANDATORY
-
-Any request to fetch, search, summarize, show, or analyze logs MUST use the two-step pattern below.
-NEVER say you lack a tool for this — these tools ARE available.
-
-### Two-step pattern
-1. Call `execute_log_insights_query` → args: `logGroupNames` (list), `startTime`, `endTime`, `queryString`
-2. Poll `get_logs_insight_query_results` with the `queryId` from step 1; repeat until status is "Complete"
-
-### Example queries
-- Summarize / show recent logs:
-  `fields @timestamp, @message | sort @timestamp desc | limit 100`
-- Show errors:
-  `fields @timestamp, @message | filter @message like /(?i)error/ | sort @timestamp desc | limit 50`
-- Pattern stats:
-  `fields @timestamp, @message | filter @message like /pattern/ | stats count() by bin(5m)`
-
-### Finding log groups
-Use `describe_log_groups` to list or search log groups — do NOT use list_log_groups (not available)."""
-
     def _get_system_prompt(self) -> str:
         """
         Get the system prompt with current context.
@@ -508,7 +509,7 @@ Use this tool to find available log groups before querying logs."""
         # The native boto3 path does not use Logs Insights, so this guidance
         # must not appear there — it would mislead the LLM.
         if self.settings.use_mcp_tools:
-            prompt = prompt + self._MCP_LOGS_INSIGHTS_GUIDANCE
+            prompt = prompt + _MCP_LOGS_INSIGHTS_GUIDANCE
 
         return prompt
 

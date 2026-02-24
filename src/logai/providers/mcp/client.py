@@ -4,6 +4,7 @@ Manages the lifecycle of an MCP server subprocess and client session.
 The MCP server communicates over stdio (stdin/stdout) using JSON-RPC.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -118,6 +119,13 @@ class MCPClientManager:
             Exception: If the subprocess cannot be started or the handshake
                        fails.  Callers should catch and fall back to native tools.
         """
+        # Guard against being called twice — re-entering start() on an already-running
+        # instance would leak the old subprocess and file descriptors.
+        if self._stdio_cm is not None:
+            logger.warning(
+                "MCPClientManager.start() called on an already-started instance; ignoring."
+            )
+            return
         # ------------------------------------------------------------------
         # Open stderr redirect — must happen before stdio_client() is entered
         # so the file handle is available for cleanup if anything fails below.
@@ -133,10 +141,10 @@ class MCPClientManager:
                     "Could not open log file '%s' for MCP stderr; discarding to devnull",
                     self._log_file_path,
                 )
-                self._stderr_log = open(os.devnull, "w")  # noqa: SIM115
+                self._stderr_log = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115
         else:
             # No log file configured — discard stderr so it never hits the terminal.
-            self._stderr_log = open(os.devnull, "w")  # noqa: SIM115
+            self._stderr_log = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115
 
         try:
             server_params = StdioServerParameters(
@@ -277,7 +285,7 @@ class MCPClientManager:
     # Tool invocation
     # ------------------------------------------------------------------
 
-    async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+    async def call_tool(self, name: str, arguments: dict[str, Any], timeout: float = 60.0) -> Any:
         """Invoke an MCP tool by name with the given arguments.
 
         MCP returns a ``CallToolResult`` containing a list of content blocks
@@ -288,6 +296,8 @@ class MCPClientManager:
         Args:
             name: MCP tool name (e.g., ``"describe_log_groups"``).
             arguments: Tool arguments as a plain dictionary.
+            timeout: Maximum seconds to wait for the MCP server to respond
+                     (default 60 s).  Raises ``MCPToolError`` on expiry.
 
         Returns:
             Parsed tool result — a dict if JSON-parseable, otherwise
@@ -295,12 +305,19 @@ class MCPClientManager:
 
         Raises:
             RuntimeError: If the client has not been started.
-            MCPToolError: If the MCP server signals an error for this tool call.
+            MCPToolError: If the MCP server signals an error for this tool call,
+                          or if the call times out.
         """
         if not self._session:
             raise RuntimeError("MCP client not connected. Call start() first.")
 
-        result = await self._session.call_tool(name, arguments)
+        try:
+            result = await asyncio.wait_for(
+                self._session.call_tool(name, arguments),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError as exc:
+            raise MCPToolError(name, f"Tool call timed out after {timeout}s") from exc
 
         if result.isError:
             # Collect error text from all content blocks.

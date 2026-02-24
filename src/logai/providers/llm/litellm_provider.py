@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import re
 from collections.abc import AsyncGenerator
 from typing import Any, NoReturn, cast
 
@@ -155,10 +156,12 @@ class LiteLLMProvider(BaseLLMProvider):
         if self.provider in ["anthropic", "openai"]:
             return True
         if self.provider == "ollama":
-            # Check if model family is registered as supporting tools
+            # Check if model family is registered as supporting tools.
+            # Use word-boundary regex so "qwen2.5" matches "ollama_chat/qwen2.5:7b"
+            # but NOT a hypothetical "ollama_chat/notqwen2.5" variant.
+            # Only models with native tool calling support are listed;
+            # reasoning models (openthinker, deepseek-r1) are intentionally excluded.
             model_name = self._get_model_name()
-            # Only models with native tool calling support
-            # Reasoning models (openthinker, deepseek-r1) are excluded
             supported_families = [
                 "qwen2.5",
                 "qwen3",
@@ -168,7 +171,10 @@ class LiteLLMProvider(BaseLLMProvider):
                 "firefunction",
                 "command-r",
             ]
-            return any(f"ollama_chat/{family}" in model_name for family in supported_families)
+            return any(
+                re.search(rf"ollama_chat/{re.escape(family)}(?:[:/]|$)", model_name)
+                for family in supported_families
+            )
         return False
 
     async def chat(
@@ -218,8 +224,10 @@ class LiteLLMProvider(BaseLLMProvider):
             # Pass num_ctx to Ollama to override the default 4096-token context window.
             # Without this, Ollama silently truncates prompts even when the model supports
             # a larger context window (e.g. qwen3:32b supports 32768 tokens).
+            # Use setdefault so that any "options" dict already in params is merged
+            # rather than silently overwritten.
             if self.provider == "ollama" and self.num_ctx:
-                params["options"] = {"num_ctx": self.num_ctx}
+                params.setdefault("options", {})["num_ctx"] = self.num_ctx
 
             # Only send tools if the model supports them
             if tools and self._supports_tools():
@@ -316,8 +324,10 @@ class LiteLLMProvider(BaseLLMProvider):
             # Pass num_ctx to Ollama to override the default 4096-token context window.
             # Without this, Ollama silently truncates prompts even when the model supports
             # a larger context window (e.g. qwen3:32b supports 32768 tokens).
+            # Use setdefault so that any "options" dict already in params is merged
+            # rather than silently overwritten.
             if self.provider == "ollama" and self.num_ctx:
-                params["options"] = {"num_ctx": self.num_ctx}
+                params.setdefault("options", {})["num_ctx"] = self.num_ctx
 
             # Only send tools if the model supports them
             if tools and self._supports_tools():

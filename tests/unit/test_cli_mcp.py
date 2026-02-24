@@ -4,8 +4,9 @@ import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from logai.cli import build_mcp_env, register_mcp_tools
+from logai.cli import build_mcp_env
 from logai.config.settings import LogAISettings
+from logai.providers.mcp.registry import register_mcp_tools
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
@@ -189,7 +190,7 @@ class TestRegisterMcpTools:
 
         mock_processor = MagicMock()
 
-        with patch("logai.cli.ToolRegistry"):
+        with patch("logai.providers.mcp.registry.ToolRegistry"):
             registered = await register_mcp_tools(mock_client, mock_processor)
 
         assert "describe_log_groups" in registered
@@ -217,7 +218,7 @@ class TestRegisterMcpTools:
 
         mock_processor = MagicMock()
 
-        with patch("logai.cli.ToolRegistry"):
+        with patch("logai.providers.mcp.registry.ToolRegistry"):
             registered = await register_mcp_tools(
                 mock_client, mock_processor, exclude_tools={"describe_log_groups"}
             )
@@ -240,7 +241,7 @@ class TestRegisterMcpTools:
         )
         mock_processor = MagicMock()
 
-        with patch("logai.cli.ToolRegistry") as mock_registry:
+        with patch("logai.providers.mcp.registry.ToolRegistry") as mock_registry:
             await register_mcp_tools(mock_client, mock_processor)
             assert mock_registry.register.called
 

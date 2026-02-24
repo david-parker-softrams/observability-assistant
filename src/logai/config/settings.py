@@ -502,7 +502,7 @@ class LogAISettings(BaseSettings):
         description="Command used to launch the MCP server subprocess",
     )
     mcp_server_args: list[str] = Field(
-        default=["awslabs.cloudwatch-mcp-server@latest"],
+        default_factory=lambda: ["awslabs.cloudwatch-mcp-server@latest"],
         description=(
             "Arguments passed to the MCP server launch command. "
             "When overriding via environment variable (LOGAI_MCP_SERVER_ARGS), "

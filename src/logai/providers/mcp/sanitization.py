@@ -38,6 +38,12 @@ _TOOL_STRATEGIES: dict[str, str] = {
     # Log group discovery — metadata, no PII in log events
     "describe_log_groups": _STRATEGY_PASSTHROUGH,
     # Anomaly / pattern analysis — may include log samples
+    # TODO: Verify sanitization coverage for analyze_log_group.  The AWS CloudWatch
+    #       MCP server returns anomaly/pattern data under "anomalies" or "patterns" keys
+    #       rather than the "results" or "events" keys handled by _apply_sanitization().
+    #       Until the actual response schema is confirmed and format handlers are added,
+    #       PII in analyze_log_group results may not be redacted.  Track this before
+    #       enabling this tool in a production environment.
     "analyze_log_group": _STRATEGY_SANITIZE,
     # Metrics tools — numeric data, no log events
     "get_metric_data": _STRATEGY_PASSTHROUGH,
