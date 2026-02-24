@@ -33,6 +33,13 @@ class CachedResultSummary:
         """
         Convert to dict optimized for LLM comprehension.
 
+        .. deprecated::
+            This method is no longer used in production. The orchestrator now builds
+            the cache summary directly via ``_create_enhanced_cache_summary()`` which
+            produces a flat structure better suited for LLM consumption.
+            This method is retained because existing tests cover its behaviour and it
+            may still be useful for debugging / offline tooling.
+
         Design principles (Phase 1 - Separate Message Timing):
         - 5 top-level keys maximum
         - Clear "what you have" vs "how to get more" separation
@@ -492,7 +499,7 @@ class ResultCacheManager:
         if errors and remaining > 0:
             error_slots = max(1, min(len(errors), remaining * 2 // 5))
             sampled.extend(self._select_time_diverse(errors, error_slots))
-            remaining -= len(sampled)
+            remaining = count - len(sampled)
 
         # Warnings get second priority (up to 30% of remaining)
         if warnings and remaining > 0:
