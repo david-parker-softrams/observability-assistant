@@ -47,4 +47,4 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --auto \
             --squash \
-          || echo "Auto-merge already set or PR not found — skipping"
+          || echo "Auto-merge already set or PR not found -- skipping"

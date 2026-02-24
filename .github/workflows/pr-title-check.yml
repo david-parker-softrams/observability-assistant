@@ -37,5 +37,5 @@ jobs:
           requireScope: false
           subjectPattern: ^.+$
           subjectPatternError: |
-            The PR title "{subject}" is not valid — the description after the
+            The PR title "{subject}" is not valid -- the description after the
             type prefix must not be empty.
