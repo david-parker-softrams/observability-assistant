@@ -413,6 +413,9 @@ class TestLoggingSetup:
         )
 
         assert log_file.exists(), "Log file should have been created"
+        assert (
+            logging.getLogger().level == logging.INFO
+        ), "Root logger level should be INFO after setup_logging(cli_level='INFO')"
 
     def test_console_fallback_when_file_fails(self):
         """StreamHandler IS added as emergency fallback when file logging fails."""

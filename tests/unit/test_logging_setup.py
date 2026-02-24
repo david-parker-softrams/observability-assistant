@@ -395,9 +395,7 @@ class TestLogLevelCLIArgument:
 
             class DeprecatedDebugAction(argparse.Action):
                 def __call__(self, parser, namespace, values, option_string=None):
-                    parser.error(
-                        "The --debug flag has been removed. " "Use --loglevel DEBUG instead."
-                    )
+                    parser.error("The --debug flag has been removed. Use --loglevel DEBUG instead.")
 
             p = argparse.ArgumentParser()
             p.add_argument(
@@ -947,6 +945,7 @@ class TestSetupLoggingIntegration:
 
         content = log_file.read_text()
         assert "Logging initialized" in content
+        assert "source=" in content
 
     def test_end_to_end_env_debug_no_cli(self, clean_env: None, tmp_path: Path) -> None:
         """

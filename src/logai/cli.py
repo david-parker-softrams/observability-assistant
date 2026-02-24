@@ -18,6 +18,7 @@ from logai.providers.llm.litellm_provider import LiteLLMProvider
 from logai.ui.app import LogAIApp
 
 # Valid log levels accepted by --loglevel and LOGAI_LOG_LEVEL
+# CRITICAL intentionally omitted — no user scenario requires suppressing ERROR but showing CRITICAL
 VALID_LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 
 # Default log level when neither --loglevel nor LOGAI_LOG_LEVEL is configured
@@ -75,6 +76,9 @@ def setup_logging(
         # new default), we can't distinguish "user explicitly set WARNING"
         # from "no env var set". This is acceptable — the result is correct
         # either way.
+        # NOTE: If LOGAI_LOG_LEVEL=WARNING is set explicitly in .env, source will
+        # show 'default' since WARNING == DEFAULT_LOG_LEVEL. The level is still
+        # correct; only the diagnostic label is slightly misleading.
         effective_level_name = settings.log_level
         level_source = "LOGAI_LOG_LEVEL env var"
     elif settings is not None:
@@ -373,8 +377,12 @@ def main() -> int:
     settings = None
     try:
         settings = get_settings()
-    except Exception:
-        pass  # Will be handled after logging is initialized
+    except Exception as e:
+        print(
+            f"Warning: Could not load settings before logging init "
+            f"({type(e).__name__}: {e}). Using defaults.",
+            file=sys.stderr,
+        )
 
     # Setup logging (uses settings if available for log_level from .env)
     setup_logging(cli_level=args.loglevel, settings=settings, log_file=args.log_file)
@@ -390,8 +398,7 @@ def main() -> int:
         elif args.auth_command == "list":
             return asyncio.run(handle_auth_list(args))
         elif args.auth_command is None:
-            parser.parse_args(["auth", "--help"])
-            return 1
+            parser.error("Usage: logai auth {login,logout,status,list}")
         else:
             print(f"❌ Unknown auth command: {args.auth_command}", file=sys.stderr)
             return 1

@@ -78,7 +78,7 @@ The comment says "make cache entries unique per invocation". This might be inten
    - Was it in tests?
 
 3. **Can you reproduce the failure now?**
-   - Run the application with `--debug` flag
+   - Run the application with `--loglevel DEBUG` flag
    - Perform a log search that triggers caching
    - Check the logs at `~/.logai/logs/logai.log`
    - Share the relevant log entries
@@ -98,7 +98,7 @@ The unit tests pass, which suggests the core caching logic is sound.
 ## Next Steps
 
 ### Option 1: User confirms issue still exists
-- Run application with `--debug`
+- Run application with `--loglevel DEBUG`
 - Reproduce failure
 - Analyze logs using Hans's triage checklist
 - Identify exact failure reason
@@ -133,4 +133,4 @@ The unit tests pass, which suggests the core caching logic is sound.
 
 The cache system is **working correctly** in unit tests. We need empirical evidence from real application usage to determine if there's still a problem, or if recent fixes resolved it.
 
-**Recommendation:** User should run the application with `--debug` and attempt to reproduce the failure before proceeding with further fixes.
+**Recommendation:** User should run the application with `--loglevel DEBUG` and attempt to reproduce the failure before proceeding with further fixes.
