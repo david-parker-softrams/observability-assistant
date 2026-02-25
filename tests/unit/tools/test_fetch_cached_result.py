@@ -83,7 +83,7 @@ class TestFetchCachedResultTool:
         assert limit_param["type"] == "integer"
         assert limit_param["minimum"] == 1
         assert limit_param["maximum"] == 200
-        assert limit_param["default"] == 100
+        assert limit_param["default"] == 25
 
     def test_tool_parameters_filter_pattern(self, fetch_tool: FetchCachedResultTool) -> None:
         """Test filter_pattern parameter definition."""
@@ -139,7 +139,7 @@ class TestFetchCachedResultTool:
         result = await fetch_tool.execute(cache_id=summary.cache_id)
 
         assert result["success"] is True
-        assert len(result["events"]) == 100
+        assert len(result["events"]) == 25
         assert result["cache_id"] == summary.cache_id
 
     @pytest.mark.asyncio
@@ -245,7 +245,7 @@ class TestFetchCachedResultTool:
 
         assert result["success"] is True
         assert result["offset"] == 0  # Default offset
-        assert result["limit"] == 100  # Default limit
+        assert result["limit"] == 25  # Default limit
 
     @pytest.mark.asyncio
     async def test_execute_error_handling(self) -> None:
