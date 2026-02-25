@@ -403,7 +403,7 @@ class ResultCacheManager:
                 int_timestamps.append(ts)
             elif isinstance(ts, str):
                 str_timestamps.append(ts)
-            # floats or other numeric types: coerce to int
+            # float: coerce to int
             elif isinstance(ts, float):
                 int_timestamps.append(int(ts))
 
@@ -417,7 +417,9 @@ class ResultCacheManager:
                 "span_ms": max_ts - min_ts,
             }
 
-        # Graceful degradation: return string timestamps as-is (span cannot be computed)
+        # Graceful degradation: return string timestamps as-is (span cannot be computed).
+        # Lexicographic sort works correctly for UTC ISO 8601 strings ("Z" suffix);
+        # timezone-offset timestamps are not guaranteed to sort correctly.
         if str_timestamps:
             sorted_strs = sorted(str_timestamps)
             return {
@@ -540,6 +542,51 @@ class ResultCacheManager:
 
         return sampled[:count]
 
+    def _normalize_mcp_insights_records(
+        self, raw_results: list[Any], tool_name: str
+    ) -> list[dict[str, Any]]:
+        """
+        Normalize a list of CloudWatch Logs Insights records into standard event dicts.
+
+        The CloudWatch MCP server returns records as dicts whose field names carry a
+        leading ``@`` prefix (e.g. ``@timestamp``, ``@message``, ``@logStream``).
+        This helper strips that prefix so the rest of the pipeline sees canonical
+        field names (``timestamp``, ``message``, ``logStream``, …).
+
+        Non-dict entries in the list are silently skipped.  If every entry is
+        non-dict a warning is emitted so the problem is visible in logs without
+        crashing the caller.
+
+        Args:
+            raw_results: The list stored under the ``"results"`` key of an MCP
+                Insights response.
+            tool_name: Tool name — used only for log messages.
+
+        Returns:
+            List of normalized event dicts (may be empty).
+        """
+        normalized: list[dict[str, Any]] = []
+        for record in raw_results:
+            if not isinstance(record, dict):
+                continue
+            clean: dict[str, Any] = {}
+            for key, value in record.items():
+                # Strip leading "@" from CloudWatch Insights field names
+                clean_key = key[1:] if key.startswith("@") else key
+                clean[clean_key] = value
+            normalized.append(clean)
+
+        if raw_results and not normalized:
+            logger.warning(
+                "MCP Insights 'results' had %d records but none were valid dicts "
+                "(tool=%s). First record type: %s",
+                len(raw_results),
+                tool_name,
+                type(raw_results[0]).__name__,
+            )
+
+        return normalized
+
     async def cache_result(
         self,
         tool_name: str,
@@ -569,26 +616,16 @@ class ResultCacheManager:
 
         # Fallback: MCP Insights format uses a "results" key with CloudWatch
         # field-value records where field names carry an "@" prefix
-        # (e.g. "@timestamp", "@message", "@logStream").  Normalize each record
-        # by stripping the leading "@" so downstream logic sees standard field
-        # names ("timestamp", "message", "logStream", …).
+        # (e.g. "@timestamp", "@message", "@logStream").  Delegate normalization
+        # to the shared helper so the logic lives in exactly one place.
         if not events:
             raw_results = result.get("results", [])
             if isinstance(raw_results, list) and raw_results:
-                normalized: list[dict[str, Any]] = []
-                for record in raw_results:
-                    if not isinstance(record, dict):
-                        continue
-                    clean: dict[str, Any] = {}
-                    for key, value in record.items():
-                        # Strip leading "@" from CloudWatch Insights field names
-                        clean_key = key[1:] if key.startswith("@") else key
-                        clean[clean_key] = value
-                    normalized.append(clean)
-                events = normalized
+                events = self._normalize_mcp_insights_records(raw_results, tool_name)
                 logger.debug(
-                    f"Extracted {len(events)} events from MCP Insights 'results' key "
-                    f"(tool={tool_name})"
+                    "Extracted %d events from MCP Insights 'results' key (tool=%s)",
+                    len(events),
+                    tool_name,
                 )
 
         # Generate summary components
@@ -787,8 +824,25 @@ class ResultCacheManager:
             )
             await db.commit()
 
-        # Extract events
+        # Extract events (handle different result formats).
+        # NOTE: the raw result dict serialized to SQLite may use the "results" key
+        # (MCP Insights format) rather than "events" or "logs".  Apply the same
+        # fallback and normalization as cache_result() so callers always receive
+        # events in the standard {"timestamp": ..., "message": ...} shape.
         events = result.get("events", result.get("logs", []))
+        if not isinstance(events, list):
+            events = []
+
+        if not events:
+            raw_results = result.get("results", [])
+            if isinstance(raw_results, list) and raw_results:
+                events = self._normalize_mcp_insights_records(raw_results, cache_id)
+                logger.debug(
+                    "fetch_chunk: extracted %d events from MCP Insights 'results' key "
+                    "(cache_id=%s)",
+                    len(events),
+                    cache_id,
+                )
 
         # Apply filters
         filtered_events = events

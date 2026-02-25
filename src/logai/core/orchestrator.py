@@ -285,8 +285,9 @@ DO NOT call `get_logs_insight_query_results` afterward — it is NOT needed.
   `fields @timestamp, @message | stats count() by bin(5m)`
 
 ### After the query completes
-If the result comes back with `"cached": true`, the full dataset has been stored
-in a local cache. You MUST immediately call `fetch_cached_result_chunk` to
+For large result sets, the result will come back with `"cached": true` — this means
+the full dataset has been stored in a local cache to protect the context window.
+You MUST immediately call `fetch_cached_result_chunk` to
 retrieve and analyze the actual log events — do NOT summarize from the preview alone.
 
 ### Finding log groups
@@ -488,8 +489,8 @@ Current time: {current_time}
         Get the system prompt with current context.
 
         When MCP tools are active (``settings.use_mcp_tools`` is True), the
-        prompt is extended with guidance for the CloudWatch Logs Insights
-        two-call pattern so the LLM knows how to use the MCP-based tools.
+        prompt is extended with guidance for the CloudWatch Logs Insights tools
+        so the LLM knows how to use the MCP-based tools correctly.
 
         Returns:
             Formatted system prompt including log group context and, when
