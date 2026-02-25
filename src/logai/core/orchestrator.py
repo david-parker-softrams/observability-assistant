@@ -289,7 +289,7 @@ For large result sets, the result will come back with `"cached": true` — this 
 the full dataset has been stored in a local cache to protect the context window.
 You MUST immediately call `fetch_cached_result_chunk` to retrieve the first chunk
 of actual log events — do NOT summarize from the preview alone.
-Fetch in small chunks (limit=25) and analyze each chunk before deciding to fetch more.
+Fetch in small chunks (respecting the system's configured initial chunk size) and analyze each chunk before deciding to fetch more.
 
 ### Finding log groups
 Use `describe_log_groups` to list or search log groups — do NOT use list_log_groups (not available)."""
@@ -374,7 +374,7 @@ Before giving up on a search:
 This preview is NOT sufficient to answer user questions. The full dataset has been cached to protect context limits.
 
 🚨 MANDATORY IMMEDIATE ACTION REQUIRED:
-You MUST call fetch_cached_result_chunk(cache_id, offset=0, limit=25) in your IMMEDIATE next response.
+You MUST call fetch_cached_result_chunk(cache_id, offset=0, limit={chunk_size}) in your IMMEDIATE next response.
 DO NOT skip this step. DO NOT answer based on preview alone. DO NOT wait for user prompt.
 
 ❌ WRONG - These will give INCORRECT answers:
@@ -385,12 +385,12 @@ DO NOT skip this step. DO NOT answer based on preview alone. DO NOT wait for use
 
 ✅ CORRECT - Required workflow (SUMMARIZE AS YOU GO):
 1. See "cached": true with cache_id "result_abc123" and total_events: 100
-2. IMMEDIATELY call: fetch_cached_result_chunk(cache_id='result_abc123', offset=0, limit=25)
-3. Receive first chunk (up to 25 events)
+2. IMMEDIATELY call: fetch_cached_result_chunk(cache_id='result_abc123', offset=0, limit={chunk_size})
+3. Receive first chunk (up to {chunk_size} events)
 4. Analyze THIS chunk — summarize key findings, extract patterns, note counts
 5. Decide: do you have enough information to answer the user's question?
    - YES → Answer based on what you've analyzed so far
-   - NO → Fetch the next chunk: fetch_cached_result_chunk(cache_id='result_abc123', offset=25, limit=25)
+   - NO → Fetch the next chunk: fetch_cached_result_chunk(cache_id='result_abc123', offset={chunk_size}, limit={chunk_size})
 6. Repeat steps 3-5. Stop fetching once you can answer accurately. Do NOT fetch all chunks by default.
 
 EXAMPLE:
@@ -400,7 +400,7 @@ your immediate next action MUST be calling fetch_cached_result_chunk, NOT provid
 The fetch_cached_result_chunk tool supports:
 - cache_id: The cache_id from the cached result (REQUIRED)
 - offset: Starting index, 0-based (start with 0)
-- limit: Number of events, max 200 (use 25 initially to protect context window)
+- limit: Number of events, max 200 (use {chunk_size} initially to protect context window)
 - filter_pattern: Optional text search (case-insensitive)
 - time_start/time_end: Optional Unix timestamp filters
 
@@ -520,6 +520,7 @@ Use this tool to find available log groups before querying logs."""
         prompt = self.SYSTEM_PROMPT.format(
             current_time=now.strftime("%Y-%m-%d %H:%M:%S UTC"),
             log_groups_context=log_groups_context,
+            chunk_size=self.settings.initial_chunk_size,
         )
 
         # Inject MCP-specific guidance only when the MCP path is active.

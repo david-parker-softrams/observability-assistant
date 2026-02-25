@@ -432,7 +432,7 @@ class LogAISettings(BaseSettings):
 
     max_events_per_chunk: int = Field(
         default=100,
-        description="Hard cap on events per chunk fetch (ceiling for initial_chunk_size)",
+        description="Configured maximum events per chunk fetch (intended ceiling for initial_chunk_size; not enforced as a hard cap by default)",
         ge=10,
         le=500,
     )
@@ -533,6 +533,20 @@ class LogAISettings(BaseSettings):
         if self.github_copilot_retry_max_delay < self.github_copilot_retry_base_delay:
             raise ValueError(
                 "github_copilot_retry_max_delay must be >= github_copilot_retry_base_delay"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_chunk_size_ordering(self) -> "LogAISettings":
+        """Validate that initial_chunk_size does not exceed max_events_per_chunk.
+
+        A configuration where initial_chunk_size > max_events_per_chunk would be
+        contradictory: the starting chunk is larger than the declared ceiling.
+        """
+        if self.initial_chunk_size > self.max_events_per_chunk:
+            raise ValueError(
+                f"initial_chunk_size ({self.initial_chunk_size}) must be <= "
+                f"max_events_per_chunk ({self.max_events_per_chunk})"
             )
         return self
 

@@ -1348,12 +1348,14 @@ class TestChunkSizePromptContent:
     """Tests verifying that prompt text uses conservative chunk sizes and
     summarize-as-you-go language after the context-overflow fix."""
 
-    def test_system_prompt_uses_small_chunk_size(self, orchestrator) -> None:
-        """Test that system prompt uses conservative chunk size and summarize-as-you-go."""
+    def test_system_prompt_uses_small_chunk_size(self, orchestrator, settings) -> None:
+        """Test that system prompt uses the configured chunk size and summarize-as-you-go."""
         prompt = orchestrator._get_system_prompt()
+        chunk_size = settings.initial_chunk_size  # Dynamic: uses whatever settings say (default 25)
 
-        # Should use new conservative chunk size
-        assert "limit=25" in prompt or "limit=25)" in prompt
+        # Should use the configured chunk size, not a hardcoded value
+        expected = f"limit={chunk_size}"
+        assert expected in prompt, f"Expected '{expected}' in system prompt"
         assert "limit=100)" not in prompt
 
         # Should have summarize-as-you-go language
