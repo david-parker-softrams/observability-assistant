@@ -678,3 +678,375 @@ async def test_cache_result_validation_prevents_bad_data(cache_manager: ResultCa
             query_params={},
             result=bad_result,
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests for Bug Fixes: MCP Insights result handling & ISO string timestamps
+# (Branch: fix/mcp-insights-result-handling)
+# ---------------------------------------------------------------------------
+
+# ── Shared fixtures for the new test groups ─────────────────────────────────
+
+MCP_INSIGHTS_RECORDS = [
+    {
+        "@timestamp": "2026-02-25T13:00:00Z",
+        "@message": "INFO hello",
+        "@logStream": "stream1",
+    },
+    {
+        "@timestamp": "2026-02-25T13:01:00Z",
+        "@message": "ERROR boom",
+        "@logStream": "stream2",
+    },
+    {
+        "@timestamp": "2026-02-25T13:02:00Z",
+        "@message": "WARN watch out",
+        "@logStream": "stream1",
+    },
+]
+
+
+# ── Group 1: MCP Insights `results` extraction in cache_result() ─────────────
+
+
+class TestCacheResultMcpInsightsFormat:
+    """Tests for the MCP Insights 'results' key normalisation path in cache_result()."""
+
+    @pytest.mark.asyncio
+    async def test_cache_result_mcp_insights_format(
+        self, cache_manager: ResultCacheManager
+    ) -> None:
+        """
+        Given a result dict with a 'results' key containing CloudWatch Insights records,
+        the summary should reflect the actual number of records and expose normalised
+        field names ('timestamp', 'message') rather than the raw '@'-prefixed originals.
+        """
+        result = {"results": list(MCP_INSIGHTS_RECORDS)}
+
+        summary = await cache_manager.cache_result(
+            tool_name="query_cloudwatch_insights",
+            query_params={"log_group": "/aws/lambda/test"},
+            result=result,
+        )
+
+        # Event count must equal the number of records — not 0
+        assert summary.total_events == len(MCP_INSIGHTS_RECORDS)
+
+        # At least one sample event must be present
+        assert len(summary.sample_events) > 0
+
+        # All sample events must use the normalised 'message' key (no '@message')
+        for event in summary.sample_events:
+            assert "message" in event, f"'message' key missing from sample event: {event}"
+            assert "@message" not in event, f"'@message' key should have been stripped: {event}"
+
+        # All sample events must use the normalised 'timestamp' key (no '@timestamp')
+        for event in summary.sample_events:
+            assert "timestamp" in event, f"'timestamp' key missing from sample event: {event}"
+            assert "@timestamp" not in event, f"'@timestamp' key should have been stripped: {event}"
+
+    @pytest.mark.asyncio
+    async def test_cache_result_mcp_insights_normalization(
+        self, cache_manager: ResultCacheManager
+    ) -> None:
+        """
+        ALL '@'-prefixed fields must have the '@' stripped; non-'@' fields must
+        pass through the normalisation step completely unchanged.
+        """
+        # Include a field that has NO '@' prefix to verify pass-through
+        records = [
+            {
+                "@timestamp": "2026-02-25T13:00:00Z",
+                "@message": "INFO test",
+                "@logStream": "stream-x",
+                "plain_field": "should-survive",
+            }
+        ]
+        result = {"results": records}
+
+        summary = await cache_manager.cache_result(
+            tool_name="query_cloudwatch_insights",
+            query_params={"log_group": "/aws/lambda/test"},
+            result=result,
+        )
+
+        assert len(summary.sample_events) == 1
+        event = summary.sample_events[0]
+
+        # '@'-prefixed fields → stripped
+        assert "timestamp" in event
+        assert "message" in event
+        assert "logStream" in event
+
+        # Original '@'-prefixed keys must be gone
+        assert "@timestamp" not in event
+        assert "@message" not in event
+        assert "@logStream" not in event
+
+        # Non-'@' field must be present unchanged
+        assert event.get("plain_field") == "should-survive"
+
+    @pytest.mark.asyncio
+    async def test_cache_result_mcp_insights_event_count(
+        self, cache_manager: ResultCacheManager
+    ) -> None:
+        """
+        The event_count stored in the DB (reflected in total_events) must equal
+        the number of records supplied in the 'results' list.
+        """
+        import aiosqlite
+
+        records = [
+            {"@timestamp": f"2026-02-25T13:0{i}:00Z", "@message": f"msg {i}"} for i in range(7)
+        ]
+        result = {"results": records}
+
+        summary = await cache_manager.cache_result(
+            tool_name="query_cloudwatch_insights",
+            query_params={"log_group": "/aws/lambda/test", "run": "count-check"},
+            result=result,
+        )
+
+        # Verify the in-memory summary
+        assert summary.total_events == 7
+
+        # Also verify what was persisted to the database
+        async with aiosqlite.connect(str(cache_manager.db_path)) as db:
+            async with db.execute(
+                "SELECT event_count FROM cached_results WHERE cache_id = ?",
+                (summary.cache_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
+
+        assert row is not None, "Cache entry must exist in DB"
+        assert row[0] == 7, f"DB event_count should be 7, got {row[0]}"
+
+    @pytest.mark.asyncio
+    async def test_cache_result_events_key_takes_precedence(
+        self, cache_manager: ResultCacheManager
+    ) -> None:
+        """
+        When both 'events' and 'results' keys exist, the 'events' key must win
+        (pre-existing behaviour must be preserved).
+        """
+        native_events = [
+            {"timestamp": 1740488400000, "message": "native event A"},
+            {"timestamp": 1740488401000, "message": "native event B"},
+        ]
+        mcp_records = [
+            {"@timestamp": "2026-02-25T13:00:00Z", "@message": "mcp record A"},
+            {"@timestamp": "2026-02-25T13:01:00Z", "@message": "mcp record B"},
+            {"@timestamp": "2026-02-25T13:02:00Z", "@message": "mcp record C"},
+        ]
+        result = {"events": native_events, "results": mcp_records}
+
+        summary = await cache_manager.cache_result(
+            tool_name="query_cloudwatch_insights",
+            query_params={"log_group": "/aws/lambda/test"},
+            result=result,
+        )
+
+        # 'events' has 2 items, 'results' has 3 — the 'events' key must win
+        assert summary.total_events == len(native_events)
+
+        # Sample events should reflect the native (non-'@'-prefixed) data
+        for event in summary.sample_events:
+            assert "timestamp" in event
+            assert "message" in event
+            assert "@timestamp" not in event
+
+    @pytest.mark.asyncio
+    async def test_cache_result_empty_results_key(self, cache_manager: ResultCacheManager) -> None:
+        """
+        An empty 'results' list must not crash and must yield total_events == 0.
+        """
+        result = {"results": []}
+
+        summary = await cache_manager.cache_result(
+            tool_name="query_cloudwatch_insights",
+            query_params={"log_group": "/aws/lambda/test"},
+            result=result,
+        )
+
+        assert summary.total_events == 0
+        assert summary.sample_events == []
+        assert summary.time_range == {"start": None, "end": None}
+
+    @pytest.mark.asyncio
+    async def test_cache_result_native_events_format_unchanged(
+        self, cache_manager: ResultCacheManager
+    ) -> None:
+        """
+        Regression: plain {"events": [...]} format must continue to work exactly as
+        before — the MCP fallback path must not interfere.
+        """
+        native_result = {
+            "events": [
+                {"timestamp": 1707750000000, "message": "ERROR: something bad"},
+                {"timestamp": 1707751800000, "message": "WARN: heads up"},
+                {"timestamp": 1707753600000, "message": "INFO: all good"},
+            ]
+        }
+
+        summary = await cache_manager.cache_result(
+            tool_name="fetch_logs",
+            query_params={"log_group": "/aws/lambda/test"},
+            result=native_result,
+        )
+
+        assert summary.total_events == 3
+        assert len(summary.sample_events) == 3
+
+        # All sample events must carry plain (non-'@') keys
+        for event in summary.sample_events:
+            assert "timestamp" in event
+            assert "message" in event
+
+        # Time range must be resolved from integer timestamps
+        assert summary.time_range["start"] == 1707750000000
+        assert summary.time_range["end"] == 1707753600000
+        assert summary.time_range["span_ms"] == 3600000
+
+
+# ── Group 2: _extract_time_range() with string timestamps ────────────────────
+
+
+class TestExtractTimeRangeStringTimestamps:
+    """Tests for the ISO 8601 string-timestamp handling in _extract_time_range()."""
+
+    def test_extract_time_range_iso_string_timestamps(
+        self, cache_manager: ResultCacheManager
+    ) -> None:
+        """
+        Events whose 'timestamp' value is an ISO 8601 string must not crash.
+        The method should return start/end as the lexicographically first/last strings.
+        """
+        events = [
+            {"timestamp": "2026-02-25T13:02:00Z", "message": "third"},
+            {"timestamp": "2026-02-25T13:00:00Z", "message": "first"},
+            {"timestamp": "2026-02-25T13:01:00Z", "message": "second"},
+        ]
+
+        time_range = cache_manager._extract_time_range(events)
+
+        assert "start" in time_range
+        assert "end" in time_range
+        # ISO 8601 timestamps sort lexicographically
+        assert time_range["start"] == "2026-02-25T13:00:00Z"
+        assert time_range["end"] == "2026-02-25T13:02:00Z"
+        # span_ms is NOT expected when timestamps are strings
+        assert "span_ms" not in time_range
+
+    def test_extract_time_range_integer_timestamps_unchanged(
+        self, cache_manager: ResultCacheManager
+    ) -> None:
+        """
+        Regression: integer epoch-millisecond timestamps must still produce
+        start, end, and span_ms exactly as before.
+        """
+        events = [
+            {"timestamp": 1707750000000, "message": "first"},
+            {"timestamp": 1707751800000, "message": "middle"},
+            {"timestamp": 1707753600000, "message": "last"},
+        ]
+
+        time_range = cache_manager._extract_time_range(events)
+
+        assert time_range["start"] == 1707750000000
+        assert time_range["end"] == 1707753600000
+        assert time_range["span_ms"] == 3600000
+
+    def test_extract_time_range_mixed_timestamps(self, cache_manager: ResultCacheManager) -> None:
+        """
+        A mix of integer and string timestamps must not crash.
+        Integers are preferred; the result must contain start, end, and span_ms.
+        """
+        events = [
+            {"timestamp": 1707750000000, "message": "int event"},
+            {"timestamp": "2026-02-25T13:00:00Z", "message": "string event"},
+            {"timestamp": 1707753600000, "message": "int event 2"},
+        ]
+
+        # Must not raise — that is the primary assertion
+        time_range = cache_manager._extract_time_range(events)
+
+        assert "start" in time_range
+        assert "end" in time_range
+        # Integers take priority, so span_ms must be present
+        assert "span_ms" in time_range
+        assert time_range["start"] == 1707750000000
+        assert time_range["end"] == 1707753600000
+
+    def test_extract_time_range_empty(self, cache_manager: ResultCacheManager) -> None:
+        """
+        An empty events list must return {"start": None, "end": None} —
+        existing behaviour must be preserved.
+        """
+        time_range = cache_manager._extract_time_range([])
+
+        assert time_range == {"start": None, "end": None}
+
+
+class TestFetchChunkMcpInsightsRoundTrip:
+    """End-to-end round-trip tests: store MCP Insights result → fetch_chunk() returns normalised events."""
+
+    @pytest.mark.asyncio
+    async def test_fetch_chunk_returns_normalized_events_for_mcp_insights_format(
+        self, cache_manager: ResultCacheManager
+    ) -> None:
+        """
+        End-to-end round-trip through SQLite: cache an MCP Insights result (using the
+        'results' key with '@'-prefixed fields) then call fetch_chunk() and verify that
+        the returned events carry normalised 'message'/'timestamp' keys — never the raw
+        '@message'/'@timestamp' originals.
+        """
+        result = {
+            "results": [
+                {
+                    "@timestamp": "2026-02-25T13:00:01Z",
+                    "@message": "ERROR Boom",
+                    "@logStream": "stream1",
+                },
+                {
+                    "@timestamp": "2026-02-25T13:00:02Z",
+                    "@message": "INFO OK",
+                    "@logStream": "stream1",
+                },
+            ],
+            "status": "Complete",
+        }
+
+        # Step 1 – cache the MCP Insights result
+        summary = await cache_manager.cache_result(
+            tool_name="query_cloudwatch_insights",
+            query_params={"log_group": "/aws/lambda/test", "query": "fields @message"},
+            result=result,
+        )
+
+        # Step 2 – retrieve via fetch_chunk
+        chunk = await cache_manager.fetch_chunk(
+            cache_id=summary.cache_id,
+            offset=0,
+            limit=10,
+        )
+
+        # Basic success checks
+        assert chunk["success"] is True
+        assert len(chunk["events"]) == 2
+
+        # Every event must use the normalised 'message' key, never '@message'
+        for event in chunk["events"]:
+            assert "message" in event, f"'message' key missing from fetched event: {event}"
+            assert (
+                "@message" not in event
+            ), f"'@message' key should have been stripped before storage: {event}"
+
+        # Every event must use the normalised 'timestamp' key, never '@timestamp'
+        for event in chunk["events"]:
+            assert "timestamp" in event, f"'timestamp' key missing from fetched event: {event}"
+            assert (
+                "@timestamp" not in event
+            ), f"'@timestamp' key should have been stripped before storage: {event}"
+
+        # Spot-check the first event's message value is a plain string
+        assert isinstance(chunk["events"][0]["message"], str)
