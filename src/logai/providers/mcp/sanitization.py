@@ -32,8 +32,8 @@ _STRATEGY_PASSTHROUGH = "passthrough"
 # treated conservatively — no data modification).
 _TOOL_STRATEGIES: dict[str, str] = {
     # Logs Insights query lifecycle
-    "execute_log_insights_query": _STRATEGY_PASSTHROUGH,  # Returns query ID only
-    "get_logs_insight_query_results": _STRATEGY_SANITIZE,  # Returns log data
+    "execute_log_insights_query": _STRATEGY_SANITIZE,  # Returns log data synchronously
+    "get_logs_insight_query_results": _STRATEGY_SANITIZE,  # Returns log data (async fallback)
     "cancel_logs_insight_query": _STRATEGY_PASSTHROUGH,  # Returns status only
     # Log group discovery — metadata, no PII in log events
     "describe_log_groups": _STRATEGY_PASSTHROUGH,

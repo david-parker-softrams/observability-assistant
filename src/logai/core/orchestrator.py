@@ -257,25 +257,38 @@ If relevant, expand your search. Otherwise, proceed with your analysis.""",
 
 
 # Guidance injected into the system prompt when MCP tools are active.
-# Teaches the LLM the two-call CloudWatch Logs Insights pattern exposed by
-# the AWS CloudWatch MCP server (execute → poll results).
+# Describes the synchronous CloudWatch Logs Insights tool exposed by the
+# AWS CloudWatch MCP server.  execute_log_insights_query polls internally
+# and returns complete results directly — no separate polling step is needed.
 _MCP_LOGS_INSIGHTS_GUIDANCE = """
 ## CloudWatch Logs Insights (MCP Tools) — MANDATORY
 
-Any request to fetch, search, summarize, show, or analyze logs MUST use the two-step pattern below.
+Any request to fetch, search, summarize, show, or analyze logs MUST use the tool below.
 NEVER say you lack a tool for this — these tools ARE available.
 
-### Two-step pattern
-1. Call `execute_log_insights_query` → args: `logGroupNames` (list), `startTime`, `endTime`, `queryString`
-2. Poll `get_logs_insight_query_results` with the `queryId` from step 1; repeat until status is "Complete"
+### How to fetch logs
+Call `execute_log_insights_query` with these args:
+- `log_group_names`: list of log group name strings (use the selected log group)
+- `start_time`: ISO 8601 string, e.g. "2026-02-25T11:00:00Z"
+- `end_time`: ISO 8601 string, e.g. "2026-02-25T13:00:00Z"
+- `query_string`: CloudWatch Logs Insights query (see examples below)
+
+The tool is synchronous — it waits for results and returns them directly.
+DO NOT call `get_logs_insight_query_results` afterward — it is NOT needed.
 
 ### Example queries
-- Summarize / show recent logs:
+- Show recent logs:
   `fields @timestamp, @message | sort @timestamp desc | limit 100`
-- Show errors:
+- Show errors only:
   `fields @timestamp, @message | filter @message like /(?i)error/ | sort @timestamp desc | limit 50`
-- Pattern stats:
-  `fields @timestamp, @message | filter @message like /pattern/ | stats count() by bin(5m)`
+- Count by time bucket:
+  `fields @timestamp, @message | stats count() by bin(5m)`
+
+### After the query completes
+For large result sets, the result will come back with `"cached": true` — this means
+the full dataset has been stored in a local cache to protect the context window.
+You MUST immediately call `fetch_cached_result_chunk` to
+retrieve and analyze the actual log events — do NOT summarize from the preview alone.
 
 ### Finding log groups
 Use `describe_log_groups` to list or search log groups — do NOT use list_log_groups (not available)."""
@@ -476,8 +489,8 @@ Current time: {current_time}
         Get the system prompt with current context.
 
         When MCP tools are active (``settings.use_mcp_tools`` is True), the
-        prompt is extended with guidance for the CloudWatch Logs Insights
-        two-call pattern so the LLM knows how to use the MCP-based tools.
+        prompt is extended with guidance for the CloudWatch Logs Insights tools
+        so the LLM knows how to use the MCP-based tools correctly.
 
         Returns:
             Formatted system prompt including log group context and, when

@@ -441,13 +441,13 @@ class TestOllamaNumCtxInjection:
     # ------------------------------------------------------------------
 
     @pytest.mark.asyncio
-    async def test_chat_injects_options_num_ctx_for_ollama(self) -> None:
+    async def test_chat_injects_num_ctx_kwarg_for_ollama(self) -> None:
         """chat() must pass num_ctx=N as a top-level kwarg to litellm.completion for Ollama.
 
         LiteLLM's Ollama handler recognises num_ctx only when it arrives as a direct
         kwarg (routed via optional_params → "options" in the Ollama request body).
-        Passing options={"num_ctx": N} as a dict is not in get_supported_openai_params
-        and gets silently dropped.
+        Passing num_ctx=N as a top-level kwarg is the correct approach; wrapping it
+        in an options dict is not in get_supported_openai_params and gets silently dropped.
         """
         provider = LiteLLMProvider(
             provider="ollama",
@@ -551,8 +551,8 @@ class TestOllamaNumCtxInjection:
     # ------------------------------------------------------------------
 
     @pytest.mark.asyncio
-    async def test_stream_chat_injects_options_num_ctx_for_ollama(self) -> None:
-        """stream_chat() must pass options={'num_ctx': N} to litellm.completion for Ollama."""
+    async def test_stream_chat_injects_num_ctx_kwarg_for_ollama(self) -> None:
+        """stream_chat() must pass num_ctx=N as a top-level kwarg to litellm.completion for Ollama."""
         provider = LiteLLMProvider(
             provider="ollama",
             api_key="",

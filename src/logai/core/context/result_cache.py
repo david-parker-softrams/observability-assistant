@@ -378,32 +378,56 @@ class ResultCacheManager:
         """
         Extract time range from events.
 
+        Handles both integer epoch-millisecond timestamps and ISO 8601 string
+        timestamps (as returned by CloudWatch MCP Insights results).  When all
+        timestamps are integers the full numeric span is calculated; when strings
+        are encountered the start/end are returned as-is (informational only).
+
         Args:
             events: List of event dictionaries
 
         Returns:
-            Time range dictionary with start, end, and span
+            Time range dictionary with start, end, and optional span_ms
         """
         if not events:
             return {"start": None, "end": None}
 
-        timestamps: list[int] = []
+        int_timestamps: list[int] = []
+        str_timestamps: list[str] = []
+
         for e in events:
             ts = e.get("timestamp")
-            if ts is not None and isinstance(ts, int):
-                timestamps.append(ts)
+            if ts is None:
+                continue
+            if isinstance(ts, int):
+                int_timestamps.append(ts)
+            elif isinstance(ts, str):
+                str_timestamps.append(ts)
+            # float: coerce to int
+            elif isinstance(ts, float):
+                int_timestamps.append(int(ts))
 
-        if not timestamps:
-            return {"start": None, "end": None}
+        # Prefer integer timestamps for precise span calculation
+        if int_timestamps:
+            min_ts = min(int_timestamps)
+            max_ts = max(int_timestamps)
+            return {
+                "start": min_ts,
+                "end": max_ts,
+                "span_ms": max_ts - min_ts,
+            }
 
-        min_ts = min(timestamps)
-        max_ts = max(timestamps)
+        # Graceful degradation: return string timestamps as-is (span cannot be computed).
+        # Lexicographic sort works correctly for UTC ISO 8601 strings ("Z" suffix);
+        # timezone-offset timestamps are not guaranteed to sort correctly.
+        if str_timestamps:
+            sorted_strs = sorted(str_timestamps)
+            return {
+                "start": sorted_strs[0],
+                "end": sorted_strs[-1],
+            }
 
-        return {
-            "start": min_ts,
-            "end": max_ts,
-            "span_ms": max_ts - min_ts,
-        }
+        return {"start": None, "end": None}
 
     def _select_time_diverse(
         self, events: list[dict[str, Any]], count: int
@@ -421,8 +445,13 @@ class ResultCacheManager:
         if len(events) <= count:
             return events
 
-        # Sort by timestamp first
-        sorted_events = sorted(events, key=lambda e: e.get("timestamp", 0))
+        # Sort by timestamp first.  Use a numeric key so that mixed int/string
+        # timestamp lists don't raise TypeError; string timestamps sort last.
+        def _ts_sort_key(e: dict[str, Any]) -> float:
+            ts = e.get("timestamp", 0)
+            return float(ts) if isinstance(ts, int | float) else float("inf")
+
+        sorted_events = sorted(events, key=_ts_sort_key)
 
         selected = []
 
@@ -513,10 +542,62 @@ class ResultCacheManager:
             if rest:
                 sampled.extend(self._select_time_diverse(rest, remaining))
 
-        # Sort by timestamp for chronological presentation
-        sampled.sort(key=lambda e: e.get("timestamp", 0))
+        # Sort by timestamp for chronological presentation.  Guard against mixed
+        # int/string timestamp lists (MCP Insights returns ISO 8601 strings).
+        sampled.sort(
+            key=lambda e: (
+                e.get("timestamp", 0)
+                if isinstance(e.get("timestamp"), int | float)
+                else float("inf")
+            )
+        )
 
         return sampled[:count]
+
+    def _normalize_mcp_insights_records(
+        self, raw_results: list[Any], tool_name: str
+    ) -> list[dict[str, Any]]:
+        """
+        Normalize a list of CloudWatch Logs Insights records into standard event dicts.
+
+        The CloudWatch MCP server returns records as dicts whose field names carry a
+        leading ``@`` prefix (e.g. ``@timestamp``, ``@message``, ``@logStream``).
+        This helper strips that prefix so the rest of the pipeline sees canonical
+        field names (``timestamp``, ``message``, ``logStream``, …).
+
+        Non-dict entries in the list are silently skipped.  If every entry is
+        non-dict a warning is emitted so the problem is visible in logs without
+        crashing the caller.
+
+        Args:
+            raw_results: The list stored under the ``"results"`` key of an MCP
+                Insights response.
+            tool_name: Tool name — used only for log messages.
+
+        Returns:
+            List of normalized event dicts (may be empty).
+        """
+        normalized: list[dict[str, Any]] = []
+        for record in raw_results:
+            if not isinstance(record, dict):
+                continue
+            clean: dict[str, Any] = {}
+            for key, value in record.items():
+                # Strip leading "@" from CloudWatch Insights field names
+                clean_key = key[1:] if key.startswith("@") else key
+                clean[clean_key] = value
+            normalized.append(clean)
+
+        if raw_results and not normalized:
+            logger.warning(
+                "MCP Insights 'results' had %d records but none were valid dicts "
+                "(tool=%s). First record type: %s",
+                len(raw_results),
+                tool_name,
+                type(raw_results[0]).__name__,
+            )
+
+        return normalized
 
     async def cache_result(
         self,
@@ -544,6 +625,20 @@ class ResultCacheManager:
         events = result.get("events", result.get("logs", []))
         if not isinstance(events, list):
             events = []
+
+        # Fallback: MCP Insights format uses a "results" key with CloudWatch
+        # field-value records where field names carry an "@" prefix
+        # (e.g. "@timestamp", "@message", "@logStream").  Delegate normalization
+        # to the shared helper so the logic lives in exactly one place.
+        if not events:
+            raw_results = result.get("results", [])
+            if isinstance(raw_results, list) and raw_results:
+                events = self._normalize_mcp_insights_records(raw_results, tool_name)
+                logger.debug(
+                    "Extracted %d events from MCP Insights 'results' key (tool=%s)",
+                    len(events),
+                    tool_name,
+                )
 
         # Generate summary components
         event_stats = self._extract_event_statistics(events)
@@ -741,8 +836,25 @@ class ResultCacheManager:
             )
             await db.commit()
 
-        # Extract events
+        # Extract events (handle different result formats).
+        # NOTE: the raw result dict serialized to SQLite may use the "results" key
+        # (MCP Insights format) rather than "events" or "logs".  Apply the same
+        # fallback and normalization as cache_result() so callers always receive
+        # events in the standard {"timestamp": ..., "message": ...} shape.
         events = result.get("events", result.get("logs", []))
+        if not isinstance(events, list):
+            events = []
+
+        if not events:
+            raw_results = result.get("results", [])
+            if isinstance(raw_results, list) and raw_results:
+                events = self._normalize_mcp_insights_records(raw_results, cache_id)
+                logger.debug(
+                    "fetch_chunk: extracted %d events from MCP Insights 'results' key "
+                    "(cache_id=%s)",
+                    len(events),
+                    cache_id,
+                )
 
         # Apply filters
         filtered_events = events
@@ -754,11 +866,22 @@ class ResultCacheManager:
             ]
 
         if time_start is not None:
-            filtered_events = [e for e in filtered_events if e.get("timestamp", 0) >= time_start]
+            # Events with non-numeric timestamps (e.g. ISO 8601 strings from MCP
+            # Insights) cannot be compared to epoch-ms integers — pass them through
+            # rather than crashing or silently dropping them.
+            filtered_events = [
+                e
+                for e in filtered_events
+                if not isinstance(e.get("timestamp"), int | float)
+                or e.get("timestamp", 0) >= time_start
+            ]
 
         if time_end is not None:
             filtered_events = [
-                e for e in filtered_events if e.get("timestamp", float("inf")) <= time_end
+                e
+                for e in filtered_events
+                if not isinstance(e.get("timestamp"), int | float)
+                or e.get("timestamp", float("inf")) <= time_end
             ]
 
         # Apply pagination
