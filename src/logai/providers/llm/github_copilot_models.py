@@ -75,8 +75,8 @@ MODEL_METADATA: dict[str, dict[str, Any]] = {
     "grok-code-fast-1": {"provider": "xai", "supports_tools": True, "tier": "fast"},
 }
 
-# Default model
-DEFAULT_MODEL = "claude-opus-4.6"
+# Default model — keep in sync with `github_copilot_model` default in settings.py
+DEFAULT_MODEL = "gpt-4o-mini"
 
 
 def get_cache_path() -> Path:

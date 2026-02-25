@@ -110,7 +110,7 @@ Follow the browser prompts to authorize LogAI. Your token will be saved to `~/.l
 
 **Variable:** `LOGAI_GITHUB_COPILOT_MODEL`
 **Required:** Yes (when using GitHub Copilot)
-**Default:** `claude-opus-4.5`
+**Default:** `gpt-4o-mini`
 
 ```bash
 LOGAI_GITHUB_COPILOT_MODEL=gpt-4o-mini

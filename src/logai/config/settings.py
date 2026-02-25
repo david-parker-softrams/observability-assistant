@@ -79,7 +79,7 @@ class LogAISettings(BaseSettings):
 
     # === GitHub Copilot Configuration ===
     github_copilot_model: str = Field(
-        default="claude-opus-4.5",
+        default="gpt-4o-mini",
         description="GitHub Copilot model to use",
     )
 
