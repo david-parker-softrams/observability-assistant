@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0](https://github.com/david-parker-softrams/observability-assistant/compare/logai-v0.2.1...logai-v0.3.0) (2026-02-25)
+
+
+### Features
+
+* integrate MCP server for CloudWatch tool calls ([dabed2f](https://github.com/david-parker-softrams/observability-assistant/commit/dabed2f2c22954c67c80c5dfea4972209d086bec))
+
+
+### Bug Fixes
+
+* handle MCP Insights results format in result cache ([#15](https://github.com/david-parker-softrams/observability-assistant/issues/15)) ([03520f7](https://github.com/david-parker-softrams/observability-assistant/commit/03520f7d967fbb43fdc4092569db785884ab4c5b))
+* pass num_ctx as top-level kwarg to litellm, not as options dict ([#14](https://github.com/david-parker-softrams/observability-assistant/issues/14)) ([9090582](https://github.com/david-parker-softrams/observability-assistant/commit/90905821abf7a1f406e3076ed0790be8d5162ba2))
+
 ## [0.2.1](https://github.com/david-parker-softrams/observability-assistant/compare/logai-v0.2.0...logai-v0.2.1) (2026-02-24)
 
 
