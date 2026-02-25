@@ -445,8 +445,13 @@ class ResultCacheManager:
         if len(events) <= count:
             return events
 
-        # Sort by timestamp first
-        sorted_events = sorted(events, key=lambda e: e.get("timestamp", 0))
+        # Sort by timestamp first.  Use a numeric key so that mixed int/string
+        # timestamp lists don't raise TypeError; string timestamps sort last.
+        def _ts_sort_key(e: dict[str, Any]) -> float:
+            ts = e.get("timestamp", 0)
+            return float(ts) if isinstance(ts, int | float) else float("inf")
+
+        sorted_events = sorted(events, key=_ts_sort_key)
 
         selected = []
 
@@ -537,8 +542,15 @@ class ResultCacheManager:
             if rest:
                 sampled.extend(self._select_time_diverse(rest, remaining))
 
-        # Sort by timestamp for chronological presentation
-        sampled.sort(key=lambda e: e.get("timestamp", 0))
+        # Sort by timestamp for chronological presentation.  Guard against mixed
+        # int/string timestamp lists (MCP Insights returns ISO 8601 strings).
+        sampled.sort(
+            key=lambda e: (
+                e.get("timestamp", 0)
+                if isinstance(e.get("timestamp"), int | float)
+                else float("inf")
+            )
+        )
 
         return sampled[:count]
 
@@ -854,11 +866,22 @@ class ResultCacheManager:
             ]
 
         if time_start is not None:
-            filtered_events = [e for e in filtered_events if e.get("timestamp", 0) >= time_start]
+            # Events with non-numeric timestamps (e.g. ISO 8601 strings from MCP
+            # Insights) cannot be compared to epoch-ms integers — pass them through
+            # rather than crashing or silently dropping them.
+            filtered_events = [
+                e
+                for e in filtered_events
+                if not isinstance(e.get("timestamp"), int | float)
+                or e.get("timestamp", 0) >= time_start
+            ]
 
         if time_end is not None:
             filtered_events = [
-                e for e in filtered_events if e.get("timestamp", float("inf")) <= time_end
+                e
+                for e in filtered_events
+                if not isinstance(e.get("timestamp"), int | float)
+                or e.get("timestamp", float("inf")) <= time_end
             ]
 
         # Apply pagination
