@@ -34,7 +34,7 @@ def mock_settings(tmp_path):
     settings.enable_result_caching = True
     settings.cache_large_results_threshold = 5000
     settings.max_result_tokens = 10000
-    settings.initial_chunk_size = 100
+    settings.initial_chunk_size = 25
     settings.enable_auto_fetch_guidance = True
     settings.cache_sample_event_count = 5  # New setting for sample event count
     settings.enable_history_pruning = True

@@ -11,7 +11,7 @@ from logai.config.settings import LogAISettings
 from logai.core.context.budget_tracker import ContextBudgetTracker
 from logai.core.context.result_cache import CachedResultSummary, ResultCacheManager
 from logai.core.context.token_counter import TokenCounter
-from logai.core.orchestrator import LLMOrchestrator
+from logai.core.orchestrator import ActiveCacheContext, LLMOrchestrator
 from logai.core.sanitizer import LogSanitizer
 from logai.core.tools.registry import ToolRegistry
 from logai.providers.llm.base import LLMResponse
@@ -1337,3 +1337,169 @@ class TestContextInjectionMerging:
         # And: The single system message should contain the context
         system_content = system_messages[0]["content"]
         assert "CONTEXT: Streaming context test" in system_content
+
+
+# ---------------------------------------------------------------------------
+# §6.3.2 — New tests: chunk size / prompt content (design doc §6.3.3–6.3.7)
+# ---------------------------------------------------------------------------
+
+
+class TestChunkSizePromptContent:
+    """Tests verifying that prompt text uses conservative chunk sizes and
+    summarize-as-you-go language after the context-overflow fix."""
+
+    def test_system_prompt_uses_small_chunk_size(self, orchestrator) -> None:
+        """Test that system prompt uses conservative chunk size and summarize-as-you-go."""
+        prompt = orchestrator._get_system_prompt()
+
+        # Should use new conservative chunk size
+        assert "limit=25" in prompt or "limit=25)" in prompt
+        assert "limit=100)" not in prompt
+
+        # Should have summarize-as-you-go language
+        assert "Analyze THIS chunk" in prompt
+        assert "enough information" in prompt.lower()
+
+        # Should NOT have the old iterate language
+        assert "Iterate through all chunks" not in prompt
+
+    def test_follow_up_cache_injection_no_iterate_all_chunks(
+        self,
+        settings,
+        mock_llm_provider,
+        mock_sanitizer,
+        mock_result_cache,
+    ) -> None:
+        """Test that follow-up cache injection uses summarize-as-you-go, not iterate-all."""
+        import time as _time
+
+        settings.enable_auto_fetch_guidance = True
+        settings.initial_chunk_size = 25
+
+        orchestrator = LLMOrchestrator(
+            llm_provider=mock_llm_provider,
+            tool_registry=ToolRegistry,
+            sanitizer=mock_sanitizer,
+            settings=settings,
+            result_cache=mock_result_cache,
+        )
+
+        # Set up active cache — uses ActiveCacheContext (defined in orchestrator.py),
+        # not CachedResultSummary (the result_cache dataclass).
+        orchestrator._active_cache = ActiveCacheContext(
+            cache_id="result_test123",
+            total_events=100,
+            created_at=_time.time(),
+            tool_name="fetch_logs",
+        )
+
+        # Use an aggregation-keyword message so _should_inject_cache_guidance returns True
+        injection = orchestrator._get_follow_up_cache_injection("how many errors are there?")
+
+        assert injection is not None
+        # Must NOT contain the old iterate language
+        assert "Iterate through all chunks" not in injection
+        # Must contain summarize-as-you-go language
+        assert (
+            "analyze what you've learned" in injection.lower()
+            or "decide if you need more" in injection.lower()
+        )
+        # Must use the new chunk size
+        assert "limit=25" in injection
+        # Must mention running totals for aggregation accuracy
+        assert "running totals" in injection.lower()
+
+    def test_follow_up_cache_injection_chunk_count_with_new_defaults(
+        self,
+        settings,
+        mock_llm_provider,
+        mock_sanitizer,
+        mock_result_cache,
+    ) -> None:
+        """Test chunk count calculation with new default chunk size of 25."""
+        import time as _time
+
+        settings.initial_chunk_size = 25
+
+        orchestrator = LLMOrchestrator(
+            llm_provider=mock_llm_provider,
+            tool_registry=ToolRegistry,
+            sanitizer=mock_sanitizer,
+            settings=settings,
+            result_cache=mock_result_cache,
+        )
+
+        orchestrator._active_cache = ActiveCacheContext(
+            cache_id="result_test456",
+            total_events=100,
+            created_at=_time.time(),
+            tool_name="fetch_logs",
+        )
+
+        # Use an aggregation-keyword message so injection is triggered
+        injection = orchestrator._get_follow_up_cache_injection("count the errors")
+
+        assert injection is not None
+        # 100 events / 25 per chunk = 4 chunks
+        assert "Chunks Available: 4" in injection
+        assert "at 25 events each" in injection
+
+    def test_worst_case_chunk_tokens_within_budget(self, settings) -> None:
+        """Verify worst-case chunk fetch tokens fit within 32K model results budget."""
+        # Use the real defaults from settings
+        chunk_size = settings.initial_chunk_size  # 25
+        max_fetches = settings.max_auto_chunk_fetches  # 3
+        tokens_per_event_high = 50  # Conservative estimate
+
+        worst_case_tokens = chunk_size * max_fetches * tokens_per_event_high
+
+        # The real enforcement guard is max_result_tokens (currently defaults to 10,000)
+        assert (
+            worst_case_tokens <= settings.max_result_tokens
+        ), f"Worst case {worst_case_tokens} tokens exceeds max_result_tokens={settings.max_result_tokens}"
+
+    def test_enhanced_cache_summary_fetch_instructions_uses_small_chunk(
+        self,
+        settings,
+        mock_llm_provider,
+        mock_sanitizer,
+        mock_result_cache,
+    ) -> None:
+        """Test that _create_enhanced_cache_summary embeds limit= from initial_chunk_size."""
+        import time as _time
+
+        settings.initial_chunk_size = 25
+
+        orchestrator = LLMOrchestrator(
+            llm_provider=mock_llm_provider,
+            tool_registry=ToolRegistry,
+            sanitizer=mock_sanitizer,
+            settings=settings,
+            result_cache=mock_result_cache,
+        )
+
+        # Build a minimal CachedResultSummary stub (all required fields)
+        from logai.core.context.result_cache import CachedResultSummary
+
+        summary = CachedResultSummary(
+            cache_id="result_abc123",
+            total_events=200,
+            time_range={"start": "2024-01-01T00:00:00Z", "end": "2024-01-01T01:00:00Z"},
+            sample_events=[{"message": f"log {i}"} for i in range(5)],
+            event_statistics={"INFO": 180, "ERROR": 20},
+            original_tool="fetch_logs",
+            original_query={"log_group": "/aws/lambda/my-function"},
+            cached_at=int(_time.time()),
+            expires_at=int(_time.time()) + 3600,
+        )
+
+        result = orchestrator._create_enhanced_cache_summary(
+            summary, {"success": True}, "fetch_logs"
+        )
+
+        example = result["fetch_instructions"]["example"]
+
+        # Must contain the small chunk size from settings
+        assert "limit=25" in example, f"Expected limit=25 in example, got: {example!r}"
+        # Must NOT contain the old hard-coded large chunk size
+        assert "limit=100" not in example, f"Unexpected limit=100 found in example: {example!r}"

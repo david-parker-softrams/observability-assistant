@@ -37,7 +37,7 @@ def _make_settings(**overrides) -> Mock:
     settings.cache_dir = Path("/tmp/cache")
     settings.cache_large_results_threshold = 5000
     settings.max_result_tokens = 10000
-    settings.initial_chunk_size = 100
+    settings.initial_chunk_size = 25
     settings.enable_auto_fetch_guidance = True
     settings.cache_sample_event_count = 5
     settings.enable_history_pruning = True
@@ -149,3 +149,22 @@ class TestGetSystemPromptMcpGuidance:
         assert (
             "execute_log_insights_query" not in prompt
         ), "execute_log_insights_query must NOT appear in the system prompt on the native path"
+
+
+# ---------------------------------------------------------------------------
+# §6.3.3 — New test: MCP guidance example query uses limit 50 (not 100)
+# ---------------------------------------------------------------------------
+
+
+class TestMcpGuidanceQueryLimits:
+    """Tests verifying that _MCP_LOGS_INSIGHTS_GUIDANCE uses conservative query limits."""
+
+    def test_mcp_guidance_uses_limit_50_in_show_recent_example(self) -> None:
+        """Test MCP guidance example query uses limit 50 for recent logs."""
+        from logai.core.orchestrator import _MCP_LOGS_INSIGHTS_GUIDANCE
+
+        assert (
+            "limit 50" in _MCP_LOGS_INSIGHTS_GUIDANCE or "limit 50`" in _MCP_LOGS_INSIGHTS_GUIDANCE
+        )
+        # The old limit 100 should no longer appear in the "Show recent logs" example
+        assert "sort @timestamp desc | limit 100" not in _MCP_LOGS_INSIGHTS_GUIDANCE

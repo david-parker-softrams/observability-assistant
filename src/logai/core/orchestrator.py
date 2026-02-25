@@ -278,7 +278,7 @@ DO NOT call `get_logs_insight_query_results` afterward — it is NOT needed.
 
 ### Example queries
 - Show recent logs:
-  `fields @timestamp, @message | sort @timestamp desc | limit 100`
+  `fields @timestamp, @message | sort @timestamp desc | limit 50`
 - Show errors only:
   `fields @timestamp, @message | filter @message like /(?i)error/ | sort @timestamp desc | limit 50`
 - Count by time bucket:
@@ -287,8 +287,9 @@ DO NOT call `get_logs_insight_query_results` afterward — it is NOT needed.
 ### After the query completes
 For large result sets, the result will come back with `"cached": true` — this means
 the full dataset has been stored in a local cache to protect the context window.
-You MUST immediately call `fetch_cached_result_chunk` to
-retrieve and analyze the actual log events — do NOT summarize from the preview alone.
+You MUST immediately call `fetch_cached_result_chunk` to retrieve the first chunk
+of actual log events — do NOT summarize from the preview alone.
+Fetch in small chunks (limit=25) and analyze each chunk before deciding to fetch more.
 
 ### Finding log groups
 Use `describe_log_groups` to list or search log groups — do NOT use list_log_groups (not available)."""
@@ -373,7 +374,7 @@ Before giving up on a search:
 This preview is NOT sufficient to answer user questions. The full dataset has been cached to protect context limits.
 
 🚨 MANDATORY IMMEDIATE ACTION REQUIRED:
-You MUST call fetch_cached_result_chunk(cache_id, offset=0, limit=100) in your IMMEDIATE next response.
+You MUST call fetch_cached_result_chunk(cache_id, offset=0, limit=25) in your IMMEDIATE next response.
 DO NOT skip this step. DO NOT answer based on preview alone. DO NOT wait for user prompt.
 
 ❌ WRONG - These will give INCORRECT answers:
@@ -382,13 +383,15 @@ DO NOT skip this step. DO NOT answer based on preview alone. DO NOT wait for use
 - Providing statistics or counts from preview data
 - Waiting for the user to ask for more data
 
-✅ CORRECT - Required workflow:
+✅ CORRECT - Required workflow (SUMMARIZE AS YOU GO):
 1. See "cached": true with cache_id "result_abc123" and total_events: 100
-2. IMMEDIATELY call: fetch_cached_result_chunk(cache_id='result_abc123', offset=0, limit=100)
-3. Receive full chunk (100 events)
-4. Analyze the complete data
-5. Answer user's question based on FULL data
-6. Fetch more chunks if needed (offset=100, limit=100, etc.)
+2. IMMEDIATELY call: fetch_cached_result_chunk(cache_id='result_abc123', offset=0, limit=25)
+3. Receive first chunk (up to 25 events)
+4. Analyze THIS chunk — summarize key findings, extract patterns, note counts
+5. Decide: do you have enough information to answer the user's question?
+   - YES → Answer based on what you've analyzed so far
+   - NO → Fetch the next chunk: fetch_cached_result_chunk(cache_id='result_abc123', offset=25, limit=25)
+6. Repeat steps 3-5. Stop fetching once you can answer accurately. Do NOT fetch all chunks by default.
 
 EXAMPLE:
 If a log query tool returns {{"cached": true, "cache_id": "result_6d283cecb68018ad", "total_events": 100, "sample": [5 events]}},
@@ -397,13 +400,14 @@ your immediate next action MUST be calling fetch_cached_result_chunk, NOT provid
 The fetch_cached_result_chunk tool supports:
 - cache_id: The cache_id from the cached result (REQUIRED)
 - offset: Starting index, 0-based (start with 0)
-- limit: Number of events, max 200 (use 100 initially)
+- limit: Number of events, max 200 (use 25 initially to protect context window)
 - filter_pattern: Optional text search (case-insensitive)
 - time_start/time_end: Optional Unix timestamp filters
 
-CONSEQUENCE OF IGNORING THIS:
-If you answer based only on preview samples, you will provide incomplete, potentially wrong analysis.
-The user expects analysis of ALL events, not just a preview.
+IMPORTANT — CONTEXT BUDGET:
+Do NOT try to load all events at once. Each chunk consumes context window space.
+Fetch one chunk, analyze it, then decide if more data is needed to answer accurately.
+For exact counts across large datasets, track running totals as you process each chunk.
 
 ## User-Provided Log Entries
 
@@ -688,9 +692,13 @@ You have an active cached dataset from a previous query:
 - Total Events: {cache.total_events}
 - Chunks Available: {total_chunks} (at {chunk_size} events each)
 
-The user's question requires analyzing the full dataset.
+To answer the user's question, fetch one chunk at a time:
 Use fetch_cached_result_chunk(cache_id="{cache.cache_id}", offset=0, limit={chunk_size})
-to retrieve and analyze all events. Iterate through all chunks for accurate counts.
+
+After each chunk, analyze what you've learned and decide if you need more data.
+Only fetch another chunk if the user's question genuinely requires more data than you've already seen.
+Stop fetching once you have enough information to answer the question accurately.
+For exact counts or aggregations, keep running totals as you process each chunk.
 
 Do NOT answer based only on preview samples."""
 
@@ -699,7 +707,7 @@ Do NOT answer based only on preview samples."""
         Reset the chunk fetch count on new user message (new turn).
 
         Per approved design: fetch count resets per conversation turn,
-        allowing agents to make up to max_auto_chunk_fetches (5) per turn.
+        allowing agents to make up to max_auto_chunk_fetches (default: 3) per turn.
         """
         if self._active_cache:
             self._active_cache.chunks_fetched = 0
@@ -982,7 +990,7 @@ Do NOT answer based only on preview samples."""
                 "available": True,
                 "tool": "fetch_cached_result_chunk",
                 "cache_id": summary.cache_id,
-                "example": f"fetch_cached_result_chunk(cache_id='{summary.cache_id}', offset=0, limit=100)",
+                "example": f"fetch_cached_result_chunk(cache_id='{summary.cache_id}', offset=0, limit={self.settings.initial_chunk_size})",
                 "note": "Use to retrieve additional events from the full cached dataset",
             },
         }
