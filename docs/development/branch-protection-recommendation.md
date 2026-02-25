@@ -44,14 +44,21 @@ enforced regardless of which tool or workflow a team member uses.
 - **Require status checks to pass before merging**: ✅ enabled
 - **Require branches to be up to date before merging**: ✅ enabled
 
-**Required checks** (these already exist in the repo's CI workflows):
+**Required checks:**
 
-| Check name | Workflow | What it validates |
-|---|---|---|
-| `Validate PR title` | `pr-title-check.yml` | PR title follows Conventional Commits format (required for `release-please` versioning) |
-| `ruff` | pre-commit / CI | Python linting — catches code errors and style issues |
-| `ruff-format` | pre-commit / CI | Python formatting — enforces consistent code style |
-| `mypy` | pre-commit / CI | Static type checking on `src/` |
+| Check name | Source | Status | What it validates |
+|---|---|---|---|
+| `Validate PR title` | `pr-title-check.yml` (GitHub Actions) | ✅ Ready to use now | PR title follows Conventional Commits format (required for `release-please` versioning) |
+| `ruff` | Pre-commit hook (local only) | ⚠️ CI workflow needed | Python linting — catches code errors and style issues |
+| `ruff-format` | Pre-commit hook (local only) | ⚠️ CI workflow needed | Python formatting — enforces consistent code style |
+| `mypy` | Pre-commit hook (local only) | ⚠️ CI workflow needed | Static type checking on `src/` |
+
+> **Note:** `ruff`, `ruff-format`, and `mypy` currently run only as local
+> pre-commit hooks. They are **not** yet executed by a GitHub Actions workflow,
+> so they do not produce GitHub status checks and cannot be added as required
+> checks in branch protection until a CI workflow is created to run them on
+> pull requests. `Validate PR title` is the only check that is ready to
+> configure today.
 
 > Requiring the branch to be up to date means a PR cannot be merged if `main`
 > has moved ahead since the branch was created. This prevents integration bugs
@@ -96,11 +103,11 @@ Use the same types as the PR title convention:
 |---|---|
 | `feat/` | New feature or enhancement |
 | `fix/` | Bug fix |
-| `refactor/` | Code restructuring with no behaviour change |
+| `refactor/` | Code restructuring with no behavior change |
 | `docs/` | Documentation only |
 | `test/` | Adding or updating tests |
 | `chore/` | Maintenance, dependency updates, tooling |
-| `hotfix/` | Critical production fix (merge as fast as possible) |
+| `hotfix/` | Critical production fix (merge as fast as possible) — use `fix:` (or another valid type) as the PR title prefix, not `hotfix:` |
 
 **Examples:** `feat/export-logs-to-csv`, `fix/chat-scroll-position`, `chore/update-dependencies`
 
@@ -169,24 +176,31 @@ git branch -d feat/my-new-feature
 
    - [x] **Require status checks to pass before merging**
      - [x] Require branches to be up to date before merging
-     - In the search box, add each required check by name:
-       - `Validate PR title`
-       - `ruff`
-       - `ruff-format`
-       - `mypy`
+      - In the search box, add each required check by name:
+        - `Validate PR title`
+        - `ruff` *(only after a CI workflow has been created — see note below)*
+        - `ruff-format` *(only after a CI workflow has been created — see note below)*
+        - `mypy` *(only after a CI workflow has been created — see note below)*
 
-     > **Note:** A check only appears in the search box after it has run at
-     > least once on a PR. If a check is missing, open a draft PR first to
-     > trigger the workflows, then come back and add the checks.
+     > **Note:** A check only appears in the search box after a GitHub Actions
+     > workflow has run it at least once on a PR and reported a status check
+     > back to GitHub. `Validate PR title` is available immediately. `ruff`,
+     > `ruff-format`, and `mypy` currently run only as local pre-commit hooks
+     > and will **not** appear in the search box — even after opening a draft
+     > PR — until CI workflows are created to run them on pull requests.
 
    - [x] **Restrict who can push to matching branches**
-     *(Leave the "who can push" list empty — no direct pushes by anyone.)*
+     *(Leave the "who can push" list empty — GitHub will then block direct pushes by everyone, including admins, with no exceptions.)*
 
    - [x] **Allow force pushes** — leave **unchecked** (disabled)
 
    - [x] **Allow deletions** — leave **unchecked** (disabled)
 
-   - [x] **Do not allow bypassing the above settings** *(applies rules to admins too)*
+   - Depending on your repository's GitHub plan and settings, you will see
+     **one** of the following options — enable it either way:
+     - [x] **Do not allow bypassing the above settings** — enable this *(applies rules to admins too)*
+     - **Allow specified actors to bypass required pull requests** — leave the
+       actors list **empty** *(an empty list means no one can bypass)*
 
 7. Click **Create** (or **Save changes**).
 
@@ -196,7 +210,7 @@ git branch -d feat/my-new-feature
 
 | Workflow | Impact |
 |---|---|
-| `release.yml` (Release Please) | None — Release Please merges its own PR via `gh pr merge --auto`, which goes through the normal PR flow and satisfies all required checks. |
+| `release.yml` (Release Please) | ⚠️ Partial — Release Please merges its own PR via `gh pr merge --auto`, which goes through the normal PR flow. Auto-merge will work once CI workflows exist for all required checks. Until then, if `ruff`, `ruff-format`, or `mypy` have been added as required checks before their CI workflows exist, Release Please PRs will be blocked and must be merged manually. |
 | `pr-title-check.yml` | Becomes a *blocking* required check instead of advisory. No change to the workflow file itself. |
 | Agent team members (Jackie, Raoul, Tina, etc.) | Must push to feature branches and open PRs. Direct commits to `main` will be rejected. |
 | Hotfixes | Use a `hotfix/` branch + PR. A single reviewer can approve immediately to keep the turnaround fast. |
