@@ -68,7 +68,7 @@ class LogAISettings(BaseSettings):
 
     llm_request_timeout: float = Field(
         default=120.0,
-        gt=0,
+        ge=0,
         description=(
             "Timeout in seconds for LLM API requests (applies to Ollama and other LiteLLM "
             "providers). The underlying HTTP library defaults to 600 s (10 min), which causes "
