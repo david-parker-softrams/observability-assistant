@@ -66,6 +66,16 @@ class LogAISettings(BaseSettings):
         le=131072,
     )
 
+    llm_request_timeout: float = Field(
+        default=120.0,
+        gt=0,
+        description=(
+            "Timeout in seconds for LLM API requests (applies to Ollama and other LiteLLM "
+            "providers). The underlying HTTP library defaults to 600 s (10 min), which causes "
+            "silent hangs on slow/unresponsive models. Set to 0 to disable (not recommended)."
+        ),
+    )
+
     # === GitHub Copilot Configuration ===
     github_copilot_model: str = Field(
         default="claude-opus-4.5",

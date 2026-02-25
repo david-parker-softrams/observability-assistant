@@ -79,6 +79,7 @@ class LiteLLMProvider(BaseLLMProvider):
         max_tokens: int | None = None,
         api_base: str | None = None,
         num_ctx: int | None = None,
+        request_timeout: float = 120.0,
     ):
         """
         Initialize LiteLLM provider.
@@ -92,6 +93,10 @@ class LiteLLMProvider(BaseLLMProvider):
             api_base: Base URL for API (used by Ollama)
             num_ctx: Ollama context window size. Overrides Ollama's default of 4096 tokens so that
                      the full prompt (including tool definitions) is never silently truncated.
+            request_timeout: HTTP request timeout in seconds passed to litellm.completion().
+                             Prevents silent 10-minute hangs when the underlying httpcore library
+                             defaults to 600 s. Mirrors the timeout already used by the GitHub
+                             Copilot provider.
         """
         self.provider = provider
         self.api_key = api_key
@@ -100,6 +105,7 @@ class LiteLLMProvider(BaseLLMProvider):
         self.max_tokens = max_tokens
         self.api_base = api_base
         self.num_ctx = num_ctx
+        self.request_timeout = request_timeout
 
         # Set API key in environment for litellm
         if provider == "anthropic":
@@ -124,12 +130,14 @@ class LiteLLMProvider(BaseLLMProvider):
                 provider="anthropic",
                 api_key=settings.anthropic_api_key or "",
                 model=settings.anthropic_model,
+                request_timeout=settings.llm_request_timeout,
             )
         elif settings.llm_provider == "openai":
             return cls(
                 provider="openai",
                 api_key=settings.openai_api_key or "",
                 model=settings.openai_model,
+                request_timeout=settings.llm_request_timeout,
             )
         elif settings.llm_provider == "ollama":
             return cls(
@@ -138,6 +146,7 @@ class LiteLLMProvider(BaseLLMProvider):
                 model=settings.ollama_model,
                 api_base=settings.ollama_base_url,
                 num_ctx=settings.ollama_num_ctx,
+                request_timeout=settings.llm_request_timeout,
             )
         elif settings.llm_provider == "github-copilot":
             # Import here to avoid circular dependency
@@ -208,6 +217,11 @@ class LiteLLMProvider(BaseLLMProvider):
                 "model": self._get_model_name(),
                 "messages": messages,
                 "temperature": kwargs.get("temperature", self.temperature),
+                # Prevent silent 10-minute hangs: httpcore's default is 600 s, which
+                # means a hanging Ollama request would block the agent for 10 minutes
+                # before failing. request_timeout is the LiteLLM-standard kwarg for
+                # capping total HTTP round-trip time.
+                "request_timeout": self.request_timeout,
             }
 
             # Add API base for Ollama
@@ -310,6 +324,8 @@ class LiteLLMProvider(BaseLLMProvider):
                 "messages": messages,
                 "temperature": kwargs.get("temperature", self.temperature),
                 "stream": True,
+                # Prevent silent 10-minute hangs (see chat() for full explanation).
+                "request_timeout": self.request_timeout,
             }
 
             # Add API base for Ollama
