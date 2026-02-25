@@ -279,6 +279,35 @@ class TestLogAISettings:
         with pytest.raises(ValueError):
             LogAISettings(_env_file=None)  # type: ignore
 
+    def test_chunk_size_ordering_validation(self, clean_env: None) -> None:
+        """Test validate_chunk_size_ordering model validator.
+
+        initial_chunk_size must not exceed max_events_per_chunk.
+        """
+        # Shared required env vars for all sub-cases
+        os.environ["LOGAI_ANTHROPIC_API_KEY"] = "sk-ant-test-key"
+        os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
+
+        # --- Valid case: initial_chunk_size well below max_events_per_chunk ---
+        os.environ["LOGAI_INITIAL_CHUNK_SIZE"] = "25"
+        os.environ["LOGAI_MAX_EVENTS_PER_CHUNK"] = "100"
+        settings = LogAISettings(_env_file=None)  # type: ignore
+        assert settings.initial_chunk_size == 25
+        assert settings.max_events_per_chunk == 100
+
+        # --- Boundary case: initial_chunk_size == max_events_per_chunk (equal is allowed) ---
+        os.environ["LOGAI_INITIAL_CHUNK_SIZE"] = "50"
+        os.environ["LOGAI_MAX_EVENTS_PER_CHUNK"] = "50"
+        settings = LogAISettings(_env_file=None)  # type: ignore
+        assert settings.initial_chunk_size == 50
+        assert settings.max_events_per_chunk == 50
+
+        # --- Invalid case: initial_chunk_size exceeds max_events_per_chunk ---
+        os.environ["LOGAI_INITIAL_CHUNK_SIZE"] = "100"
+        os.environ["LOGAI_MAX_EVENTS_PER_CHUNK"] = "10"
+        with pytest.raises(ValueError, match="initial_chunk_size.*must be.*max_events_per_chunk"):
+            LogAISettings(_env_file=None)  # type: ignore
+
 
 class TestGlobalSettings:
     """Test global settings functions."""
