@@ -378,32 +378,54 @@ class ResultCacheManager:
         """
         Extract time range from events.
 
+        Handles both integer epoch-millisecond timestamps and ISO 8601 string
+        timestamps (as returned by CloudWatch MCP Insights results).  When all
+        timestamps are integers the full numeric span is calculated; when strings
+        are encountered the start/end are returned as-is (informational only).
+
         Args:
             events: List of event dictionaries
 
         Returns:
-            Time range dictionary with start, end, and span
+            Time range dictionary with start, end, and optional span_ms
         """
         if not events:
             return {"start": None, "end": None}
 
-        timestamps: list[int] = []
+        int_timestamps: list[int] = []
+        str_timestamps: list[str] = []
+
         for e in events:
             ts = e.get("timestamp")
-            if ts is not None and isinstance(ts, int):
-                timestamps.append(ts)
+            if ts is None:
+                continue
+            if isinstance(ts, int):
+                int_timestamps.append(ts)
+            elif isinstance(ts, str):
+                str_timestamps.append(ts)
+            # floats or other numeric types: coerce to int
+            elif isinstance(ts, float):
+                int_timestamps.append(int(ts))
 
-        if not timestamps:
-            return {"start": None, "end": None}
+        # Prefer integer timestamps for precise span calculation
+        if int_timestamps:
+            min_ts = min(int_timestamps)
+            max_ts = max(int_timestamps)
+            return {
+                "start": min_ts,
+                "end": max_ts,
+                "span_ms": max_ts - min_ts,
+            }
 
-        min_ts = min(timestamps)
-        max_ts = max(timestamps)
+        # Graceful degradation: return string timestamps as-is (span cannot be computed)
+        if str_timestamps:
+            sorted_strs = sorted(str_timestamps)
+            return {
+                "start": sorted_strs[0],
+                "end": sorted_strs[-1],
+            }
 
-        return {
-            "start": min_ts,
-            "end": max_ts,
-            "span_ms": max_ts - min_ts,
-        }
+        return {"start": None, "end": None}
 
     def _select_time_diverse(
         self, events: list[dict[str, Any]], count: int
@@ -544,6 +566,30 @@ class ResultCacheManager:
         events = result.get("events", result.get("logs", []))
         if not isinstance(events, list):
             events = []
+
+        # Fallback: MCP Insights format uses a "results" key with CloudWatch
+        # field-value records where field names carry an "@" prefix
+        # (e.g. "@timestamp", "@message", "@logStream").  Normalize each record
+        # by stripping the leading "@" so downstream logic sees standard field
+        # names ("timestamp", "message", "logStream", …).
+        if not events:
+            raw_results = result.get("results", [])
+            if isinstance(raw_results, list) and raw_results:
+                normalized: list[dict[str, Any]] = []
+                for record in raw_results:
+                    if not isinstance(record, dict):
+                        continue
+                    clean: dict[str, Any] = {}
+                    for key, value in record.items():
+                        # Strip leading "@" from CloudWatch Insights field names
+                        clean_key = key[1:] if key.startswith("@") else key
+                        clean[clean_key] = value
+                    normalized.append(clean)
+                events = normalized
+                logger.debug(
+                    f"Extracted {len(events)} events from MCP Insights 'results' key "
+                    f"(tool={tool_name})"
+                )
 
         # Generate summary components
         event_stats = self._extract_event_statistics(events)
