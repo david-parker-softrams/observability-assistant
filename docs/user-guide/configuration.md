@@ -153,10 +153,10 @@ LOGAI_GITHUB_COPILOT_MODEL=gpt-4o-mini
 
 **Variable:** `LOGAI_GITHUB_COPILOT_API_BASE`
 **Required:** No
-**Default:** `https://api.githubcopilot.com`
+**Default:** `https://api.githubcopilot.com/chat/completions`
 
 ```bash
-LOGAI_GITHUB_COPILOT_API_BASE=https://api.githubcopilot.com
+LOGAI_GITHUB_COPILOT_API_BASE=https://api.githubcopilot.com/chat/completions
 ```
 
 **Note:** You typically don't need to change this.
@@ -618,11 +618,11 @@ LOGAI_TIME_EXPANSION_FACTOR=4.0
 
 **Variable:** `LOGAI_LOG_LEVEL`
 **Required:** No
-**Default:** `INFO`
+**Default:** `WARNING`
 **Options:** `DEBUG`, `INFO`, `WARNING`, `ERROR`
 
 ```bash
-LOGAI_LOG_LEVEL=INFO
+LOGAI_LOG_LEVEL=WARNING
 ```
 
 **Log Levels:**
@@ -758,7 +758,7 @@ LOGAI_MAX_RETRY_ATTEMPTS=3
 LOGAI_TIME_EXPANSION_FACTOR=4.0
 
 # === Logging ===
-LOGAI_LOG_LEVEL=INFO
+LOGAI_LOG_LEVEL=WARNING
 LOGAI_LOG_FILE=~/.logai/logai.log
 ```
 
@@ -767,7 +767,7 @@ LOGAI_LOG_FILE=~/.logai/logai.log
 ```bash
 # LLM Provider
 LOGAI_LLM_PROVIDER=github-copilot
-LOGAI_GITHUB_COPILOT_MODEL=claude-opus-4.6
+LOGAI_GITHUB_COPILOT_MODEL=gpt-4o-mini
 
 # AWS
 AWS_DEFAULT_REGION=us-east-1
@@ -798,7 +798,7 @@ LOGAI_LOG_LEVEL=DEBUG
 **`.env.production`:**
 ```bash
 LOGAI_LLM_PROVIDER=github-copilot
-LOGAI_GITHUB_COPILOT_MODEL=claude-opus-4.6
+LOGAI_GITHUB_COPILOT_MODEL=gpt-4o-mini
 AWS_PROFILE=prod
 AWS_DEFAULT_REGION=us-east-1
 LOGAI_LOG_LEVEL=WARNING

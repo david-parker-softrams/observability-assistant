@@ -43,7 +43,7 @@ class GitHubCopilotProvider(BaseLLMProvider):
 
     Example:
         ```python
-        provider = GitHubCopilotProvider(model="claude-opus-4.6")
+        provider = GitHubCopilotProvider(model="gpt-4o-mini")
         response = await provider.chat([
             {"role": "user", "content": "What is 2+2?"}
         ])
