@@ -15,6 +15,7 @@ permissions:
 jobs:
   validate-pr-title:
     name: Validate PR title
+    if: github.actor != 'release-please[bot]'
     runs-on: ubuntu-latest
     steps:
       # amannn/action-semantic-pull-request v5
