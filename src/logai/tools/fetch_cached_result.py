@@ -71,10 +71,10 @@ class FetchCachedResultTool(BaseTool):
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "Number of events to fetch (default: 100, max: 200)",
+                    "description": "Number of events to fetch (default: 25, max: 200)",
                     "minimum": 1,
                     "maximum": 200,
-                    "default": 100,
+                    "default": 25,
                 },
                 "filter_pattern": {
                     "type": "string",
@@ -129,7 +129,7 @@ class FetchCachedResultTool(BaseTool):
             )
 
         offset = kwargs.get("offset", 0)
-        limit = kwargs.get("limit", 100)
+        limit = kwargs.get("limit", 25)
         filter_pattern = kwargs.get("filter_pattern")
         time_start = kwargs.get("time_start")
         time_end = kwargs.get("time_end")

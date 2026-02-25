@@ -66,6 +66,17 @@ class LogAISettings(BaseSettings):
         le=131072,
     )
 
+    llm_request_timeout: float = Field(
+        default=120.0,
+        ge=0,
+        le=600,
+        description=(
+            "Timeout in seconds for LLM API requests (applies to Ollama and other LiteLLM "
+            "providers). The underlying HTTP library defaults to 600 s (10 min), which causes "
+            "silent hangs on slow/unresponsive models. Set to 0 to disable (not recommended)."
+        ),
+    )
+
     # === GitHub Copilot Configuration ===
     github_copilot_model: str = Field(
         default="claude-opus-4.5",
@@ -378,7 +389,7 @@ class LogAISettings(BaseSettings):
     )
 
     max_result_tokens: int = Field(
-        default=50000,
+        default=10000,
         description="Maximum tokens for a single tool result before caching",
         ge=1000,
         le=100000,
@@ -432,7 +443,7 @@ class LogAISettings(BaseSettings):
 
     max_events_per_chunk: int = Field(
         default=100,
-        description="Maximum events to return in a single cached result chunk",
+        description="Configured maximum events per chunk fetch (intended ceiling for initial_chunk_size; not enforced as a hard cap by default)",
         ge=10,
         le=500,
     )
@@ -469,14 +480,14 @@ class LogAISettings(BaseSettings):
     )
 
     initial_chunk_size: int = Field(
-        default=100,
-        ge=50,
-        le=200,
+        default=25,
+        ge=10,
+        le=100,
         description="Default number of events in first chunk fetch",
     )
 
     max_auto_chunk_fetches: int = Field(
-        default=5,
+        default=3,
         ge=1,
         le=10,
         description="Maximum number of automatic chunk fetches per turn",
@@ -533,6 +544,20 @@ class LogAISettings(BaseSettings):
         if self.github_copilot_retry_max_delay < self.github_copilot_retry_base_delay:
             raise ValueError(
                 "github_copilot_retry_max_delay must be >= github_copilot_retry_base_delay"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_chunk_size_ordering(self) -> "LogAISettings":
+        """Validate that initial_chunk_size does not exceed max_events_per_chunk.
+
+        A configuration where initial_chunk_size > max_events_per_chunk would be
+        contradictory: the starting chunk is larger than the declared ceiling.
+        """
+        if self.initial_chunk_size > self.max_events_per_chunk:
+            raise ValueError(
+                f"initial_chunk_size ({self.initial_chunk_size}) must be <= "
+                f"max_events_per_chunk ({self.max_events_per_chunk})"
             )
         return self
 

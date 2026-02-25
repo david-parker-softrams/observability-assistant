@@ -35,7 +35,7 @@ def settings(tmp_path):
         enable_history_pruning=True,
         cache_large_results_threshold=5000,  # Lower threshold for testing
         context_window_buffer=5000,
-        max_result_tokens=50000,
+        max_result_tokens=10000,
         max_history_tokens=80000,
     )
 

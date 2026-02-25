@@ -22,6 +22,7 @@ def mock_settings():
     settings.llm_provider = "anthropic"
     settings.anthropic_api_key = "test-api-key"
     settings.anthropic_model = "claude-3-5-sonnet-20241022"
+    settings.llm_request_timeout = 120.0
     return settings
 
 
@@ -275,6 +276,7 @@ class TestLiteLLMProvider:
         settings.ollama_base_url = "http://localhost:11434"
         settings.ollama_model = "llama3.1:8b"
         settings.ollama_num_ctx = 32768
+        settings.llm_request_timeout = 120.0
 
         provider = cast(LiteLLMProvider, LiteLLMProvider.from_settings(settings))
 
@@ -653,6 +655,7 @@ class TestOllamaNumCtxInjection:
         settings.ollama_base_url = "http://localhost:11434"
         settings.ollama_model = "qwen3:32b"
         settings.ollama_num_ctx = 65536
+        settings.llm_request_timeout = 120.0
 
         provider = cast(LiteLLMProvider, LiteLLMProvider.from_settings(settings))
 
@@ -665,6 +668,7 @@ class TestOllamaNumCtxInjection:
         settings.ollama_base_url = "http://localhost:11434"
         settings.ollama_model = "llama3.1:8b"
         settings.ollama_num_ctx = 32768  # the configured default
+        settings.llm_request_timeout = 120.0
 
         provider = cast(LiteLLMProvider, LiteLLMProvider.from_settings(settings))
 
@@ -679,3 +683,184 @@ class TestOllamaNumCtxInjection:
             api_base="http://localhost:11434",
         )
         assert provider.num_ctx is None
+
+
+# ---------------------------------------------------------------------------
+# request_timeout injection tests
+# ---------------------------------------------------------------------------
+
+
+class TestRequestTimeoutInjection:
+    """Tests verifying that request_timeout is forwarded to litellm.completion()
+    in both chat() and stream_chat(), preventing the 10-minute httpcore default hang.
+    """
+
+    # ------------------------------------------------------------------
+    # Constructor / default value
+    # ------------------------------------------------------------------
+
+    def test_request_timeout_default_is_120(self) -> None:
+        """request_timeout defaults to 120.0 seconds when not supplied."""
+        provider = LiteLLMProvider(
+            provider="ollama",
+            api_key="",
+            model="llama3.1:8b",
+            api_base="http://localhost:11434",
+        )
+        assert provider.request_timeout == 120.0
+
+    def test_request_timeout_custom_value_stored(self) -> None:
+        """A custom request_timeout value is stored on the instance."""
+        provider = LiteLLMProvider(
+            provider="ollama",
+            api_key="",
+            model="llama3.1:8b",
+            api_base="http://localhost:11434",
+            request_timeout=30.0,
+        )
+        assert provider.request_timeout == 30.0
+
+    # ------------------------------------------------------------------
+    # chat() — timeout forwarded to litellm.completion
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_chat_passes_request_timeout_to_litellm(self) -> None:
+        """chat() must include request_timeout in the litellm.completion kwargs."""
+        provider = LiteLLMProvider(
+            provider="ollama",
+            api_key="",
+            model="llama3.1:8b",
+            api_base="http://localhost:11434",
+            request_timeout=45.0,
+        )
+
+        mock_response = _make_mock_litellm_response()
+
+        with patch("litellm.completion", return_value=mock_response) as mock_completion:
+            await provider.chat(messages=[{"role": "user", "content": "Hi"}])
+
+        call_kwargs = mock_completion.call_args[1]
+        assert (
+            "request_timeout" in call_kwargs
+        ), "request_timeout must be passed to litellm.completion"
+        assert call_kwargs["request_timeout"] == 45.0
+
+    @pytest.mark.asyncio
+    async def test_chat_passes_request_timeout_for_anthropic(self) -> None:
+        """chat() forwards request_timeout even for non-Ollama providers."""
+        provider = LiteLLMProvider(
+            provider="anthropic",
+            api_key="sk-ant-test",
+            model="claude-3-5-sonnet-20241022",
+            request_timeout=60.0,
+        )
+
+        mock_response = _make_mock_litellm_response()
+
+        with patch("litellm.completion", return_value=mock_response) as mock_completion:
+            await provider.chat(messages=[{"role": "user", "content": "Hi"}])
+
+        call_kwargs = mock_completion.call_args[1]
+        assert call_kwargs.get("request_timeout") == 60.0
+
+    @pytest.mark.asyncio
+    async def test_chat_uses_default_timeout_when_not_specified(self) -> None:
+        """chat() uses the 120 s default when request_timeout is not overridden."""
+        provider = LiteLLMProvider(
+            provider="anthropic",
+            api_key="sk-ant-test",
+            model="claude-3-5-sonnet-20241022",
+        )
+
+        mock_response = _make_mock_litellm_response()
+
+        with patch("litellm.completion", return_value=mock_response) as mock_completion:
+            await provider.chat(messages=[{"role": "user", "content": "Hi"}])
+
+        call_kwargs = mock_completion.call_args[1]
+        assert call_kwargs.get("request_timeout") == 120.0
+
+    # ------------------------------------------------------------------
+    # stream_chat() — timeout forwarded to litellm.completion
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_stream_chat_passes_request_timeout_to_litellm(self) -> None:
+        """stream_chat() must include request_timeout in the litellm.completion kwargs."""
+        provider = LiteLLMProvider(
+            provider="ollama",
+            api_key="",
+            model="llama3.1:8b",
+            api_base="http://localhost:11434",
+            request_timeout=90.0,
+        )
+
+        chunks = _make_mock_stream_chunks(["Hi"])
+
+        with patch("litellm.completion", return_value=iter(chunks)) as mock_completion:
+            [t async for t in provider.stream_chat(messages=[{"role": "user", "content": "Hi"}])]
+
+        call_kwargs = mock_completion.call_args[1]
+        assert (
+            "request_timeout" in call_kwargs
+        ), "request_timeout must be passed to litellm.completion in stream_chat"
+        assert call_kwargs["request_timeout"] == 90.0
+
+    @pytest.mark.asyncio
+    async def test_stream_chat_uses_default_timeout_when_not_specified(self) -> None:
+        """stream_chat() uses the 120 s default when request_timeout is not overridden."""
+        provider = LiteLLMProvider(
+            provider="anthropic",
+            api_key="sk-ant-test",
+            model="claude-3-5-sonnet-20241022",
+        )
+
+        chunks = _make_mock_stream_chunks(["Hi"])
+
+        with patch("litellm.completion", return_value=iter(chunks)) as mock_completion:
+            [t async for t in provider.stream_chat(messages=[{"role": "user", "content": "Hi"}])]
+
+        call_kwargs = mock_completion.call_args[1]
+        assert call_kwargs.get("request_timeout") == 120.0
+
+    # ------------------------------------------------------------------
+    # from_settings() — timeout read from settings and wired through
+    # ------------------------------------------------------------------
+
+    def test_from_settings_passes_timeout_to_ollama_provider(self) -> None:
+        """from_settings() must forward llm_request_timeout to LiteLLMProvider for Ollama."""
+        settings = Mock(spec=LogAISettings)
+        settings.llm_provider = "ollama"
+        settings.ollama_base_url = "http://localhost:11434"
+        settings.ollama_model = "llama3.1:8b"
+        settings.ollama_num_ctx = 32768
+        settings.llm_request_timeout = 60.0
+
+        provider = cast(LiteLLMProvider, LiteLLMProvider.from_settings(settings))
+
+        assert provider.request_timeout == 60.0
+
+    def test_from_settings_passes_timeout_to_anthropic_provider(self) -> None:
+        """from_settings() must forward llm_request_timeout for Anthropic."""
+        settings = Mock(spec=LogAISettings)
+        settings.llm_provider = "anthropic"
+        settings.anthropic_api_key = "sk-ant-test"
+        settings.anthropic_model = "claude-3-5-sonnet-20241022"
+        settings.llm_request_timeout = 180.0
+
+        provider = cast(LiteLLMProvider, LiteLLMProvider.from_settings(settings))
+
+        assert provider.request_timeout == 180.0
+
+    def test_from_settings_passes_timeout_to_openai_provider(self) -> None:
+        """from_settings() must forward llm_request_timeout for OpenAI."""
+        settings = Mock(spec=LogAISettings)
+        settings.llm_provider = "openai"
+        settings.openai_api_key = "sk-openai-test"
+        settings.openai_model = "gpt-4-turbo-preview"
+        settings.llm_request_timeout = 30.0
+
+        provider = cast(LiteLLMProvider, LiteLLMProvider.from_settings(settings))
+
+        assert provider.request_timeout == 30.0
