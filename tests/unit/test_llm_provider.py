@@ -442,7 +442,13 @@ class TestOllamaNumCtxInjection:
 
     @pytest.mark.asyncio
     async def test_chat_injects_options_num_ctx_for_ollama(self) -> None:
-        """chat() must pass options={'num_ctx': N} to litellm.completion for Ollama."""
+        """chat() must pass num_ctx=N as a top-level kwarg to litellm.completion for Ollama.
+
+        LiteLLM's Ollama handler recognises num_ctx only when it arrives as a direct
+        kwarg (routed via optional_params → "options" in the Ollama request body).
+        Passing options={"num_ctx": N} as a dict is not in get_supported_openai_params
+        and gets silently dropped.
+        """
         provider = LiteLLMProvider(
             provider="ollama",
             api_key="",
@@ -457,8 +463,11 @@ class TestOllamaNumCtxInjection:
             await provider.chat(messages=[{"role": "user", "content": "Hello"}])
 
         call_kwargs = mock_completion.call_args[1]
-        assert "options" in call_kwargs, "options must be present in litellm.completion call"
-        assert call_kwargs["options"] == {"num_ctx": 32768}
+        assert (
+            "num_ctx" in call_kwargs
+        ), "num_ctx must be a top-level kwarg in litellm.completion call"
+        assert call_kwargs["num_ctx"] == 32768
+        assert "options" not in call_kwargs, "options dict must NOT be used (LiteLLM drops it)"
 
     @pytest.mark.asyncio
     async def test_chat_num_ctx_not_injected_for_anthropic(self) -> None:
@@ -477,6 +486,7 @@ class TestOllamaNumCtxInjection:
 
         call_kwargs = mock_completion.call_args[1]
         assert "options" not in call_kwargs, "options must NOT be forwarded to non-Ollama providers"
+        assert "num_ctx" not in call_kwargs, "num_ctx must NOT be forwarded to non-Ollama providers"
 
     @pytest.mark.asyncio
     async def test_chat_num_ctx_not_injected_for_openai(self) -> None:
@@ -495,6 +505,7 @@ class TestOllamaNumCtxInjection:
 
         call_kwargs = mock_completion.call_args[1]
         assert "options" not in call_kwargs, "options must NOT be forwarded to OpenAI provider"
+        assert "num_ctx" not in call_kwargs, "num_ctx must NOT be forwarded to OpenAI provider"
 
     @pytest.mark.asyncio
     async def test_chat_num_ctx_none_skips_options_for_ollama(self) -> None:
@@ -514,6 +525,7 @@ class TestOllamaNumCtxInjection:
 
         call_kwargs = mock_completion.call_args[1]
         assert "options" not in call_kwargs, "options must not be injected when num_ctx is None"
+        assert "num_ctx" not in call_kwargs, "num_ctx must not be injected when num_ctx is None"
 
     @pytest.mark.asyncio
     async def test_chat_num_ctx_value_is_passed_exactly(self) -> None:
@@ -532,7 +544,7 @@ class TestOllamaNumCtxInjection:
             await provider.chat(messages=[{"role": "user", "content": "Hello"}])
 
         call_kwargs = mock_completion.call_args[1]
-        assert call_kwargs["options"]["num_ctx"] == 65536
+        assert call_kwargs["num_ctx"] == 65536
 
     # ------------------------------------------------------------------
     # stream_chat() tests
@@ -558,9 +570,10 @@ class TestOllamaNumCtxInjection:
 
         call_kwargs = mock_completion.call_args[1]
         assert (
-            "options" in call_kwargs
-        ), "options must be present in streaming litellm.completion call"
-        assert call_kwargs["options"] == {"num_ctx": 32768}
+            "num_ctx" in call_kwargs
+        ), "num_ctx must be a top-level kwarg in streaming litellm.completion call"
+        assert call_kwargs["num_ctx"] == 32768
+        assert "options" not in call_kwargs, "options dict must NOT be used (LiteLLM drops it)"
         assert tokens == ["Hello"]
 
     @pytest.mark.asyncio
@@ -582,6 +595,9 @@ class TestOllamaNumCtxInjection:
         assert (
             "options" not in call_kwargs
         ), "options must NOT be forwarded to non-Ollama providers in stream_chat"
+        assert (
+            "num_ctx" not in call_kwargs
+        ), "num_ctx must NOT be forwarded to non-Ollama providers in stream_chat"
 
     @pytest.mark.asyncio
     async def test_stream_chat_num_ctx_none_skips_options_for_ollama(self) -> None:
@@ -603,6 +619,9 @@ class TestOllamaNumCtxInjection:
         assert (
             "options" not in call_kwargs
         ), "options must not be injected when num_ctx is None in stream_chat"
+        assert (
+            "num_ctx" not in call_kwargs
+        ), "num_ctx must not be injected when num_ctx is None in stream_chat"
 
     @pytest.mark.asyncio
     async def test_stream_chat_passes_stream_true_to_litellm(self) -> None:
