@@ -437,11 +437,6 @@ class LogPreviewScreen(ModalScreen[dict[str, Any] | None]):
         """
         super().__init__(**kwargs)
 
-        # DEBUG: Log initialization
-        logger.debug(f"[LOG_PREVIEW] __init__ called for log group: {log_group_name}")
-        logger.debug(f"[LOG_PREVIEW] TIME_FRAME_OPTIONS: {self.TIME_FRAME_OPTIONS}")
-        logger.debug(f"[LOG_PREVIEW] Initial selected_time_frame: {self.selected_time_frame}")
-
         self.log_group_name = log_group_name
         self.datasource = datasource
         self.limit = limit or self.DEFAULT_LIMIT
@@ -458,9 +453,6 @@ class LogPreviewScreen(ModalScreen[dict[str, Any] | None]):
                     self.selected_time_frame = label
                     break
             # If no exact match, use default (keeps "15 min")
-            logger.debug(
-                f"[LOG_PREVIEW] Custom time_range_minutes={time_range_minutes}, selected_time_frame set to: {self.selected_time_frame}"
-            )
 
     @property
     def time_range_minutes(self) -> int:
@@ -475,9 +467,6 @@ class LogPreviewScreen(ModalScreen[dict[str, Any] | None]):
 
     def compose(self) -> ComposeResult:
         """Compose the preview screen layout."""
-        logger.debug(
-            f"[LOG_PREVIEW] compose() called, selected_time_frame: {self.selected_time_frame}"
-        )
 
         with Container(id="preview-container"):
             # Header with log group name
@@ -487,19 +476,12 @@ class LogPreviewScreen(ModalScreen[dict[str, Any] | None]):
             )
 
             # Time frame selector
-            logger.debug("[LOG_PREVIEW] Entering timeframe-controls section")
             with Horizontal(id="timeframe-controls"):
                 yield Static("Time Frame:", classes="timeframe-label")
                 with Horizontal(id="timeframe-selector"):
-                    logger.debug(
-                        f"[LOG_PREVIEW] Starting to yield buttons for TIME_FRAME_OPTIONS: {list(self.TIME_FRAME_OPTIONS.keys())}"
-                    )
                     for label in self.TIME_FRAME_OPTIONS.keys():
                         variant: Literal["default", "primary"] = (
                             "primary" if label == self.selected_time_frame else "default"
-                        )
-                        logger.debug(
-                            f"[LOG_PREVIEW] Yielding button: label='{label}', variant='{variant}', is_selected={label == self.selected_time_frame}"
                         )
                         yield Button(label, variant=variant, classes="timeframe-btn")
 
@@ -533,47 +515,6 @@ class LogPreviewScreen(ModalScreen[dict[str, Any] | None]):
 
     async def on_mount(self) -> None:
         """Fetch and display logs when screen mounts."""
-        logger.debug("[LOG_PREVIEW] on_mount() called - starting diagnostics")
-
-        # DEBUG: Verify timeframe-selector container exists
-        try:
-            selector_container = self.query_one("#timeframe-selector", Horizontal)
-            logger.debug(f"[LOG_PREVIEW] Found #timeframe-selector container: {selector_container}")
-        except Exception as e:
-            logger.error(f"[LOG_PREVIEW] Failed to find #timeframe-selector container: {e}")
-            selector_container = None
-
-        # DEBUG: Query all buttons in timeframe-selector
-        if selector_container:
-            try:
-                buttons = list(selector_container.query(Button))
-                logger.debug(f"[LOG_PREVIEW] Found {len(buttons)} buttons in #timeframe-selector")
-                for idx, button in enumerate(buttons):
-                    logger.debug(
-                        f"[LOG_PREVIEW]   Button {idx}: label='{button.label}', variant='{button.variant}', classes={button.classes}"
-                    )
-            except Exception as e:
-                logger.error(f"[LOG_PREVIEW] Failed to query buttons: {e}")
-
-        # DEBUG: Also try querying buttons with the timeframe-btn class
-        try:
-            all_timeframe_buttons = list(self.query(".timeframe-btn"))
-            logger.debug(
-                f"[LOG_PREVIEW] Found {len(all_timeframe_buttons)} buttons with .timeframe-btn class"
-            )
-        except Exception as e:
-            logger.error(f"[LOG_PREVIEW] Failed to query .timeframe-btn buttons: {e}")
-
-        # DEBUG: Query the timeframe-controls container
-        try:
-            controls_container = self.query_one("#timeframe-controls", Horizontal)
-            logger.debug(f"[LOG_PREVIEW] Found #timeframe-controls container: {controls_container}")
-            logger.debug(
-                f"[LOG_PREVIEW] #timeframe-controls children count: {len(list(controls_container.children))}"
-            )
-        except Exception as e:
-            logger.error(f"[LOG_PREVIEW] Failed to find #timeframe-controls container: {e}")
-
         self._fetch_and_display_logs()
 
     def watch_selected_time_frame(self, new_frame: str) -> None:

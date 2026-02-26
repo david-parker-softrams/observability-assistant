@@ -7,34 +7,32 @@
 
 This document provides a complete inventory of all tools/functions available to the LLM agent in LogAI. The agent uses these tools to interact with AWS CloudWatch, fetch logs, analyze data, and provide observability insights.
 
-> **MCP Migration (v2.0):** As of this release, LogAI uses `awslabs.cloudwatch-mcp-server` (run via `uvx`) as the default tool provider for CloudWatch operations. The tools `list_log_groups`, `fetch_logs`, and `search_logs` now route through MCP by default. The `fetch_cached_result_chunk` tool remains a native application tool. Use `--no-mcp` to fall back to the original native tools.
+> **MCP Migration (v2.0):** As of this release, LogAI uses `awslabs.cloudwatch-mcp-server` (run via `uvx`) as the only tool provider for CloudWatch operations. The `fetch_cached_result_chunk` tool remains a native application tool.
 
 ### Key Statistics
 
-- **Total Tools**: 4 (MCP mode) / 4 (native mode)
+- **MCP Tools**: Dynamic — the full set of tools exposed by the connected MCP server at runtime (number varies by server version)
+- **Native/Built-in Tools**: 1 (`fetch_cached_result_chunk` — always present, no MCP equivalent)
 - **Tool Categories**: 2 (Inventory, Search & Fetch) + 1 (Cache)
-- **Data Source**: AWS CloudWatch Logs (via MCP server or native boto3)
+- **Data Source**: AWS CloudWatch Logs (via MCP server)
 - **Common Features**: Caching, PII Sanitization, Time Range Filtering
 
 ---
 
-## Tool Provider: MCP vs. Native
+## Tool Provider
 
-| Mode | How to enable | CloudWatch tools | `fetch_cached_result_chunk` |
-|------|--------------|------------------|-----------------------------|
-| **MCP (default)** | `--use-mcp` or `LOGAI_USE_MCP_TOOLS=true` | Routed through `awslabs.cloudwatch-mcp-server` subprocess | Native (unchanged) |
-| **Native** | `--no-mcp` or `LOGAI_USE_MCP_TOOLS=false` | Executed directly via boto3 | Native (unchanged) |
+All CloudWatch tools (`list_log_groups`, `fetch_logs`, `search_logs`) are routed through the `awslabs.cloudwatch-mcp-server` subprocess via MCP. The LLM has access to all tools exposed by the MCP server, including additional capabilities such as metric queries and alarm status. All MCP tool results pass through LogAI's PII sanitization layer before reaching the LLM.
 
-In MCP mode, the LLM has access to all tools exposed by the MCP server — including `list_log_groups`, `fetch_logs`, `search_logs`, and additional capabilities such as metric queries and alarm status. All MCP tool results pass through LogAI's PII sanitization layer before reaching the LLM.
+The `fetch_cached_result_chunk` tool is a native application tool with no MCP equivalent.
 
 
 ## Quick Reference
 
 | Tool Name | Purpose | Category | Required Params | Provider |
 |-----------|---------|----------|-----------------|----------|
-| `list_log_groups` | Discover available log groups | Inventory | None (optional prefix) | MCP (default) / Native |
-| `fetch_logs` | Get logs from a specific group | Search & Fetch | `log_group`, `start_time` | MCP (default) / Native |
-| `search_logs` | Search across multiple groups | Search & Fetch | `log_group_patterns`, `search_pattern`, `start_time` | MCP (default) / Native |
+| `list_log_groups` | Discover available log groups | Inventory | None (optional prefix) | MCP |
+| `fetch_logs` | Get logs from a specific group | Search & Fetch | `log_group`, `start_time` | MCP |
+| `search_logs` | Search across multiple groups | Search & Fetch | `log_group_patterns`, `search_pattern`, `start_time` | MCP |
 | `fetch_cached_result_chunk` | Retrieve a chunk of a cached large result | Cache | `cache_id`, `chunk_index` | Native (always) |
 
 ---
@@ -66,7 +64,7 @@ Lists all available CloudWatch log groups in the current AWS region. This is the
 
 **Category**: Inventory & Discovery
 
-**Tool Provider**: MCP (`awslabs.cloudwatch-mcp-server`) by default; native boto3 with `--no-mcp`.
+**Tool Provider**: MCP (`awslabs.cloudwatch-mcp-server`)
 
 **Parameters**:
 ```json
@@ -148,8 +146,8 @@ Lists all available CloudWatch log groups in the current AWS region. This is the
 - TTL: Configured in settings
 
 **File Location**:
-- Implementation: `src/logai/core/tools/cloudwatch_tools.py` (lines 13-125)
-- Tests: `tests/unit/test_cloudwatch_tools.py`
+- Implementation: MCP server (`awslabs.cloudwatch-mcp-server` via `uvx`)
+- Tests: `tests/unit/core/test_orchestrator_mcp.py`
 
 **When Agent Uses This**:
 - Initial log group discovery
@@ -169,9 +167,9 @@ Fetches actual log events from a specific CloudWatch log group within a time ran
 
 **Category**: Search & Fetch
 
-**Tool Provider**: MCP (`awslabs.cloudwatch-mcp-server`) by default; native boto3 with `--no-mcp`.
+**Tool Provider**: MCP (`awslabs.cloudwatch-mcp-server`)
 
-> **MCP behavior:** In MCP mode, this tool uses CloudWatch Logs Insights rather than the `FilterLogEvents` API. Insights is more powerful (supports aggregation, parsing, and sorting) but is asynchronous — the LLM will make two calls per fetch: one to execute the query and one to retrieve results. This adds a small amount of latency (typically 2–10 seconds) compared to the native path.
+> **MCP behavior:** This tool uses CloudWatch Logs Insights rather than the `FilterLogEvents` API. Insights is more powerful (supports aggregation, parsing, and sorting) but is asynchronous — the LLM will make two calls per fetch: one to execute the query and one to retrieve results. This adds a small amount of latency (typically 2–10 seconds).
 
 **Parameters**:
 ```json
@@ -331,8 +329,8 @@ Fetches actual log events from a specific CloudWatch log group within a time ran
 - If not found error: Orchestrator calls `list_log_groups` to find correct group
 
 **File Location**:
-- Implementation: `src/logai/core/tools/cloudwatch_tools.py` (lines 127-310)
-- Tests: `tests/unit/test_cloudwatch_tools.py`
+- Implementation: MCP server (`awslabs.cloudwatch-mcp-server` via `uvx`)
+- Tests: `tests/unit/core/test_orchestrator_mcp.py`
 
 **When Agent Uses This**:
 - Primary tool for log retrieval
@@ -352,9 +350,9 @@ Searches across multiple CloudWatch log groups simultaneously for a specific pat
 
 **Category**: Search & Fetch
 
-**Tool Provider**: MCP (`awslabs.cloudwatch-mcp-server`) by default; native boto3 with `--no-mcp`.
+**Tool Provider**: MCP (`awslabs.cloudwatch-mcp-server`)
 
-> **MCP behavior:** In MCP mode, this tool uses CloudWatch Logs Insights, which natively supports querying across multiple log groups in a single query — a cleaner fit than the native implementation's loop-and-merge approach. The same two-call pattern applies (execute + poll for results).
+> **MCP behavior:** This tool uses CloudWatch Logs Insights, which natively supports querying across multiple log groups in a single query — a cleaner fit than a loop-and-merge approach. The same two-call pattern applies (execute + poll for results).
 
 **Parameters**:
 ```json
@@ -517,8 +515,8 @@ Searches across multiple CloudWatch log groups simultaneously for a specific pat
 - `events_by_group` helps with filtering results
 
 **File Location**:
-- Implementation: `src/logai/core/tools/cloudwatch_tools.py` (lines 312-521)
-- Tests: `tests/unit/test_cloudwatch_tools.py`
+- Implementation: MCP server (`awslabs.cloudwatch-mcp-server` via `uvx`)
+- Tests: `tests/unit/core/test_orchestrator_mcp.py`
 
 **When Agent Uses This**:
 - Cross-service investigation
@@ -538,7 +536,7 @@ Retrieves a specific chunk of a large tool result that was automatically cached 
 
 **Category**: Cache Access
 
-**Tool Provider**: **Native (always)** — this is an application-level tool with no MCP equivalent. It is unaffected by `--use-mcp` / `--no-mcp`.
+**Tool Provider**: **Native (always)** — this is an application-level tool with no MCP equivalent.
 
 **Parameters**:
 ```json
@@ -607,19 +605,12 @@ Agent (LLM) decides which tool(s) to call
 │   → try related log groups                  │
 └─────────────────────────────────────────────┘
     ↓
-Tool Execution (MCP mode, default)
+Tool Execution (MCP mode)
     ├─ Tool dispatched via ToolRegistry
     ├─ MCPToolAdapter routes call to MCP server subprocess
     ├─ MCP server calls CloudWatch Logs Insights API
     ├─ ResultProcessor applies PII sanitization
     └─ Result returned to LLM (cached if large)
-
-Tool Execution (native mode, --no-mcp)
-    ├─ Check cache (if enabled)
-    ├─ Call AWS CloudWatch API (FilterLogEvents / DescribeLogGroups)
-    ├─ Sanitize results (remove PII)
-    ├─ Cache results
-    └─ Return to LLM
     ↓
 Agent Processing
     ├─ Analyze results
@@ -929,14 +920,14 @@ max_log_events: int = 1000
 
 ### Test Coverage
 
-- **Unit tests**: `tests/unit/test_cloudwatch_tools.py`
+- **Unit tests**: `tests/unit/core/test_orchestrator_mcp.py`
 - **Integration tests**: `tests/unit/test_orchestrator.py`
 - **Mock fixtures**: Mocked CloudWatch datasource
 
 ### Running Tests
 
 ```bash
-pytest tests/unit/test_cloudwatch_tools.py -v
+pytest tests/unit/core/test_orchestrator_mcp.py -v
 pytest tests/unit/test_orchestrator.py::TestToolExecution -v
 ```
 
@@ -1057,10 +1048,10 @@ class MyNewTool(BaseTool):
 ## References
 
 - **MCP Module**: `src/logai/providers/mcp/`
-- **Tool Implementation (native)**: `src/logai/core/tools/`
+- **Tool Base Class**: `src/logai/core/tools/`
 - **Orchestrator**: `src/logai/core/orchestrator.py`
-- **CloudWatch Datasource (native fallback)**: `src/logai/providers/datasources/cloudwatch.py`
-- **Tests**: `tests/unit/test_cloudwatch_tools.py`
+- **CloudWatch Datasource**: `src/logai/providers/datasources/cloudwatch.py`
+- **Tests**: `tests/unit/core/test_orchestrator_mcp.py`
 - **MCP Design Document**: `george-scratch/design-mcp-migration.md`
 
 ---

@@ -47,7 +47,7 @@ print("   OK — client created, is_connected=False")
 
 print("3. Creating ResultProcessor with no sanitizer...")
 
-processor = ResultProcessor(sanitizer=None, cache=None)
+processor = ResultProcessor(sanitizer=None)
 print("   OK — ResultProcessor created")
 
 # ---------------------------------------------------------------------------

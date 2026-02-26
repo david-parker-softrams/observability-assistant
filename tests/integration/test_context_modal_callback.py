@@ -13,19 +13,26 @@ class TestModalCallbackIntegration:
 
     @pytest.mark.asyncio
     async def test_end_to_end_modal_to_context_flow(self):
-        """Test complete flow from modal open to context injection."""
+        """Test complete flow from modal open to context injection.
+
+        The callback registered with push_screen is synchronous — it
+        schedules the async injection via call_later.  We verify that
+        call_later is invoked with the right arguments rather than
+        awaiting the callback directly.
+        """
         orchestrator = MagicMock()
         cache_manager = MagicMock()
-        chat_screen = ChatScreen(orchestrator, cache_manager)
+        mock_datasource = AsyncMock()
+        # Pass datasource directly — the registry-based lookup was replaced by
+        # a constructor parameter when OP-4 threaded CloudWatchDataSource through.
+        chat_screen = ChatScreen(orchestrator, cache_manager, datasource=mock_datasource)
 
         mock_app = MagicMock()
         chat_screen.orchestrator.inject_context_update = MagicMock()
         chat_screen.query_one = MagicMock()
-
-        mock_tool = MagicMock()
-        mock_datasource = AsyncMock()
-        mock_tool.datasource = mock_datasource
-        orchestrator.tool_registry.get_tool.return_value = mock_tool
+        # Intercept call_later so we can capture the scheduled coroutine.
+        scheduled_calls: list = []
+        chat_screen.call_later = lambda fn, *args, **kwargs: scheduled_calls.append((fn, args))
 
         registered_callback = None
 
@@ -36,9 +43,9 @@ class TestModalCallbackIntegration:
 
         mock_app.push_screen = capture_push_screen
 
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
+        from logai.ui.widgets.log_groups_sidebar import SelectableLogGroupItem
 
-        event = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
+        event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
 
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
             mock_app_prop.return_value = mock_app
@@ -63,7 +70,19 @@ class TestModalCallbackIntegration:
             ],
         }
 
-        await registered_callback(result)
+        # Invoke the sync callback — it schedules async work via call_later.
+        registered_callback(result)
+
+        # Verify that the async injection was scheduled with the right result.
+        assert len(scheduled_calls) == 1
+        fn, args = scheduled_calls[0]
+        # Bound method identity is not stable across attribute lookups, so
+        # compare by name rather than using `is`.
+        assert fn.__name__ == "_inject_log_entries_to_context"
+        assert args[0] is result
+
+        # Now actually run the scheduled async method to verify context content.
+        await fn(*args)
 
         chat_screen.orchestrator.inject_context_update.assert_called_once()
         context_message = chat_screen.orchestrator.inject_context_update.call_args[0][0]
@@ -74,18 +93,16 @@ class TestModalCallbackIntegration:
 
     @pytest.mark.asyncio
     async def test_end_to_end_user_cancels_modal(self):
-        """Test complete flow when user cancels modal."""
+        """Test complete flow when user cancels modal (callback receives None)."""
         orchestrator = MagicMock()
         cache_manager = MagicMock()
-        chat_screen = ChatScreen(orchestrator, cache_manager)
+        mock_datasource = AsyncMock()
+        chat_screen = ChatScreen(orchestrator, cache_manager, datasource=mock_datasource)
 
         mock_app = MagicMock()
         chat_screen.orchestrator.inject_context_update = MagicMock()
-
-        mock_tool = MagicMock()
-        mock_datasource = AsyncMock()
-        mock_tool.datasource = mock_datasource
-        orchestrator.tool_registry.get_tool.return_value = mock_tool
+        scheduled_calls: list = []
+        chat_screen.call_later = lambda fn, *args, **kwargs: scheduled_calls.append((fn, args))
 
         registered_callback = None
 
@@ -95,16 +112,19 @@ class TestModalCallbackIntegration:
 
         mock_app.push_screen = capture_push_screen
 
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
+        from logai.ui.widgets.log_groups_sidebar import SelectableLogGroupItem
 
-        event = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
+        event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
 
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
             mock_app_prop.return_value = mock_app
             await chat_screen.on_log_group_preview_requested(event)
 
-        await registered_callback(None)
+        # Simulate the user dismissing the modal without selecting entries.
+        registered_callback(None)
 
+        # No async work should be scheduled when the user cancels.
+        assert len(scheduled_calls) == 0
         chat_screen.orchestrator.inject_context_update.assert_not_called()
 
     @pytest.mark.asyncio
@@ -112,15 +132,14 @@ class TestModalCallbackIntegration:
         """Test that opening modal multiple times creates separate callbacks."""
         orchestrator = MagicMock()
         cache_manager = MagicMock()
-        chat_screen = ChatScreen(orchestrator, cache_manager)
+        mock_datasource = AsyncMock()
+        chat_screen = ChatScreen(orchestrator, cache_manager, datasource=mock_datasource)
 
         mock_app = MagicMock()
         chat_screen.orchestrator.inject_context_update = MagicMock()
         chat_screen.query_one = MagicMock()
-
-        mock_tool = MagicMock()
-        mock_tool.datasource = AsyncMock()
-        orchestrator.tool_registry.get_tool.return_value = mock_tool
+        scheduled_calls: list = []
+        chat_screen.call_later = lambda fn, *args, **kwargs: scheduled_calls.append((fn, args))
 
         callbacks = []
 
@@ -129,10 +148,10 @@ class TestModalCallbackIntegration:
 
         mock_app.push_screen = capture_push_screen
 
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
+        from logai.ui.widgets.log_groups_sidebar import SelectableLogGroupItem
 
-        event1 = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/function1")
-        event2 = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/function2")
+        event1 = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/function1")
+        event2 = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/function2")
 
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
             mock_app_prop.return_value = mock_app
@@ -146,13 +165,20 @@ class TestModalCallbackIntegration:
             "log_group_name": "/aws/lambda/function1",
             "selected_entries": [{"timestamp": 1708263045123, "message": "From function1"}],
         }
-        await callbacks[0](result1)
+        callbacks[0](result1)
 
         result2 = {
             "log_group_name": "/aws/lambda/function2",
             "selected_entries": [{"timestamp": 1708263046456, "message": "From function2"}],
         }
-        await callbacks[1](result2)
+        callbacks[1](result2)
+
+        # Both callbacks should have scheduled async work.
+        assert len(scheduled_calls) == 2
+
+        # Run both scheduled injections.
+        for fn, args in scheduled_calls:
+            await fn(*args)
 
         assert chat_screen.orchestrator.inject_context_update.call_count == 2
 
@@ -167,15 +193,14 @@ class TestModalCallbackIntegration:
         """Test that rapid modal open/close operations don't cause race conditions."""
         orchestrator = MagicMock()
         cache_manager = MagicMock()
-        chat_screen = ChatScreen(orchestrator, cache_manager)
+        mock_datasource = AsyncMock()
+        chat_screen = ChatScreen(orchestrator, cache_manager, datasource=mock_datasource)
 
         mock_app = MagicMock()
         chat_screen.orchestrator.inject_context_update = MagicMock()
         chat_screen.query_one = MagicMock()
-
-        mock_tool = MagicMock()
-        mock_tool.datasource = AsyncMock()
-        orchestrator.tool_registry.get_tool.return_value = mock_tool
+        scheduled_calls: list = []
+        chat_screen.call_later = lambda fn, *args, **kwargs: scheduled_calls.append((fn, args))
 
         callbacks = []
 
@@ -184,12 +209,12 @@ class TestModalCallbackIntegration:
 
         mock_app.push_screen = capture_push_screen
 
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
+        from logai.ui.widgets.log_groups_sidebar import SelectableLogGroupItem
 
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
             mock_app_prop.return_value = mock_app
             for i in range(5):
-                event = ClickableLogGroupItem.LogGroupPreviewRequested(f"/aws/lambda/function{i}")
+                event = SelectableLogGroupItem.LogGroupPreviewRequested(f"/aws/lambda/function{i}")
                 await chat_screen.on_log_group_preview_requested(event)
 
         assert len(callbacks) == 5
@@ -199,7 +224,12 @@ class TestModalCallbackIntegration:
                 "log_group_name": f"/aws/lambda/function{i}",
                 "selected_entries": [{"timestamp": 1708263045000 + i, "message": f"Log {i}"}],
             }
-            await callback(result)
+            callback(result)
+
+        assert len(scheduled_calls) == 5
+
+        for fn, args in scheduled_calls:
+            await fn(*args)
 
         assert chat_screen.orchestrator.inject_context_update.call_count == 5
 
@@ -213,15 +243,14 @@ class TestModalCallbackIntegration:
         """Test callback handles large number of entries efficiently."""
         orchestrator = MagicMock()
         cache_manager = MagicMock()
-        chat_screen = ChatScreen(orchestrator, cache_manager)
+        mock_datasource = AsyncMock()
+        chat_screen = ChatScreen(orchestrator, cache_manager, datasource=mock_datasource)
 
         mock_app = MagicMock()
         chat_screen.orchestrator.inject_context_update = MagicMock()
         chat_screen.query_one = MagicMock()
-
-        mock_tool = MagicMock()
-        mock_tool.datasource = AsyncMock()
-        orchestrator.tool_registry.get_tool.return_value = mock_tool
+        scheduled_calls: list = []
+        chat_screen.call_later = lambda fn, *args, **kwargs: scheduled_calls.append((fn, args))
 
         captured_callback = None
 
@@ -231,9 +260,9 @@ class TestModalCallbackIntegration:
 
         mock_app.push_screen = capture_push_screen
 
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
+        from logai.ui.widgets.log_groups_sidebar import SelectableLogGroupItem
 
-        event = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
+        event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
 
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
             mock_app_prop.return_value = mock_app
@@ -254,7 +283,10 @@ class TestModalCallbackIntegration:
         import time
 
         start_time = time.time()
-        await captured_callback(result)
+        captured_callback(result)
+        # Run the scheduled async work.
+        for fn, args in scheduled_calls:
+            await fn(*args)
         elapsed_time = time.time() - start_time
 
         assert elapsed_time < 1.0, f"Callback took {elapsed_time}s, expected < 1s"
@@ -266,22 +298,21 @@ class TestCallbackErrorRecovery:
 
     @pytest.mark.asyncio
     async def test_callback_error_logged_and_notified(self):
-        """Test that errors in callback are logged and user is notified."""
+        """Test that errors in the async injection step are logged and user is notified."""
         orchestrator = MagicMock()
         cache_manager = MagicMock()
-        chat_screen = ChatScreen(orchestrator, cache_manager)
+        mock_datasource = AsyncMock()
+        chat_screen = ChatScreen(orchestrator, cache_manager, datasource=mock_datasource)
 
         chat_screen.orchestrator.inject_context_update = MagicMock(
             side_effect=Exception("Orchestrator failure")
         )
         chat_screen.notify = MagicMock()
         chat_screen.query_one = MagicMock()
+        scheduled_calls: list = []
+        chat_screen.call_later = lambda fn, *args, **kwargs: scheduled_calls.append((fn, args))
 
         mock_app = MagicMock()
-
-        mock_tool = MagicMock()
-        mock_tool.datasource = AsyncMock()
-        orchestrator.tool_registry.get_tool.return_value = mock_tool
 
         captured_callback = None
 
@@ -291,9 +322,9 @@ class TestCallbackErrorRecovery:
 
         mock_app.push_screen = capture_push_screen
 
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
+        from logai.ui.widgets.log_groups_sidebar import SelectableLogGroupItem
 
-        event = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
+        event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
 
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
             mock_app_prop.return_value = mock_app
@@ -304,8 +335,11 @@ class TestCallbackErrorRecovery:
             "selected_entries": [{"timestamp": 1708263045123, "message": "Test"}],
         }
 
+        captured_callback(result)
+
         with patch("logai.ui.screens.chat.logger") as mock_logger:
-            await captured_callback(result)
+            for fn, args in scheduled_calls:
+                await fn(*args)
             assert mock_logger.error.called
 
         chat_screen.notify.assert_called_once()
@@ -316,7 +350,8 @@ class TestCallbackErrorRecovery:
         """Test that subsequent callback invocations work after an error."""
         orchestrator = MagicMock()
         cache_manager = MagicMock()
-        chat_screen = ChatScreen(orchestrator, cache_manager)
+        mock_datasource = AsyncMock()
+        chat_screen = ChatScreen(orchestrator, cache_manager, datasource=mock_datasource)
 
         call_count = [0]
 
@@ -328,12 +363,10 @@ class TestCallbackErrorRecovery:
         chat_screen.orchestrator.inject_context_update = MagicMock(side_effect=inject_side_effect)
         chat_screen.notify = MagicMock()
         chat_screen.query_one = MagicMock()
+        scheduled_calls: list = []
+        chat_screen.call_later = lambda fn, *args, **kwargs: scheduled_calls.append((fn, args))
 
         mock_app = MagicMock()
-
-        mock_tool = MagicMock()
-        mock_tool.datasource = AsyncMock()
-        orchestrator.tool_registry.get_tool.return_value = mock_tool
 
         callbacks = []
 
@@ -342,10 +375,10 @@ class TestCallbackErrorRecovery:
 
         mock_app.push_screen = capture_push_screen
 
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
+        from logai.ui.widgets.log_groups_sidebar import SelectableLogGroupItem
 
-        event1 = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test1")
-        event2 = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test2")
+        event1 = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test1")
+        event2 = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test2")
 
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
             mock_app_prop.return_value = mock_app
@@ -356,16 +389,17 @@ class TestCallbackErrorRecovery:
             "log_group_name": "/aws/lambda/test1",
             "selected_entries": [{"timestamp": 1708263045123, "message": "Test1"}],
         }
-        with patch("logai.ui.screens.chat.logger"):
-            await callbacks[0](result1)
-
-        assert chat_screen.notify.call_count == 1
+        callbacks[0](result1)
 
         result2 = {
             "log_group_name": "/aws/lambda/test2",
             "selected_entries": [{"timestamp": 1708263046456, "message": "Test2"}],
         }
-        await callbacks[1](result2)
+        callbacks[1](result2)
+
+        with patch("logai.ui.screens.chat.logger"):
+            for fn, args in scheduled_calls:
+                await fn(*args)
 
         assert chat_screen.notify.call_count == 1
         assert chat_screen.orchestrator.inject_context_update.call_count == 2
@@ -375,17 +409,18 @@ class TestCallbackTimingAndPerformance:
     """Test timing and performance characteristics of callback."""
 
     @pytest.mark.asyncio
-    async def test_callback_is_async(self):
-        """Verify callback is an async function."""
+    async def test_callback_is_sync(self):
+        """Verify the push_screen callback is a plain (synchronous) function.
+
+        The callback schedules async work via call_later rather than being
+        a coroutine itself, which is the correct Textual pattern.
+        """
         orchestrator = MagicMock()
         cache_manager = MagicMock()
-        chat_screen = ChatScreen(orchestrator, cache_manager)
+        mock_datasource = AsyncMock()
+        chat_screen = ChatScreen(orchestrator, cache_manager, datasource=mock_datasource)
 
         mock_app = MagicMock()
-
-        mock_tool = MagicMock()
-        mock_tool.datasource = AsyncMock()
-        orchestrator.tool_registry.get_tool.return_value = mock_tool
 
         captured_callback = None
 
@@ -395,30 +430,30 @@ class TestCallbackTimingAndPerformance:
 
         mock_app.push_screen = capture_push_screen
 
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
+        from logai.ui.widgets.log_groups_sidebar import SelectableLogGroupItem
 
-        event = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
+        event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
 
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
             mock_app_prop.return_value = mock_app
             await chat_screen.on_log_group_preview_requested(event)
 
-        assert asyncio.iscoroutinefunction(captured_callback)
+        assert callable(captured_callback)
+        assert not asyncio.iscoroutinefunction(captured_callback)
 
     @pytest.mark.asyncio
     async def test_callback_execution_is_fast(self):
-        """Test that callback executes quickly for typical data."""
+        """Test that the sync callback and subsequent async injection execute quickly."""
         orchestrator = MagicMock()
         cache_manager = MagicMock()
-        chat_screen = ChatScreen(orchestrator, cache_manager)
+        mock_datasource = AsyncMock()
+        chat_screen = ChatScreen(orchestrator, cache_manager, datasource=mock_datasource)
 
         mock_app = MagicMock()
         chat_screen.orchestrator.inject_context_update = MagicMock()
         chat_screen.query_one = MagicMock()
-
-        mock_tool = MagicMock()
-        mock_tool.datasource = AsyncMock()
-        orchestrator.tool_registry.get_tool.return_value = mock_tool
+        scheduled_calls: list = []
+        chat_screen.call_later = lambda fn, *args, **kwargs: scheduled_calls.append((fn, args))
 
         captured_callback = None
 
@@ -428,9 +463,9 @@ class TestCallbackTimingAndPerformance:
 
         mock_app.push_screen = capture_push_screen
 
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
+        from logai.ui.widgets.log_groups_sidebar import SelectableLogGroupItem
 
-        event = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
+        event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
 
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
             mock_app_prop.return_value = mock_app
@@ -451,7 +486,9 @@ class TestCallbackTimingAndPerformance:
         import time
 
         start_time = time.time()
-        await captured_callback(result)
+        captured_callback(result)
+        for fn, args in scheduled_calls:
+            await fn(*args)
         elapsed_time = time.time() - start_time
 
         assert elapsed_time < 0.1, f"Callback took {elapsed_time}s, expected < 0.1s"

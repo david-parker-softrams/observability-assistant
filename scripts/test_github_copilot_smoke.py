@@ -81,12 +81,12 @@ def test_model_utilities():
         from logai.providers.llm.github_copilot_models import (
             DEFAULT_MODEL,
             DEFAULT_MODELS,
-            get_available_models_sync,
+            get_available_models,
         )
 
-        # Test get_available_models_sync (doesn't require async)
-        models = get_available_models_sync()
-        print(f"✓ Found {len(models)} models (sync)")
+        # Test get_available_models (static list, no async needed)
+        models = get_available_models()
+        print(f"✓ Found {len(models)} models")
         print(f"  Sample: {', '.join(models[:3])}")
 
         # Test validate_model

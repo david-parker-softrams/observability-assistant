@@ -246,8 +246,6 @@ LogAI v0.1.0
 |----------|-------------|---------|
 | `--aws-profile PROFILE` | AWS profile name for CloudWatch access | `--aws-profile prod` |
 | `--aws-region REGION` | AWS region for CloudWatch | `--aws-region us-west-2` |
-| `--use-mcp` | Use MCP server for CloudWatch tools (default) | `--use-mcp` |
-| `--no-mcp` | Use native (boto3-based) CloudWatch tools instead of MCP | `--no-mcp` |
 | `--version` | Display LogAI version | `--version` |
 | `--help` | Show help message and examples | `--help` |
 
@@ -278,7 +276,6 @@ Once LogAI is running, try these example queries:
 | `LOGAI_OPENAI_API_KEY` | OpenAI API key | - | If using OpenAI |
 | `LOGAI_OLLAMA_BASE_URL` | Ollama base URL | `http://localhost:11434` | If using Ollama |
 | `LOGAI_OLLAMA_MODEL` | Ollama model name | `llama3.1:8b` | If using Ollama |
-| `LOGAI_USE_MCP_TOOLS` | Enable MCP server for CloudWatch tools | `true` | No |
 | `LOGAI_MCP_SERVER_COMMAND` | Command used to launch the MCP server | `uvx` | No |
 | `LOGAI_MCP_SERVER_ARGS` | MCP server arguments as a JSON array | `["awslabs.cloudwatch-mcp-server"]` | No |
 | `LOGAI_PII_SANITIZATION_ENABLED` | Enable PII redaction | `true` | No |
@@ -296,12 +293,7 @@ Once LogAI is running, try these example queries:
 
 #### MCP Tool Settings
 
-By default, LogAI routes CloudWatch operations (`list_log_groups`, `fetch_logs`, `search_logs`) through the `awslabs.cloudwatch-mcp-server` via MCP (Model Context Protocol). This provides access to CloudWatch Logs Insights — a more powerful query language than simple filter patterns — and additional capabilities such as metric and alarm queries.
-
-**`LOGAI_USE_MCP_TOOLS`** — Toggle MCP mode on or off.
-
-- **Default:** `true`
-- To disable MCP and use the native boto3-based tools instead, set this to `false` or pass `--no-mcp` at the command line.
+LogAI routes CloudWatch operations through the `awslabs.cloudwatch-mcp-server` via MCP (Model Context Protocol). This provides access to CloudWatch Logs Insights — a more powerful query language than simple filter patterns — and additional capabilities such as metric and alarm queries.
 
 **`LOGAI_MCP_SERVER_COMMAND`** — The executable used to launch the MCP server subprocess.
 
@@ -379,8 +371,7 @@ LogAI follows a layered architecture:
 ┌─────────────────────────────────────┐
 │   Integration Layer                 │
 │   - LiteLLM (Unified LLM API)       │
-│   - MCP Client (default)            │
-│   - Native CloudWatch (--no-mcp)    │
+│   - MCP Client                      │
 │   - SQLite Cache Manager            │
 └─────────────────────────────────────┘
                  ↓
@@ -395,11 +386,9 @@ LogAI follows a layered architecture:
 
 ### MCP Integration
 
-By default, LogAI spawns a local `awslabs.cloudwatch-mcp-server` subprocess (via `uvx`) and communicates with it over stdio using the [Model Context Protocol](https://modelcontextprotocol.io/). CloudWatch operations — `list_log_groups`, `fetch_logs`, and `search_logs` — are routed through this MCP server, which uses the CloudWatch Logs Insights query API.
+By default, LogAI spawns a local `awslabs.cloudwatch-mcp-server` subprocess (via `uvx`) and communicates with it over stdio using the [Model Context Protocol](https://modelcontextprotocol.io/). CloudWatch operations are routed through this MCP server, which uses the CloudWatch Logs Insights query API.
 
 The MCP server exposes all of its tools directly to the LLM, including additional capabilities not previously available in LogAI (such as metric queries and alarm status). PII sanitization and result caching are applied to MCP results by the application before they reach the LLM.
-
-To fall back to the original native boto3-based tools, use the `--no-mcp` flag or set `LOGAI_USE_MCP_TOOLS=false`.
 
 ## 🧪 Development
 
@@ -544,7 +533,7 @@ If you use the optional metrics and alarms tools exposed by the MCP server, you 
 }
 ```
 
-Users who prefer not to grant these additional permissions can opt out with `--no-mcp`.
+Users who prefer not to grant these additional permissions should contact their AWS administrator to scope down the IAM policy.
 
 ## 🗺️ Roadmap
 

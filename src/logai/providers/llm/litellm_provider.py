@@ -186,6 +186,69 @@ class LiteLLMProvider(BaseLLMProvider):
             )
         return False
 
+    def _build_params(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        stream: bool = False,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """
+        Build the litellm.completion() parameter dict.
+
+        Centralises all provider-specific parameter logic so that ``chat()``
+        and ``stream_chat()`` stay concise.
+
+        Args:
+            messages: Conversation messages to send.
+            tools: Optional tool definitions (only added when the model supports them).
+            stream: Whether to request a streaming response.
+            **kwargs: Forwarded kwargs (e.g. ``temperature`` override).
+
+        Returns:
+            Ready-to-unpack dict for ``litellm.completion(**params)``.
+        """
+        params: dict[str, Any] = {
+            "model": self._get_model_name(),
+            "messages": messages,
+            "temperature": kwargs.get("temperature", self.temperature),
+            # Prevent silent 10-minute hangs: httpcore's default is 600 s, which
+            # means a hanging Ollama request would block the agent for 10 minutes
+            # before failing. request_timeout is the LiteLLM-standard kwarg for
+            # capping total HTTP round-trip time.
+            "request_timeout": self.request_timeout,
+        }
+
+        if stream:
+            params["stream"] = True
+
+        # Add API base for Ollama
+        if self.api_base:
+            params["api_base"] = self.api_base
+
+        # Only add API key if it's not empty (Ollama doesn't need it)
+        if self.api_key:
+            params["api_key"] = self.api_key
+
+        if self.max_tokens:
+            params["max_tokens"] = self.max_tokens
+
+        # Pass num_ctx to Ollama to override the default 4096-token context window.
+        # Without this, Ollama silently truncates prompts even when the model supports
+        # a larger context window (e.g. qwen3:32b supports 32768 tokens).
+        # IMPORTANT: num_ctx must be passed as a top-level kwarg to litellm.completion(),
+        # NOT as options={"num_ctx": ...}. LiteLLM's Ollama handler only recognises
+        # num_ctx when it arrives via optional_params (i.e. as a direct kwarg); an
+        # "options" dict key is not in get_supported_openai_params and gets dropped.
+        if self.provider == "ollama" and self.num_ctx:
+            params["num_ctx"] = self.num_ctx
+
+        # Only send tools if the model supports them
+        if tools and self._supports_tools():
+            params["tools"] = tools
+
+        return params
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -212,42 +275,7 @@ class LiteLLMProvider(BaseLLMProvider):
             return self.stream_chat(messages=messages, tools=tools, **kwargs)
 
         try:
-            # Prepare litellm parameters
-            params: dict[str, Any] = {
-                "model": self._get_model_name(),
-                "messages": messages,
-                "temperature": kwargs.get("temperature", self.temperature),
-                # Prevent silent 10-minute hangs: httpcore's default is 600 s, which
-                # means a hanging Ollama request would block the agent for 10 minutes
-                # before failing. request_timeout is the LiteLLM-standard kwarg for
-                # capping total HTTP round-trip time.
-                "request_timeout": self.request_timeout,
-            }
-
-            # Add API base for Ollama
-            if self.api_base:
-                params["api_base"] = self.api_base
-
-            # Only add API key if it's not empty (Ollama doesn't need it)
-            if self.api_key:
-                params["api_key"] = self.api_key
-
-            if self.max_tokens:
-                params["max_tokens"] = self.max_tokens
-
-            # Pass num_ctx to Ollama to override the default 4096-token context window.
-            # Without this, Ollama silently truncates prompts even when the model supports
-            # a larger context window (e.g. qwen3:32b supports 32768 tokens).
-            # IMPORTANT: num_ctx must be passed as a top-level kwarg to litellm.completion(),
-            # NOT as options={"num_ctx": ...}. LiteLLM's Ollama handler only recognises
-            # num_ctx when it arrives via optional_params (i.e. as a direct kwarg); an
-            # "options" dict key is not in get_supported_openai_params and gets dropped.
-            if self.provider == "ollama" and self.num_ctx:
-                params["num_ctx"] = self.num_ctx
-
-            # Only send tools if the model supports them
-            if tools and self._supports_tools():
-                params["tools"] = tools
+            params = self._build_params(messages=messages, tools=tools, **kwargs)
 
             # Run litellm completion in executor (it's synchronous)
             loop = asyncio.get_event_loop()
@@ -318,40 +346,7 @@ class LiteLLMProvider(BaseLLMProvider):
             LLMProviderError: If request fails
         """
         try:
-            # Prepare litellm parameters
-            params: dict[str, Any] = {
-                "model": self._get_model_name(),
-                "messages": messages,
-                "temperature": kwargs.get("temperature", self.temperature),
-                "stream": True,
-                # Prevent silent 10-minute hangs (see chat() for full explanation).
-                "request_timeout": self.request_timeout,
-            }
-
-            # Add API base for Ollama
-            if self.api_base:
-                params["api_base"] = self.api_base
-
-            # Only add API key if it's not empty (Ollama doesn't need it)
-            if self.api_key:
-                params["api_key"] = self.api_key
-
-            if self.max_tokens:
-                params["max_tokens"] = self.max_tokens
-
-            # Pass num_ctx to Ollama to override the default 4096-token context window.
-            # Without this, Ollama silently truncates prompts even when the model supports
-            # a larger context window (e.g. qwen3:32b supports 32768 tokens).
-            # IMPORTANT: num_ctx must be passed as a top-level kwarg to litellm.completion(),
-            # NOT as options={"num_ctx": ...}. LiteLLM's Ollama handler only recognises
-            # num_ctx when it arrives via optional_params (i.e. as a direct kwarg); an
-            # "options" dict key is not in get_supported_openai_params and gets dropped.
-            if self.provider == "ollama" and self.num_ctx:
-                params["num_ctx"] = self.num_ctx
-
-            # Only send tools if the model supports them
-            if tools and self._supports_tools():
-                params["tools"] = tools
+            params = self._build_params(messages=messages, tools=tools, stream=True, **kwargs)
 
             # Run litellm streaming in executor
             loop = asyncio.get_event_loop()

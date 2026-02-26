@@ -186,6 +186,25 @@ class RetryState:
         self.last_tool_args = None
 
 
+@dataclass
+class ConversationLoopResult:
+    """Result returned by _run_conversation_loop().
+
+    Attributes:
+        content: The final text content — either the LLM's response, a
+            graceful error message, or a max-iterations notice.
+        is_error: True when content is an error message rather than a
+            normal LLM response.
+        error_exception: The original exception object if is_error is True
+            and the error originated from a caught exception.
+            _chat_complete() will re-raise this; _chat_stream() ignores it.
+    """
+
+    content: str
+    is_error: bool = False
+    error_exception: Exception | None = None
+
+
 class RetryPromptGenerator:
     """Generates guidance prompts for retry attempts.
 
@@ -492,13 +511,13 @@ Current time: {current_time}
         """
         Get the system prompt with current context.
 
-        When MCP tools are active (``settings.use_mcp_tools`` is True), the
-        prompt is extended with guidance for the CloudWatch Logs Insights tools
-        so the LLM knows how to use the MCP-based tools correctly.
+        The prompt always includes guidance for the CloudWatch Logs Insights MCP
+        tools so the LLM knows how to use them correctly.  MCP is the only
+        supported tool mode.
 
         Returns:
-            Formatted system prompt including log group context and, when
-            relevant, MCP-specific tool-usage guidance.
+            Formatted system prompt including log group context and MCP tool-usage
+            guidance.
         """
         now = datetime.now(UTC)
 
@@ -506,15 +525,10 @@ Current time: {current_time}
         if self.log_group_manager and self.log_group_manager.is_ready:
             log_groups_context = self.log_group_manager.format_for_prompt()
         else:
-            # Name the correct discovery tool based on which path is active.
-            # MCP mode exposes `describe_log_groups`; native mode exposes `list_log_groups`.
-            if self.settings.use_mcp_tools:
-                tool_hint = "`describe_log_groups`"
-            else:
-                tool_hint = "`list_log_groups`"
-            log_groups_context = f"""## Log Groups
+            # MCP mode exposes `describe_log_groups` for log-group discovery.
+            log_groups_context = """## Log Groups
 
-Log groups will be discovered via the {tool_hint} tool.
+Log groups will be discovered via the `describe_log_groups` tool.
 Use this tool to find available log groups before querying logs."""
 
         prompt = self.SYSTEM_PROMPT.format(
@@ -523,11 +537,9 @@ Use this tool to find available log groups before querying logs."""
             chunk_size=self.settings.initial_chunk_size,
         )
 
-        # Inject MCP-specific guidance only when the MCP path is active.
-        # The native boto3 path does not use Logs Insights, so this guidance
-        # must not appear there — it would mislead the LLM.
-        if self.settings.use_mcp_tools:
-            prompt = prompt + _MCP_LOGS_INSIGHTS_GUIDANCE
+        # MCP-specific Logs Insights guidance is always appended — MCP is the
+        # only supported tool mode.
+        prompt = prompt + _MCP_LOGS_INSIGHTS_GUIDANCE
 
         return prompt
 
@@ -575,6 +587,11 @@ Use this tool to find available log groups before querying logs."""
         """
         self._pending_context_injection = context_message
         logger.debug(f"Orchestrator stored context: {len(context_message)} chars")
+
+    @property
+    def pending_context_injection(self) -> str | None:
+        """Current staged context injection, or None if nothing is pending."""
+        return self._pending_context_injection
 
     def _get_pending_context_injection(self) -> str | None:
         """
@@ -1009,7 +1026,7 @@ Do NOT answer based only on preview samples."""
             return False
 
         usage = self.budget_tracker.get_usage()
-        threshold = getattr(self.settings, "context_warning_threshold_pct", 80.0)
+        threshold = self.settings.context_warning_threshold_pct
 
         return usage.utilization_pct >= threshold
 
@@ -1370,14 +1387,367 @@ Do NOT answer based only on preview samples."""
         except json.JSONDecodeError:
             logger.warning("Failed to parse tool message content as JSON")
 
+    async def _run_conversation_loop(self, user_message: str) -> ConversationLoopResult:
+        """Execute the full conversation loop for a single user turn.
+
+        Handles all the shared logic that was previously duplicated between
+        ``_chat_complete()`` and ``_chat_stream()``:
+
+        - Cache fetch count reset
+        - History pruning (BEFORE appending the new user message — bug fix
+          vs. old ``_chat_stream`` which pruned AFTER appending)
+        - System prompt construction (pending context injection, cache guidance)
+        - User message appended to ``self.conversation_history``
+        - Messages list construction
+        - Budget tracking
+        - Tool-calling loop: LLM call → tool execution → result append → repeat
+        - Intent detection and retry logic
+        - Final assistant message appended to ``self.conversation_history``
+
+        This method never raises — all errors are captured and returned as a
+        ``ConversationLoopResult`` with ``is_error=True``.  The thin wrappers
+        (``_chat_complete`` and ``_chat_stream``) decide how to surface errors
+        to their respective callers.
+
+        Args:
+            user_message: The user's input text for this conversation turn.
+
+        Returns:
+            ``ConversationLoopResult`` containing the final response text and
+            error status.
+        """
+        try:
+            # ── Phase 1: Setup ────────────────────────────────────────────
+            # Reset per-turn cache fetch counter (Phase 1: Separate Message Timing)
+            self._reset_cache_fetch_count()
+
+            # Prune history BEFORE appending the new user message so the
+            # pruning decision reflects the existing context, not this turn's
+            # input (fixes a bug in the old _chat_stream implementation).
+            self._prune_history_if_needed()
+
+            # Get pending context to inject (e.g. user-selected log entries via /refresh)
+            context_to_inject = self._get_pending_context_injection()
+
+            # Build system prompt, merging any pending injections
+            system_prompt = self._get_system_prompt()
+            if context_to_inject:
+                system_prompt = f"{system_prompt}\n\n---\n\n{context_to_inject}"
+
+            # Inject follow-up cache guidance when the user is asking about a
+            # previously cached dataset (Phase 1: Separate Message Timing)
+            follow_up_injection = self._get_follow_up_cache_injection(user_message)
+            if follow_up_injection:
+                system_prompt = f"{system_prompt}\n\n{follow_up_injection}"
+
+            # Append user message to history (AFTER pruning — see note above)
+            self.conversation_history.append({"role": "user", "content": user_message})
+
+            # Build messages list: one system message, then full history
+            messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
+            if self.conversation_history:
+                messages.extend(self.conversation_history)
+
+            # Update budget tracker with current conversation state
+            self._update_budget_tracker(messages)
+            self._log_budget_status()
+
+            # Resolve tool definitions once per turn
+            tools = self.tool_registry.to_function_definitions()
+
+            # Diagnostic: log message count and per-message summary
+            logger.debug(f"Sending {len(messages)} messages to LLM")
+            for i, msg in enumerate(messages):
+                # Use .get() to guard against multi-part content blocks (e.g. Anthropic
+                # tool-use messages) where "content" may be a list or absent entirely.
+                content = msg.get("content") or ""
+                content_preview = content[:100] if len(content) > 100 else content
+                logger.debug(
+                    f"Message {i}: role={msg['role']}, "
+                    f"length={len(content)} chars, "
+                    f"preview={content_preview}..."
+                )
+
+            # ── Phase 2: Conversation Loop ────────────────────────────────
+            retry_state = RetryState()
+            response: LLMResponse | None = None
+            iteration = 0
+            max_iterations = self.settings.max_tool_iterations
+
+            while iteration < max_iterations:
+                iteration += 1
+
+                try:
+                    # Always call the LLM in non-streaming mode during the tool loop.
+                    # _chat_stream's "streaming" is simulated by yielding the final
+                    # response character-by-character after the loop completes.
+                    llm_result = await self.llm_provider.chat(
+                        messages=messages, tools=tools, stream=False
+                    )
+
+                    # Type guard: stream=False must always return LLMResponse
+                    if not isinstance(llm_result, LLMResponse):
+                        raise OrchestratorError("Expected LLMResponse but got AsyncGenerator")
+
+                    response = llm_result
+
+                    # ── Tool-calls branch ─────────────────────────────────
+                    if response.has_tool_calls():
+                        tool_results = await self._execute_tool_calls(response.tool_calls)
+
+                        # Track last tool name/args for retry heuristics
+                        for tool_call in response.tool_calls:
+                            func_info = tool_call.get("function", {})
+                            retry_state.last_tool_name = func_info.get("name")
+                            try:
+                                args_str = func_info.get("arguments", "{}")
+                                retry_state.last_tool_args = (
+                                    json.loads(args_str) if isinstance(args_str, str) else args_str
+                                )
+                            except json.JSONDecodeError:
+                                retry_state.last_tool_args = {}
+
+                        # Append assistant message (with tool_calls) to history
+                        assistant_message: dict[str, Any] = {
+                            "role": "assistant",
+                            "content": response.content or "",
+                            "tool_calls": response.tool_calls,
+                        }
+                        self.conversation_history.append(assistant_message)
+                        messages.append(assistant_message)
+
+                        # Append each tool result and track its token cost
+                        for tool_result in tool_results:
+                            tool_message: dict[str, Any] = {
+                                "role": "tool",
+                                "tool_call_id": tool_result["tool_call_id"],
+                                "content": json.dumps(tool_result["result"]),
+                            }
+                            self.conversation_history.append(tool_message)
+                            messages.append(tool_message)
+
+                            self._log_tool_call_diagnostic(
+                                tool_message, tool_result, "_run_conversation_loop"
+                            )
+
+                            result_content = tool_message["content"]
+                            result_tokens = TokenCounter.count_tokens(
+                                result_content, self.settings.current_llm_model
+                            )
+                            self.budget_tracker.add_result_tokens(result_tokens)
+
+                        # Mid-loop budget check — prune if context is critically low
+                        needs_prune, _ = self._check_mid_loop_budget(messages)
+                        if needs_prune:
+                            self._emergency_prune_history(messages)
+                            _, remaining_after = self._check_mid_loop_budget(messages)
+                            if remaining_after < 0:
+                                error_msg = (
+                                    "I've reached my context limit and cannot continue "
+                                    "this conversation. Please use /clear to start a "
+                                    "new conversation."
+                                )
+                                self.conversation_history.append(
+                                    {"role": "assistant", "content": error_msg}
+                                )
+                                self._notify_context_event(
+                                    "error", "Context exhausted - conversation ended"
+                                )
+                                return ConversationLoopResult(content=error_msg, is_error=True)
+
+                        # Retry analysis
+                        should_retry, retry_reason = self._analyze_tool_results(
+                            tool_results, retry_state
+                        )
+
+                        if should_retry and retry_state.should_retry(
+                            self.settings.max_retry_attempts
+                        ):
+                            self.metrics.increment(
+                                "retry_attempts", labels={"reason": retry_reason}
+                            )
+
+                            backoff_delay = self._calculate_backoff_delay(retry_state.attempts)
+                            logger.info(
+                                "Applying exponential backoff before retry",
+                                extra={
+                                    "delay_seconds": backoff_delay,
+                                    "attempt": retry_state.attempts,
+                                },
+                            )
+
+                            with MetricsTimer(
+                                self.metrics,
+                                "retry_backoff_seconds",
+                                labels={"attempt": str(retry_state.attempts)},
+                            ):
+                                await asyncio.sleep(backoff_delay)
+
+                            retry_prompt = RetryPromptGenerator.generate_retry_prompt(
+                                retry_reason, retry_state
+                            )
+                            retry_message = {"role": "system", "content": retry_prompt}
+                            messages.append(retry_message)
+                            retry_state.record_attempt(
+                                retry_state.last_tool_name or "unknown",
+                                retry_state.last_tool_args or {},
+                                retry_reason,
+                            )
+                            logger.info(
+                                "Injecting retry prompt",
+                                extra={
+                                    "reason": retry_reason,
+                                    "attempt": retry_state.attempts,
+                                    "strategies_tried": retry_state.strategies_tried,
+                                },
+                            )
+                            self.metrics.increment(
+                                "retry_prompt_injected", labels={"reason": retry_reason}
+                            )
+                        else:
+                            if should_retry:
+                                # Max retry attempts exhausted — record metric and continue
+                                self.metrics.increment(
+                                    "retry_max_attempts_reached",
+                                    labels={"reason": retry_reason},
+                                )
+
+                        # Loop again so the LLM can process the tool results
+                        continue
+
+                    # ── No tool calls — intent detection ──────────────────
+                    if self.settings.intent_detection_enabled and response.content:
+                        detected_intent = IntentDetector.detect_intent(response.content)
+
+                        if detected_intent and detected_intent.confidence >= 0.8:
+                            self.metrics.increment(
+                                "intent_detection_hits",
+                                labels={
+                                    "intent_type": detected_intent.intent_type.value,
+                                    "confidence_bucket": self._confidence_bucket(
+                                        detected_intent.confidence
+                                    ),
+                                },
+                            )
+
+                            # Agent stated an intent but didn't call a tool — nudge it
+                            if retry_state.should_retry(self.settings.max_retry_attempts):
+                                self.metrics.increment(
+                                    "retry_attempts",
+                                    labels={"reason": "intent_without_action"},
+                                )
+                                nudge_message = {
+                                    "role": "system",
+                                    "content": RetryPromptGenerator.generate_retry_prompt(
+                                        "intent_without_action", retry_state
+                                    ),
+                                }
+                                messages.append(nudge_message)
+                                retry_state.record_attempt(
+                                    "intent_detection", {}, "intent_without_action"
+                                )
+                                logger.info(
+                                    "Detected intent without action, nudging agent",
+                                    extra={
+                                        "intent_type": detected_intent.intent_type.value,
+                                        "confidence": detected_intent.confidence,
+                                        "attempt": retry_state.attempts,
+                                    },
+                                )
+                                continue
+
+                        if IntentDetector.detect_premature_giving_up(response.content):
+                            if retry_state.empty_result_count > 0 and retry_state.should_retry(
+                                self.settings.max_retry_attempts
+                            ):
+                                nudge_message = {
+                                    "role": "system",
+                                    "content": RetryPromptGenerator.generate_retry_prompt(
+                                        "empty_logs", retry_state
+                                    ),
+                                }
+                                messages.append(nudge_message)
+                                retry_state.record_attempt(
+                                    "giving_up_prevention", {}, "premature_exit"
+                                )
+                                logger.info(
+                                    "Detected premature giving up, encouraging retry",
+                                    extra={
+                                        "empty_result_count": retry_state.empty_result_count,
+                                        "attempt": retry_state.attempts,
+                                    },
+                                )
+                                continue
+
+                    # ── Final response ────────────────────────────────────
+                    if response.content:
+                        self.conversation_history.append(
+                            {"role": "assistant", "content": response.content}
+                        )
+                        return ConversationLoopResult(content=response.content)
+                    else:
+                        error_msg = "Received empty response from LLM"
+                        self.conversation_history.append(
+                            {"role": "assistant", "content": error_msg}
+                        )
+                        return ConversationLoopResult(content=error_msg, is_error=True)
+
+                except LLMProviderError as e:
+                    return ConversationLoopResult(
+                        content=f"LLM provider error: {str(e)}",
+                        is_error=True,
+                        error_exception=e,
+                    )
+                except Exception as e:
+                    # Self-direction errors are non-fatal — if we have content, return it
+                    logger.warning(
+                        "Error in self-direction logic, continuing without retry",
+                        extra={"error": str(e)},
+                        exc_info=True,
+                    )
+                    if (
+                        response is not None
+                        and isinstance(response, LLMResponse)
+                        and response.content
+                    ):
+                        self.conversation_history.append(
+                            {"role": "assistant", "content": response.content}
+                        )
+                        return ConversationLoopResult(content=response.content)
+                    return ConversationLoopResult(
+                        content=f"Unexpected error during orchestration: {str(e)}",
+                        is_error=True,
+                        error_exception=e,
+                    )
+
+            # ── Max iterations reached ────────────────────────────────────
+            error_msg = (
+                f"Maximum tool iterations ({max_iterations}) exceeded. "
+                "The conversation may be stuck in a loop."
+            )
+            self.conversation_history.append({"role": "assistant", "content": error_msg})
+            return ConversationLoopResult(content=error_msg, is_error=True)
+
+        except Exception as e:
+            # Outer safety net: catches any exception from Phase 1 setup code
+            # (e.g. a failure in _get_system_prompt or _prune_history_if_needed)
+            logger.error(
+                "Unexpected error in _run_conversation_loop setup phase",
+                extra={"error": str(e)},
+                exc_info=True,
+            )
+            return ConversationLoopResult(
+                content=f"Unexpected error during orchestration: {str(e)}",
+                is_error=True,
+                error_exception=e,
+            )
+
     async def _chat_complete(self, user_message: str) -> str:
         """Process message and return complete response.
 
-        Enhanced with self-direction capabilities and context management:
-        - Detects intent without action and prompts execution
-        - Automatically retries on empty results
-        - Tracks retry state across the conversation turn
-        - Prunes history when context fills
+        Thin wrapper around ``_run_conversation_loop()``.  Re-raises
+        ``OrchestratorError`` for LLM provider failures so callers that
+        depend on exception-based error handling are not broken.
 
         Args:
             user_message: User's input message
@@ -1386,628 +1756,40 @@ Do NOT answer based only on preview samples."""
             Complete response text
 
         Raises:
-            OrchestratorError: If orchestration fails
+            OrchestratorError: If the conversation loop reports an error
+                that has an associated exception (e.g. LLMProviderError).
         """
-        # Track cache fetch count per turn (Phase 1)
-        self._reset_cache_fetch_count()
+        result = await self._run_conversation_loop(user_message)
 
-        # Prune history if needed (before preparing messages)
-        self._prune_history_if_needed()
+        # Re-raise exception-backed errors as OrchestratorError to preserve
+        # the existing public API contract (callers expect exceptions, not
+        # result objects, from this method).
+        if result.is_error and result.error_exception is not None:
+            raise OrchestratorError(result.content) from result.error_exception
 
-        # Get pending context to inject (user-provided logs, etc.)
-        context_to_inject = self._get_pending_context_injection()
-
-        # Build system prompt with any context injection
-        system_prompt = self._get_system_prompt()
-        if context_to_inject:
-            system_prompt = f"{system_prompt}\n\n---\n\n{context_to_inject}"
-
-        # Inject follow-up cache guidance if needed (Phase 1 - Separate Message Timing)
-        follow_up_injection = self._get_follow_up_cache_injection(user_message)
-        if follow_up_injection:
-            system_prompt = f"{system_prompt}\n\n{follow_up_injection}"
-
-        # Add user message to history
-        user_msg = {"role": "user", "content": user_message}
-        self.conversation_history.append(user_msg)
-
-        # Prepare messages with complete system prompt (only ONE system message)
-        messages = [{"role": "system", "content": system_prompt}]
-
-        # Add conversation history
-        if self.conversation_history:
-            messages.extend(self.conversation_history)
-
-        # Update budget tracker with current state
-        self._update_budget_tracker(messages)
-        self._log_budget_status()
-
-        # Get available tools
-        tools = self.tool_registry.to_function_definitions()
-
-        # Log message summary before LLM call
-        logger.debug(f"Sending {len(messages)} messages to LLM")
-        for i, msg in enumerate(messages):
-            content_preview = msg["content"][:100] if len(msg["content"]) > 100 else msg["content"]
-            logger.debug(
-                f"Message {i}: role={msg['role']}, length={len(msg['content'])} chars, preview={content_preview}..."
-            )
-
-        # Initialize retry state for this turn
-        retry_state = RetryState()
-        response = None
-
-        # Execute conversation loop with tool calling
-        iteration = 0
-        max_iterations = self.settings.max_tool_iterations
-        while iteration < max_iterations:
-            iteration += 1
-
-            try:
-                # Get LLM response
-                llm_result = await self.llm_provider.chat(
-                    messages=messages, tools=tools, stream=False
-                )
-
-                # Type guard: stream=False should always return LLMResponse
-                if not isinstance(llm_result, LLMResponse):
-                    raise OrchestratorError("Expected LLMResponse but got AsyncGenerator")
-
-                response = llm_result
-
-                # Check if LLM wants to use tools
-                if response.has_tool_calls():
-                    # Execute tool calls
-                    tool_results = await self._execute_tool_calls(response.tool_calls)
-
-                    # Track tool calls for retry logic
-                    for tool_call in response.tool_calls:
-                        func_info = tool_call.get("function", {})
-                        retry_state.last_tool_name = func_info.get("name")
-                        try:
-                            args_str = func_info.get("arguments", "{}")
-                            retry_state.last_tool_args = (
-                                json.loads(args_str) if isinstance(args_str, str) else args_str
-                            )
-                        except json.JSONDecodeError:
-                            retry_state.last_tool_args = {}
-
-                    # Add assistant message with tool calls to history
-                    assistant_message: dict[str, Any] = {
-                        "role": "assistant",
-                        "content": response.content or "",
-                        "tool_calls": response.tool_calls,
-                    }
-                    self.conversation_history.append(assistant_message)
-                    messages.append(assistant_message)
-
-                    # Add tool results as separate messages WITH budget tracking
-                    for tool_result in tool_results:
-                        tool_message: dict[str, Any] = {
-                            "role": "tool",
-                            "tool_call_id": tool_result["tool_call_id"],
-                            "content": json.dumps(tool_result["result"]),
-                        }
-                        self.conversation_history.append(tool_message)
-                        messages.append(tool_message)
-
-                        # Log diagnostic information about the tool result being sent to the LLM.
-                        self._log_tool_call_diagnostic(tool_message, tool_result, "_chat_complete")
-
-                        # Track the tool result tokens for mid-loop budget management
-                        result_content = tool_message["content"]
-                        result_tokens = TokenCounter.count_tokens(
-                            result_content, self.settings.current_llm_model
-                        )
-                        self.budget_tracker.add_result_tokens(result_tokens)
-
-                    # After processing all tool results, check budget
-                    needs_prune, remaining = self._check_mid_loop_budget(messages)
-
-                    if needs_prune:
-                        # Attempt emergency pruning
-                        self._emergency_prune_history(messages)
-
-                        # Re-check after pruning
-                        _, remaining_after = self._check_mid_loop_budget(messages)
-
-                        if remaining_after < 0:
-                            # Context still exhausted after pruning - graceful exit
-                            error_msg = (
-                                "I've reached my context limit and cannot continue this conversation. "
-                                "Please use /clear to start a new conversation."
-                            )
-                            self.conversation_history.append(
-                                {"role": "assistant", "content": error_msg}
-                            )
-                            self._notify_context_event(
-                                "error", "Context exhausted - conversation ended"
-                            )
-                            # Use appropriate return for each method context
-                            # In _chat_complete: return error_msg
-                            # In _chat_stream: yield then return
-                            return error_msg
-
-                    # Analyze results for retry logic
-                    should_retry, retry_reason = self._analyze_tool_results(
-                        tool_results, retry_state
-                    )
-
-                    if should_retry and retry_state.should_retry(self.settings.max_retry_attempts):
-                        # Record retry metrics
-                        self.metrics.increment("retry_attempts", labels={"reason": retry_reason})
-
-                        # Apply exponential backoff before retry
-                        backoff_delay = self._calculate_backoff_delay(retry_state.attempts)
-                        logger.info(
-                            "Applying exponential backoff before retry",
-                            extra={"delay_seconds": backoff_delay, "attempt": retry_state.attempts},
-                        )
-
-                        # Measure time spent in retry logic
-                        with MetricsTimer(
-                            self.metrics,
-                            "retry_backoff_seconds",
-                            labels={"attempt": str(retry_state.attempts)},
-                        ):
-                            await asyncio.sleep(backoff_delay)
-
-                        # Inject retry guidance as system message
-                        retry_prompt = RetryPromptGenerator.generate_retry_prompt(
-                            retry_reason, retry_state
-                        )
-                        retry_message = {"role": "system", "content": retry_prompt}
-                        messages.append(retry_message)
-                        retry_state.record_attempt(
-                            retry_state.last_tool_name or "unknown",
-                            retry_state.last_tool_args or {},
-                            retry_reason,
-                        )
-                        logger.info(
-                            "Injecting retry prompt",
-                            extra={
-                                "reason": retry_reason,
-                                "attempt": retry_state.attempts,
-                                "strategies_tried": retry_state.strategies_tried,
-                            },
-                        )
-
-                        # Record successful retry metric
-                        self.metrics.increment(
-                            "retry_prompt_injected", labels={"reason": retry_reason}
-                        )
-
-                    else:
-                        # Retry not triggered or max attempts reached
-                        if should_retry:
-                            # Max attempts reached - record failure
-                            self.metrics.increment(
-                                "retry_max_attempts_reached", labels={"reason": retry_reason}
-                            )
-
-                    # Continue loop - LLM will process tool results
-                    continue
-
-                # No tool calls - check for intent without action
-                if self.settings.intent_detection_enabled and response.content:
-                    detected_intent = IntentDetector.detect_intent(response.content)
-
-                    if detected_intent and detected_intent.confidence >= 0.8:
-                        # Record intent detection hit
-                        self.metrics.increment(
-                            "intent_detection_hits",
-                            labels={
-                                "intent_type": detected_intent.intent_type.value,
-                                "confidence_bucket": self._confidence_bucket(
-                                    detected_intent.confidence
-                                ),
-                            },
-                        )
-
-                        # Agent stated intent but didn't act - prompt to act
-                        if retry_state.should_retry(self.settings.max_retry_attempts):
-                            self.metrics.increment(
-                                "retry_attempts", labels={"reason": "intent_without_action"}
-                            )
-
-                            nudge_message = {
-                                "role": "system",
-                                "content": RetryPromptGenerator.generate_retry_prompt(
-                                    "intent_without_action", retry_state
-                                ),
-                            }
-                            messages.append(nudge_message)
-                            retry_state.record_attempt(
-                                "intent_detection", {}, "intent_without_action"
-                            )
-                            logger.info(
-                                "Detected intent without action, nudging agent",
-                                extra={
-                                    "intent_type": detected_intent.intent_type.value,
-                                    "confidence": detected_intent.confidence,
-                                    "attempt": retry_state.attempts,
-                                },
-                            )
-                            continue
-
-                    # Check for premature giving up
-                    if IntentDetector.detect_premature_giving_up(response.content):
-                        if retry_state.empty_result_count > 0 and retry_state.should_retry(
-                            self.settings.max_retry_attempts
-                        ):
-                            # Agent giving up after empty results - encourage retry
-                            nudge_message = {
-                                "role": "system",
-                                "content": RetryPromptGenerator.generate_retry_prompt(
-                                    "empty_logs", retry_state
-                                ),
-                            }
-                            messages.append(nudge_message)
-                            retry_state.record_attempt("giving_up_prevention", {}, "premature_exit")
-                            logger.info(
-                                "Detected premature giving up, encouraging retry",
-                                extra={
-                                    "empty_result_count": retry_state.empty_result_count,
-                                    "attempt": retry_state.attempts,
-                                },
-                            )
-                            continue
-
-                # No tool calls and no retry needed - we have the final response
-                if response.content:
-                    self.conversation_history.append(
-                        {"role": "assistant", "content": response.content}
-                    )
-                    return response.content
-                else:
-                    # Empty response, shouldn't happen but handle gracefully
-                    error_msg = "Received empty response from LLM"
-                    self.conversation_history.append({"role": "assistant", "content": error_msg})
-                    return error_msg
-
-            except LLMProviderError as e:
-                raise OrchestratorError(f"LLM provider error: {str(e)}") from e
-            except Exception as e:
-                # Log the error for self-direction features but don't fail the request
-                logger.warning(
-                    "Error in self-direction logic, continuing without retry",
-                    extra={"error": str(e)},
-                    exc_info=True,
-                )
-                # If we have content, return it; otherwise raise
-                if response is not None and isinstance(response, LLMResponse) and response.content:
-                    self.conversation_history.append(
-                        {"role": "assistant", "content": response.content}
-                    )
-                    return response.content
-                raise OrchestratorError(f"Unexpected error during orchestration: {str(e)}") from e
-
-        # Hit max iterations - likely infinite loop
-        error_msg = f"Maximum tool iterations ({max_iterations}) exceeded. The conversation may be stuck in a loop."
-        self.conversation_history.append({"role": "assistant", "content": error_msg})
-        return error_msg
+        return result.content
 
     async def _chat_stream(self, user_message: str) -> AsyncGenerator[str, None]:
-        """Process message and stream the response.
+        """Process message and stream the response character-by-character.
 
-        Enhanced with self-direction capabilities and context management.
+        Thin wrapper around ``_run_conversation_loop()``.  Yields the full
+        response (or error message) one character at a time, simulating
+        streaming.  Never raises — errors are yielded as text.
 
-        Note: For MVP, we'll handle tool calls in non-streaming mode,
-        then stream the final response. Full streaming with tool calls
-        is complex and can be added post-MVP.
+        Note: The entire conversation loop (all tool calls, retries, etc.)
+        completes before any character is yielded.  This is intentional and
+        matches the pre-refactor behaviour.  True token-level streaming is
+        tracked as a post-MVP improvement.
 
         Args:
             user_message: User's message
 
         Yields:
-            Response tokens
+            Response characters
         """
-        # Add user message to history
-        self.conversation_history.append({"role": "user", "content": user_message})
-
-        # Reset cache fetch count for new user message (new turn)
-        self._reset_cache_fetch_count()
-
-        # Prune history if needed (before preparing messages)
-        self._prune_history_if_needed()
-
-        # Build complete system prompt with context injection merged in
-        # This ensures only ONE system message is created (OpenAI API ignores subsequent system messages)
-        system_prompt = self._get_system_prompt()
-        pending_injection = self._get_pending_context_injection()
-
-        # Check if we should inject cache guidance for follow-up questions (Phase 1)
-        cache_injection = self._get_follow_up_cache_injection(user_message)
-
-        # Merge all injections into system prompt
-        if pending_injection:
-            logger.debug(f"Merging context into system prompt: {len(pending_injection)} chars")
-            logger.debug(f"Context preview: {pending_injection[:500]}...")
-            # Merge context injection into the main system prompt
-            system_prompt = system_prompt + "\n\n---\n\n" + pending_injection
-
-        if cache_injection:
-            logger.debug(f"Injecting cache guidance for follow-up: {len(cache_injection)} chars")
-            system_prompt = system_prompt + "\n\n---\n\n" + cache_injection
-
-        # Prepare messages with complete system prompt (only ONE system message)
-        messages = [{"role": "system", "content": system_prompt}]
-
-        # Add conversation history
-        if self.conversation_history:
-            messages.extend(self.conversation_history)
-
-        # Update budget tracker with current state
-        self._update_budget_tracker(messages)
-        self._log_budget_status()
-
-        # Get available tools
-        tools = self.tool_registry.to_function_definitions()
-
-        # Log message summary before LLM call
-        logger.debug(f"Sending {len(messages)} messages to LLM")
-        for i, msg in enumerate(messages):
-            content_preview = msg["content"][:100] if len(msg["content"]) > 100 else msg["content"]
-            logger.debug(
-                f"Message {i}: role={msg['role']}, length={len(msg['content'])} chars, preview={content_preview}..."
-            )
-
-        # Initialize retry state for this turn
-        retry_state = RetryState()
-        response = None
-
-        # Execute conversation loop with tool calling (non-streaming)
-        iteration = 0
-        max_iterations = self.settings.max_tool_iterations
-        while iteration < max_iterations:
-            iteration += 1
-
-            try:
-                # Get LLM response (non-streaming for tool call handling)
-                llm_result = await self.llm_provider.chat(
-                    messages=messages, tools=tools, stream=False
-                )
-
-                # Type guard: stream=False should always return LLMResponse
-                if not isinstance(llm_result, LLMResponse):
-                    raise OrchestratorError("Expected LLMResponse but got AsyncGenerator")
-
-                response = llm_result
-
-                # Check if LLM wants to use tools
-                if response.has_tool_calls():
-                    # Execute tool calls
-                    tool_results = await self._execute_tool_calls(response.tool_calls)
-
-                    # Track tool calls for retry logic
-                    for tool_call in response.tool_calls:
-                        func_info = tool_call.get("function", {})
-                        retry_state.last_tool_name = func_info.get("name")
-                        try:
-                            args_str = func_info.get("arguments", "{}")
-                            retry_state.last_tool_args = (
-                                json.loads(args_str) if isinstance(args_str, str) else args_str
-                            )
-                        except json.JSONDecodeError:
-                            retry_state.last_tool_args = {}
-
-                    # Add assistant message with tool calls to history
-                    assistant_message: dict[str, Any] = {
-                        "role": "assistant",
-                        "content": response.content or "",
-                        "tool_calls": response.tool_calls,
-                    }
-                    self.conversation_history.append(assistant_message)
-                    messages.append(assistant_message)
-
-                    # Add tool results as separate messages WITH budget tracking
-                    for tool_result in tool_results:
-                        tool_message: dict[str, Any] = {
-                            "role": "tool",
-                            "tool_call_id": tool_result["tool_call_id"],
-                            "content": json.dumps(tool_result["result"]),
-                        }
-                        self.conversation_history.append(tool_message)
-                        messages.append(tool_message)
-
-                        # Log diagnostic information about the tool result being sent to the LLM.
-                        self._log_tool_call_diagnostic(tool_message, tool_result, "_chat_stream")
-
-                        # Track the tool result tokens for mid-loop budget management
-                        result_content = tool_message["content"]
-                        result_tokens = TokenCounter.count_tokens(
-                            result_content, self.settings.current_llm_model
-                        )
-                        self.budget_tracker.add_result_tokens(result_tokens)
-
-                    # After processing all tool results, check budget
-                    needs_prune, remaining = self._check_mid_loop_budget(messages)
-
-                    if needs_prune:
-                        # Attempt emergency pruning
-                        self._emergency_prune_history(messages)
-
-                        # Re-check after pruning
-                        _, remaining_after = self._check_mid_loop_budget(messages)
-
-                        if remaining_after < 0:
-                            # Context still exhausted after pruning - graceful exit
-                            error_msg = (
-                                "I've reached my context limit and cannot continue this conversation. "
-                                "Please use /clear to start a new conversation."
-                            )
-                            self.conversation_history.append(
-                                {"role": "assistant", "content": error_msg}
-                            )
-                            self._notify_context_event(
-                                "error", "Context exhausted - conversation ended"
-                            )
-                            # In streaming mode, yield the error message then exit
-                            yield error_msg
-                            return
-
-                    # Analyze results for retry logic
-                    should_retry, retry_reason = self._analyze_tool_results(
-                        tool_results, retry_state
-                    )
-
-                    if should_retry and retry_state.should_retry(self.settings.max_retry_attempts):
-                        # Record retry metrics
-                        self.metrics.increment("retry_attempts", labels={"reason": retry_reason})
-
-                        # Apply exponential backoff before retry
-                        backoff_delay = self._calculate_backoff_delay(retry_state.attempts)
-                        logger.info(
-                            "Applying exponential backoff before retry (streaming)",
-                            extra={"delay_seconds": backoff_delay, "attempt": retry_state.attempts},
-                        )
-
-                        # Measure time spent in retry logic
-                        with MetricsTimer(
-                            self.metrics,
-                            "retry_backoff_seconds",
-                            labels={"attempt": str(retry_state.attempts)},
-                        ):
-                            await asyncio.sleep(backoff_delay)
-
-                        # Inject retry guidance as system message
-                        retry_prompt = RetryPromptGenerator.generate_retry_prompt(
-                            retry_reason, retry_state
-                        )
-                        retry_message = {"role": "system", "content": retry_prompt}
-                        messages.append(retry_message)
-                        retry_state.record_attempt(
-                            retry_state.last_tool_name or "unknown",
-                            retry_state.last_tool_args or {},
-                            retry_reason,
-                        )
-                        logger.info(
-                            "Injecting retry prompt (streaming)",
-                            extra={
-                                "reason": retry_reason,
-                                "attempt": retry_state.attempts,
-                                "strategies_tried": retry_state.strategies_tried,
-                            },
-                        )
-
-                        # Record successful retry metric
-                        self.metrics.increment(
-                            "retry_prompt_injected", labels={"reason": retry_reason}
-                        )
-
-                    else:
-                        # Retry not triggered or max attempts reached
-                        if should_retry:
-                            # Max attempts reached - record failure
-                            self.metrics.increment(
-                                "retry_max_attempts_reached", labels={"reason": retry_reason}
-                            )
-
-                    # Continue loop - LLM will process tool results
-                    continue
-
-                # No tool calls - check for intent without action
-                if self.settings.intent_detection_enabled and response.content:
-                    detected_intent = IntentDetector.detect_intent(response.content)
-
-                    if detected_intent and detected_intent.confidence >= 0.8:
-                        # Record intent detection hit
-                        self.metrics.increment(
-                            "intent_detection_hits",
-                            labels={
-                                "intent_type": detected_intent.intent_type.value,
-                                "confidence_bucket": self._confidence_bucket(
-                                    detected_intent.confidence
-                                ),
-                            },
-                        )
-
-                        # Agent stated intent but didn't act - prompt to act
-                        if retry_state.should_retry(self.settings.max_retry_attempts):
-                            self.metrics.increment(
-                                "retry_attempts", labels={"reason": "intent_without_action"}
-                            )
-
-                            nudge_message = {
-                                "role": "system",
-                                "content": RetryPromptGenerator.generate_retry_prompt(
-                                    "intent_without_action", retry_state
-                                ),
-                            }
-                            messages.append(nudge_message)
-                            retry_state.record_attempt(
-                                "intent_detection", {}, "intent_without_action"
-                            )
-                            logger.info(
-                                "Detected intent without action, nudging agent (streaming)",
-                                extra={
-                                    "intent_type": detected_intent.intent_type.value,
-                                    "confidence": detected_intent.confidence,
-                                    "attempt": retry_state.attempts,
-                                },
-                            )
-                            continue
-
-                    # Check for premature giving up
-                    if IntentDetector.detect_premature_giving_up(response.content):
-                        if retry_state.empty_result_count > 0 and retry_state.should_retry(
-                            self.settings.max_retry_attempts
-                        ):
-                            # Agent giving up after empty results - encourage retry
-                            nudge_message = {
-                                "role": "system",
-                                "content": RetryPromptGenerator.generate_retry_prompt(
-                                    "empty_logs", retry_state
-                                ),
-                            }
-                            messages.append(nudge_message)
-                            retry_state.record_attempt("giving_up_prevention", {}, "premature_exit")
-                            logger.info(
-                                "Detected premature giving up, encouraging retry (streaming)",
-                                extra={
-                                    "empty_result_count": retry_state.empty_result_count,
-                                    "attempt": retry_state.attempts,
-                                },
-                            )
-                            continue
-
-                # No tool calls and no retry needed - stream the final response
-                if response.content:
-                    self.conversation_history.append(
-                        {"role": "assistant", "content": response.content}
-                    )
-                    # TODO: Real streaming with tool calls is complex. For MVP, we're "simulating" streaming
-                    # by yielding the full response character-by-character. This gives the UI a streaming
-                    # effect but doesn't reduce latency for the first token.
-                    # Post-MVP: Implement true streaming with incremental tool calling.
-                    for char in response.content:
-                        yield char
-                    return
-                else:
-                    error_msg = "Received empty response from LLM"
-                    self.conversation_history.append({"role": "assistant", "content": error_msg})
-                    yield error_msg
-                    return
-
-            except LLMProviderError as e:
-                error_msg = f"LLM provider error: {str(e)}"
-                yield error_msg
-                return
-            except Exception as e:
-                # Log the error for self-direction features but don't fail the request
-                logger.warning(
-                    "Error in self-direction logic (streaming), continuing",
-                    extra={"error": str(e)},
-                    exc_info=True,
-                )
-                error_msg = f"Unexpected error: {str(e)}"
-                yield error_msg
-                return
-
-        # Hit max iterations
-        error_msg = f"Maximum tool iterations ({max_iterations}) exceeded."
-        self.conversation_history.append({"role": "assistant", "content": error_msg})
-        yield error_msg
+        result = await self._run_conversation_loop(user_message)
+        for char in result.content:
+            yield char
 
     async def _execute_tool_calls(self, tool_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """
@@ -2306,16 +2088,6 @@ Do NOT answer based only on preview samples."""
             List of message dictionaries
         """
         return self.conversation_history.copy()
-
-    def get_conversation_history(self) -> list[dict[str, Any]]:
-        """
-        Get a copy of the current conversation history.
-
-        Returns:
-            Copy of conversation history messages (system, user, assistant, tool messages).
-            Returns a copy to prevent external mutation.
-        """
-        return list(self.conversation_history)
 
     def get_full_context_snapshot(self) -> list[dict[str, Any]]:
         """

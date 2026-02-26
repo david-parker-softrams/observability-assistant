@@ -43,14 +43,12 @@ def mock_settings(tmp_path):
 
     # History pruning settings
     settings.enable_history_pruning = True
-    settings.emergency_prune_threshold = 0.95
+    settings.emergency_prune_threshold = 5000  # token count threshold (matches default)
+    settings.context_warning_threshold_pct = 80.0
 
     # Phase 2 orchestrator settings
     settings.orchestrator_retry_delays = "1.0,2.0,4.0"
     settings.orchestrator_retry_delays_list = [1.0, 2.0, 4.0]
-
-    # MCP settings (Phase 1 — disabled by default in tests)
-    settings.use_mcp_tools = False
 
     return settings
 
@@ -112,12 +110,10 @@ def create_mock_settings(**overrides):
     settings.enable_auto_fetch_guidance = True
     settings.cache_sample_event_count = 5  # New setting for sample event count
     settings.enable_history_pruning = True
-    settings.emergency_prune_threshold = 0.95
+    settings.emergency_prune_threshold = 5000  # token count threshold (matches default)
+    settings.context_warning_threshold_pct = 80.0
     settings.orchestrator_retry_delays = "1.0,2.0,4.0"
     settings.orchestrator_retry_delays_list = [1.0, 2.0, 4.0]
-
-    # MCP settings (Phase 1 — disabled by default in tests)
-    settings.use_mcp_tools = False
 
     # Apply overrides
     for key, value in overrides.items():

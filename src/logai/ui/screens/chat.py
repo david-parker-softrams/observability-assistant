@@ -22,7 +22,6 @@ from logai.ui.commands import CommandHandler
 from logai.ui.screens.context_viewer import ContextParser, ContextViewerScreen
 from logai.ui.widgets.input_box import ChatInput
 from logai.ui.widgets.log_groups_sidebar import (
-    ClickableLogGroupItem,
     LogGroupsSidebar,
     SelectableLogGroupItem,
 )
@@ -38,6 +37,7 @@ from logai.ui.widgets.tool_sidebar import ToolCallsSidebar
 
 if TYPE_CHECKING:
     from logai.core.log_group_manager import LogGroupManager
+    from logai.providers.datasources.cloudwatch import CloudWatchDataSource
     from logai.providers.mcp.client import MCPClientManager
     from logai.providers.mcp.sanitization import ResultProcessor
 
@@ -98,6 +98,7 @@ class ChatScreen(Screen[None]):
         log_group_manager: "LogGroupManager | None" = None,
         mcp_client: "MCPClientManager | None" = None,
         result_processor: "ResultProcessor | None" = None,
+        datasource: "CloudWatchDataSource | None" = None,
     ) -> None:
         """
         Initialize chat screen.
@@ -113,6 +114,10 @@ class ChatScreen(Screen[None]):
                 which calls ``mcp_client.stop()`` in ``action_quit``.
             result_processor: Optional MCP result post-processor.  Must be
                 supplied alongside ``mcp_client``.
+            datasource: Optional CloudWatch data source instance.  Used
+                directly by log preview so it works in MCP mode, where the
+                tool registry only holds ``MCPToolAdapter`` instances that
+                carry no ``datasource`` attribute.
         """
         super().__init__()
         self.orchestrator = orchestrator
@@ -120,6 +125,7 @@ class ChatScreen(Screen[None]):
         self.log_group_manager = log_group_manager
         self._mcp_client = mcp_client
         self._result_processor = result_processor
+        self._datasource = datasource
         self.settings = get_settings()
         self.command_handler = CommandHandler(
             orchestrator, cache_manager, self.settings, self, log_group_manager
@@ -239,8 +245,8 @@ class ChatScreen(Screen[None]):
         If startup fails, the error is surfaced as a TUI notification and the
         ``ToolRegistry`` retains whatever tools were registered before the TUI
         launched (i.e. ``fetch_cached_result`` only).  The user can still
-        interact with the app; they'll just see tool-call errors until they
-        restart with ``--no-mcp``.
+         interact with the app; they'll just see tool-call errors until they
+         restart and verify MCP is reachable.
         """
         assert self._mcp_client is not None  # guarded by caller
         assert self._result_processor is not None
@@ -288,12 +294,11 @@ class ChatScreen(Screen[None]):
             except Exception as ui_exc:
                 logger.warning("Failed to re-enable chat input after MCP failure: %s", ui_exc)
 
-            self.notify(
-                f"MCP server failed to start ({type(exc).__name__}). "
-                "See log file for details. Restart with --no-mcp to use native tools.",
-                severity="error",
-                timeout=10,
-            )
+                self.notify(
+                    f"MCP server failed to start ({type(exc).__name__}). See log file for details.",
+                    severity="error",
+                    timeout=10,
+                )
 
     @on(Input.Submitted)
     async def on_input_submitted(self, event: Input.Submitted) -> None:
@@ -418,12 +423,10 @@ class ChatScreen(Screen[None]):
         finally:
             self._current_assistant_message = None
 
-    @on(ClickableLogGroupItem.LogGroupPreviewRequested)
     @on(SelectableLogGroupItem.LogGroupPreviewRequested)
     async def on_log_group_preview_requested(
         self,
-        event: ClickableLogGroupItem.LogGroupPreviewRequested
-        | SelectableLogGroupItem.LogGroupPreviewRequested,
+        event: SelectableLogGroupItem.LogGroupPreviewRequested,
     ) -> None:
         """
         Handle request to preview logs from a log group.
@@ -432,19 +435,20 @@ class ChatScreen(Screen[None]):
             event: Preview request event with log group name
         """
         try:
-            # Get datasource from tool registry via orchestrator
-            # The tools are registered with datasource instances
-            tool = self.orchestrator.tool_registry.get("list_log_groups")
-            if tool is None or not hasattr(tool, "datasource"):
+            # Use the datasource threaded in at construction time.
+            # In MCP mode the tool registry only holds MCPToolAdapter instances
+            # which have no datasource attribute, so we bypass the registry
+            # entirely and rely on the instance passed down from cli.py.
+            if self._datasource is None:
                 self.notify(
-                    "Preview feature not available - datasource not found",
-                    severity="error",
-                    timeout=5,
+                    "Log preview requires direct AWS access (not available in this mode).",
+                    severity="warning",
+                    timeout=6,
                 )
-                logger.error("Could not access datasource from tool registry")
+                logger.warning("Log preview requested but no datasource available")
                 return
 
-            datasource = tool.datasource
+            datasource = self._datasource
 
             # Import LogPreviewScreen here to avoid circular imports
             from logai.ui.screens.log_preview import LogPreviewScreen
@@ -487,7 +491,7 @@ class ChatScreen(Screen[None]):
         """
         try:
             # Get current staged context from orchestrator
-            staged_context = self.orchestrator._pending_context_injection
+            staged_context = self.orchestrator.pending_context_injection
 
             # Get full context snapshot from orchestrator (includes system prompt)
             conversation_history = self.orchestrator.get_full_context_snapshot()

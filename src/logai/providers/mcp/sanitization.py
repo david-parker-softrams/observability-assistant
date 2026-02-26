@@ -16,7 +16,6 @@ from __future__ import annotations
 import logging
 from typing import Any, cast
 
-from logai.cache.manager import CacheManager
 from logai.core.sanitizer import LogSanitizer
 
 logger = logging.getLogger(__name__)
@@ -38,12 +37,6 @@ _TOOL_STRATEGIES: dict[str, str] = {
     # Log group discovery — metadata, no PII in log events
     "describe_log_groups": _STRATEGY_PASSTHROUGH,
     # Anomaly / pattern analysis — may include log samples
-    # TODO: Verify sanitization coverage for analyze_log_group.  The AWS CloudWatch
-    #       MCP server returns anomaly/pattern data under "anomalies" or "patterns" keys
-    #       rather than the "results" or "events" keys handled by _apply_sanitization().
-    #       Until the actual response schema is confirmed and format handlers are added,
-    #       PII in analyze_log_group results may not be redacted.  Track this before
-    #       enabling this tool in a production environment.
     "analyze_log_group": _STRATEGY_SANITIZE,
     # Metrics tools — numeric data, no log events
     "get_metric_data": _STRATEGY_PASSTHROUGH,
@@ -61,8 +54,7 @@ class ResultProcessor:
     Post-processing pipeline for MCP tool results.
 
     Applies sanitization and format normalisation to raw MCP server responses
-    before they reach the LLM.  Caching support is reserved for future use —
-    ``CacheManager`` is accepted but not yet applied (see design §5.3).
+    before they reach the LLM.
 
     Sanitization is skipped gracefully when:
     - No ``LogSanitizer`` was supplied.
@@ -73,7 +65,6 @@ class ResultProcessor:
     def __init__(
         self,
         sanitizer: LogSanitizer | None = None,
-        cache: CacheManager | None = None,
     ) -> None:
         """
         Initialise the result processor.
@@ -82,11 +73,8 @@ class ResultProcessor:
             sanitizer: Optional ``LogSanitizer`` instance.  When ``None`` or
                        when ``sanitizer.enabled`` is ``False``, no sanitization
                        is applied.
-            cache: Optional ``CacheManager``.  Reserved for future query-level
-                   caching of MCP results (Phase 2 work).
         """
         self._sanitizer = sanitizer
-        self._cache = cache  # TODO: apply query-level caching of MCP results (design §5.3)
 
     # ------------------------------------------------------------------
     # Public API
@@ -136,7 +124,7 @@ class ResultProcessor:
         """
         Apply PII sanitization to log-containing result dicts.
 
-        Handles two result formats:
+        Handles four result formats:
 
         **Insights format** (``get_logs_insight_query_results``)::
 
@@ -147,7 +135,7 @@ class ResultProcessor:
                 ]
             }
 
-        **Events format** (``analyze_log_group`` samples, native tools)::
+        **Events format** (native tools)::
 
             {
                 "events": [
@@ -156,7 +144,25 @@ class ResultProcessor:
                 ]
             }
 
-        Both formats are sanitized in-place (on a shallow copy of the result
+        **Anomalies format** (``analyze_log_group``)::
+
+            {
+                "anomalies": [
+                    {"description": "...", "logSamples": [...], ...},
+                    ...
+                ]
+            }
+
+        **Patterns format** (``analyze_log_group``)::
+
+            {
+                "patterns": [
+                    {"patternString": "...", "logSamples": [...], ...},
+                    ...
+                ]
+            }
+
+        All formats are sanitized in-place (on a shallow copy of the result
         dict) and a ``"sanitization"`` summary dict is injected.
 
         Args:
@@ -205,6 +211,54 @@ class ResultProcessor:
             result["events"] = sanitized_events
             for pattern_name, count in event_redactions.items():
                 all_redactions[pattern_name] = all_redactions.get(pattern_name, 0) + count
+            any_sanitized = True
+
+        # ---- Anomalies format: list of anomaly dicts from analyze_log_group ----
+        # Each anomaly may carry a "logSamples" list (sanitized via sanitize_log_events)
+        # and a "description" string (sanitized via sanitize).
+        anomalies: list[dict[str, Any]] = result.get("anomalies", [])
+        if anomalies and isinstance(anomalies, list):
+            sanitized_anomalies: list[dict[str, Any]] = []
+            for anomaly in anomalies:
+                sanitized_anomaly = dict(anomaly)
+                if isinstance(sanitized_anomaly.get("logSamples"), list):
+                    sanitized_samples, sample_redactions = self._sanitizer.sanitize_log_events(  # type: ignore[union-attr]
+                        sanitized_anomaly["logSamples"]
+                    )
+                    sanitized_anomaly["logSamples"] = sanitized_samples
+                    for pattern_name, count in sample_redactions.items():
+                        all_redactions[pattern_name] = all_redactions.get(pattern_name, 0) + count
+                if isinstance(sanitized_anomaly.get("description"), str):
+                    san = self._sanitizer.sanitize(sanitized_anomaly["description"])  # type: ignore[union-attr]
+                    sanitized_anomaly["description"] = san.sanitized_text
+                    for pattern_name, count in san.redactions.items():
+                        all_redactions[pattern_name] = all_redactions.get(pattern_name, 0) + count
+                sanitized_anomalies.append(sanitized_anomaly)
+            result["anomalies"] = sanitized_anomalies
+            any_sanitized = True
+
+        # ---- Patterns format: list of pattern dicts from analyze_log_group ----
+        # Each pattern may carry a "logSamples" list (sanitized via sanitize_log_events)
+        # and a "patternString" string (sanitized via sanitize).
+        patterns: list[dict[str, Any]] = result.get("patterns", [])
+        if patterns and isinstance(patterns, list):
+            sanitized_patterns: list[dict[str, Any]] = []
+            for pattern in patterns:
+                sanitized_pattern = dict(pattern)
+                if isinstance(sanitized_pattern.get("logSamples"), list):
+                    sanitized_samples, sample_redactions = self._sanitizer.sanitize_log_events(  # type: ignore[union-attr]
+                        sanitized_pattern["logSamples"]
+                    )
+                    sanitized_pattern["logSamples"] = sanitized_samples
+                    for pattern_name, count in sample_redactions.items():
+                        all_redactions[pattern_name] = all_redactions.get(pattern_name, 0) + count
+                if isinstance(sanitized_pattern.get("patternString"), str):
+                    san = self._sanitizer.sanitize(sanitized_pattern["patternString"])  # type: ignore[union-attr]
+                    sanitized_pattern["patternString"] = san.sanitized_text
+                    for pattern_name, count in san.redactions.items():
+                        all_redactions[pattern_name] = all_redactions.get(pattern_name, 0) + count
+                sanitized_patterns.append(sanitized_pattern)
+            result["patterns"] = sanitized_patterns
             any_sanitized = True
 
         # Write the sanitization summary once, with merged redaction counts.

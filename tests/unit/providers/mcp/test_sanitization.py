@@ -222,3 +222,201 @@ class TestResultProcessorNonDictInput:
         result = await processor.process("describe_log_groups", ["unexpected", "list"])
 
         assert "raw_text" in result
+
+
+# ---------------------------------------------------------------------------
+# analyze_log_group anomalies/patterns sanitization tests (SM-4)
+# ---------------------------------------------------------------------------
+
+
+class TestResultProcessorAnalyzeLogGroupSanitization:
+    """Tests for sanitization of analyze_log_group anomalies and patterns results.
+
+    Covers the two new response formats added in SM-4:
+    - ``"anomalies"`` — list of anomaly dicts, each with optional ``logSamples``
+      (list of ``{timestamp, message}``) and ``description`` (free-text string).
+    - ``"patterns"`` — list of pattern dicts, each with optional ``logSamples``
+      and ``patternString`` (free-text string).
+    """
+
+    # ------------------------------------------------------------------ #
+    # anomalies — logSamples                                               #
+    # ------------------------------------------------------------------ #
+
+    @pytest.mark.asyncio
+    async def test_anomalies_log_samples_sanitized(
+        self, processor: ResultProcessor, enabled_sanitizer: MagicMock
+    ) -> None:
+        """logSamples inside anomalies are passed through sanitize_log_events()."""
+        log_samples = [
+            {"timestamp": "2024-01-01T00:00:00Z", "message": "User secret logged in"},
+            {"timestamp": "2024-01-01T00:01:00Z", "message": "Normal event"},
+        ]
+        raw = {
+            "anomalies": [
+                {"id": "anom-1", "logSamples": log_samples},
+            ]
+        }
+
+        result = await processor.process("analyze_log_group", raw)
+
+        # sanitize_log_events must have been called with the samples list
+        enabled_sanitizer.sanitize_log_events.assert_called_once_with(log_samples)
+        # The message containing "secret" must be redacted in the output
+        sanitized_samples = result["anomalies"][0]["logSamples"]
+        messages = [s["message"] for s in sanitized_samples]
+        assert any("[REDACTED]" in m for m in messages)
+        # Sanitization metadata injected
+        assert result["sanitization"]["enabled"] is True
+
+    # ------------------------------------------------------------------ #
+    # anomalies — description                                              #
+    # ------------------------------------------------------------------ #
+
+    @pytest.mark.asyncio
+    async def test_anomalies_description_sanitized(
+        self, processor: ResultProcessor, enabled_sanitizer: MagicMock
+    ) -> None:
+        """description strings inside anomalies are passed through sanitize()."""
+        raw = {
+            "anomalies": [
+                {
+                    "id": "anom-2",
+                    "description": "Anomaly detected: secret token exposed in logs",
+                }
+            ]
+        }
+
+        result = await processor.process("analyze_log_group", raw)
+
+        # sanitize() must have been called for the description
+        enabled_sanitizer.sanitize.assert_called_once()
+        sanitized_description = result["anomalies"][0]["description"]
+        assert "[REDACTED]" in sanitized_description
+        assert result["sanitization"]["enabled"] is True
+
+    # ------------------------------------------------------------------ #
+    # patterns — logSamples                                                #
+    # ------------------------------------------------------------------ #
+
+    @pytest.mark.asyncio
+    async def test_patterns_log_samples_sanitized(
+        self, processor: ResultProcessor, enabled_sanitizer: MagicMock
+    ) -> None:
+        """logSamples inside patterns are passed through sanitize_log_events()."""
+        log_samples = [
+            {"timestamp": "2024-01-01T00:00:00Z", "message": "Auth failed for secret user"},
+        ]
+        raw = {
+            "patterns": [
+                {"patternId": "pat-1", "logSamples": log_samples},
+            ]
+        }
+
+        result = await processor.process("analyze_log_group", raw)
+
+        enabled_sanitizer.sanitize_log_events.assert_called_once_with(log_samples)
+        sanitized_samples = result["patterns"][0]["logSamples"]
+        assert "[REDACTED]" in sanitized_samples[0]["message"]
+        assert result["sanitization"]["enabled"] is True
+
+    # ------------------------------------------------------------------ #
+    # patterns — patternString                                             #
+    # ------------------------------------------------------------------ #
+
+    @pytest.mark.asyncio
+    async def test_patterns_pattern_string_sanitized(
+        self, processor: ResultProcessor, enabled_sanitizer: MagicMock
+    ) -> None:
+        """patternString inside patterns is passed through sanitize()."""
+        raw = {
+            "patterns": [
+                {
+                    "patternId": "pat-2",
+                    "patternString": "LOGIN secret=<VAR> host=<VAR>",
+                }
+            ]
+        }
+
+        result = await processor.process("analyze_log_group", raw)
+
+        enabled_sanitizer.sanitize.assert_called_once()
+        sanitized_string = result["patterns"][0]["patternString"]
+        assert "[REDACTED]" in sanitized_string
+        assert result["sanitization"]["enabled"] is True
+
+    # ------------------------------------------------------------------ #
+    # Both anomalies and patterns present in the same response             #
+    # ------------------------------------------------------------------ #
+
+    @pytest.mark.asyncio
+    async def test_anomalies_and_patterns_both_sanitized(
+        self, processor: ResultProcessor, enabled_sanitizer: MagicMock
+    ) -> None:
+        """When a response contains both anomalies and patterns, both are sanitized."""
+        raw = {
+            "anomalies": [
+                {"id": "anom-1", "description": "Detected secret in anomaly"},
+            ],
+            "patterns": [
+                {"patternId": "pat-1", "patternString": "pattern with secret value"},
+            ],
+        }
+
+        result = await processor.process("analyze_log_group", raw)
+
+        # sanitize() must have been called twice — once for each free-text field
+        assert enabled_sanitizer.sanitize.call_count == 2
+        assert "[REDACTED]" in result["anomalies"][0]["description"]
+        assert "[REDACTED]" in result["patterns"][0]["patternString"]
+        # A single sanitization metadata block is written with merged counts
+        assert result["sanitization"]["enabled"] is True
+        assert result["sanitization"]["redactions"].get("generic", 0) == 2
+
+    # ------------------------------------------------------------------ #
+    # Empty lists — no crash                                               #
+    # ------------------------------------------------------------------ #
+
+    @pytest.mark.asyncio
+    async def test_empty_anomalies_and_patterns_no_error(
+        self, processor: ResultProcessor, enabled_sanitizer: MagicMock
+    ) -> None:
+        """Empty anomalies/patterns lists cause no crash and result passes through unchanged."""
+        raw: dict = {"anomalies": [], "patterns": []}
+
+        result = await processor.process("analyze_log_group", raw)
+
+        # Empty lists are falsy — sanitize_log_events and sanitize must NOT be called
+        enabled_sanitizer.sanitize_log_events.assert_not_called()
+        enabled_sanitizer.sanitize.assert_not_called()
+        # Empty lists are preserved in the output
+        assert result["anomalies"] == []
+        assert result["patterns"] == []
+        # No sanitization block because nothing was sanitized
+        assert "sanitization" not in result
+
+    # ------------------------------------------------------------------ #
+    # Anomaly dict missing logSamples key — no KeyError                   #
+    # ------------------------------------------------------------------ #
+
+    @pytest.mark.asyncio
+    async def test_anomaly_without_log_samples_no_error(
+        self, processor: ResultProcessor, enabled_sanitizer: MagicMock
+    ) -> None:
+        """An anomaly dict that has no logSamples key does not raise a KeyError."""
+        raw = {
+            "anomalies": [
+                # No "logSamples" key at all — must be handled gracefully
+                {"id": "anom-3", "severity": "HIGH"},
+            ]
+        }
+
+        result = await processor.process("analyze_log_group", raw)
+
+        # sanitize_log_events must NOT be called (no logSamples to process)
+        enabled_sanitizer.sanitize_log_events.assert_not_called()
+        # The anomaly dict is preserved intact
+        assert result["anomalies"][0]["id"] == "anom-3"
+        assert result["anomalies"][0]["severity"] == "HIGH"
+        # Sanitization block is still written because anomalies list was non-empty
+        assert result["sanitization"]["enabled"] is True

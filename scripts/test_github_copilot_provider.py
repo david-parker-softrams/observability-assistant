@@ -33,14 +33,14 @@ async def test_authentication():
         return False
 
 
-async def test_model_fetching():
+def test_model_fetching():
     """Test 2: Fetch available models."""
     print("\n" + "=" * 60)
     print("TEST 2: Model List Fetching")
     print("=" * 60)
 
     try:
-        models = await get_available_models()
+        models = get_available_models()
         print(f"✓ Found {len(models)} models")
         print(f"  Sample models: {', '.join(models[:5])}...")
         return True
@@ -225,8 +225,8 @@ async def main():
         print("\n⚠️  Cannot proceed without authentication. Run 'logai auth login'.")
         return
 
-    # Test 2: Model fetching
-    results.append(("Model Fetching", await test_model_fetching()))
+    # Test 2: Model fetching (synchronous — get_available_models() is not async)
+    results.append(("Model Fetching", test_model_fetching()))
 
     # Test 3: Basic chat
     results.append(("Basic Chat", await test_basic_chat()))

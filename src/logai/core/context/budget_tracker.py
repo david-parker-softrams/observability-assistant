@@ -442,7 +442,5 @@ class ContextBudgetTracker:
 
         if pct >= 90:
             return f"Context: {pct:.0f}% (!)"
-        elif pct >= 70:
-            return f"Context: {pct:.0f}%"
         else:
             return f"Context: {pct:.0f}%"
