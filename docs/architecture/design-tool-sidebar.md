@@ -746,7 +746,7 @@ class ToolCallsSidebar(Static):
         }
         return icons.get(status, "?")
 
-    def _format_args(self, args: dict, max_len: int = 40) -> str:
+    def _format_args(self, args: dict) -> str:
         """Format arguments for display."""
         if not args:
             return "{}"

@@ -144,3 +144,9 @@ cython_debug/
 *.db
 *.db-journal
 cache/
+
+# Developer scratch directories
+george-scratch/
+
+# Ad-hoc output files
+verification_output.txt

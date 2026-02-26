@@ -423,6 +423,13 @@ class LogAISettings(BaseSettings):
         le=20000,
     )
 
+    context_warning_threshold_pct: float = Field(
+        default=80.0,
+        description="Percentage of context budget used before a warning is issued (0-100).",
+        ge=0.0,
+        le=100.0,
+    )
+
     # === Result Handling ===
     enable_result_caching: bool = Field(
         default=True,
@@ -500,14 +507,6 @@ class LogAISettings(BaseSettings):
     )
 
     # === MCP (Model Context Protocol) Configuration ===
-    use_mcp_tools: bool = Field(
-        default=True,
-        description=(
-            "Use MCP server for CloudWatch tools instead of native boto3 tools. "
-            "Defaults to True as of Phase 3 — set to False (or use --no-mcp) to "
-            "fall back to the legacy native boto3 tools."
-        ),
-    )
     mcp_server_command: str = Field(
         default="uvx",
         description="Command used to launch the MCP server subprocess",

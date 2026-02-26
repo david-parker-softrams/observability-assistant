@@ -239,8 +239,8 @@ class ChatScreen(Screen[None]):
         If startup fails, the error is surfaced as a TUI notification and the
         ``ToolRegistry`` retains whatever tools were registered before the TUI
         launched (i.e. ``fetch_cached_result`` only).  The user can still
-        interact with the app; they'll just see tool-call errors until they
-        restart with ``--no-mcp``.
+         interact with the app; they'll just see tool-call errors until they
+         restart and verify MCP is reachable.
         """
         assert self._mcp_client is not None  # guarded by caller
         assert self._result_processor is not None
@@ -288,12 +288,11 @@ class ChatScreen(Screen[None]):
             except Exception as ui_exc:
                 logger.warning("Failed to re-enable chat input after MCP failure: %s", ui_exc)
 
-            self.notify(
-                f"MCP server failed to start ({type(exc).__name__}). "
-                "See log file for details. Restart with --no-mcp to use native tools.",
-                severity="error",
-                timeout=10,
-            )
+                self.notify(
+                    f"MCP server failed to start ({type(exc).__name__}). See log file for details.",
+                    severity="error",
+                    timeout=10,
+                )
 
     @on(Input.Submitted)
     async def on_input_submitted(self, event: Input.Submitted) -> None:

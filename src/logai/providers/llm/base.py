@@ -90,7 +90,7 @@ class BaseLLMProvider(ABC):
         """
         # This is an async generator, must yield
         if False:  # pragma: no cover
-            yield
+            yield  # Required: makes Python treat this abstract method as an async generator
 
 
 class LLMProviderError(Exception):

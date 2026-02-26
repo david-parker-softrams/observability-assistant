@@ -7,7 +7,6 @@ import os
 import shutil
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from logai import __version__
 from logai.cache.manager import CacheManager
@@ -19,9 +18,6 @@ from logai.core.tools.registry import ToolRegistry
 from logai.providers.datasources.cloudwatch import CloudWatchDataSource
 from logai.providers.llm.litellm_provider import LiteLLMProvider
 from logai.ui.app import LogAIApp
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -253,28 +249,6 @@ For more information, visit: https://github.com/logai/logai
         type=str,
         default=None,
         help="Path to log file (default: ~/.logai/logs/logai.log)",
-    )
-
-    parser.add_argument(
-        "--use-mcp",
-        action="store_true",
-        default=False,
-        help=(
-            "Use the AWS CloudWatch MCP server for CloudWatch tools (now the default). "
-            "This flag is a no-op when LOGAI_USE_MCP_TOOLS=true (the default). "
-            "Requires 'uvx' (from the 'uv' package manager) to be on PATH. "
-            "Falls back to native boto3 tools automatically if 'uvx' is not found."
-        ),
-    )
-
-    parser.add_argument(
-        "--no-mcp",
-        action="store_true",
-        default=False,
-        help=(
-            "Disable the MCP server and use the legacy native boto3 CloudWatch tools instead. "
-            "Useful if 'uvx' is unavailable or for troubleshooting MCP connectivity issues."
-        ),
     )
 
     parser.add_argument(
@@ -516,31 +490,23 @@ def _run_app(settings: LogAISettings) -> int:
         )
 
         # ----------------------------------------------------------------
-        # Tool registration — MCP path or native path
+        # Tool registration — MCP path (the only supported mode)
         # ----------------------------------------------------------------
-        # MCP tools (when enabled) are NOT registered here.  Registration
-        # requires an active MCP subprocess, which must be started inside
-        # Textual's event loop.  An unstarted MCPClientManager is passed to
-        # LogAIApp, which starts it in ChatScreen.on_mount via a @work worker.
-        mcp_client = None
-        result_processor = None
+        # MCP tools are NOT registered here.  Registration requires an active
+        # MCP subprocess, which must be started inside Textual's event loop.
+        # An unstarted MCPClientManager is passed to LogAIApp, which starts it
+        # in ChatScreen.on_mount via a @work worker.
+        from logai.providers.mcp.client import MCPClientManager
+        from logai.providers.mcp.sanitization import ResultProcessor
 
-        if settings.use_mcp_tools:
-            # --- MCP path: build the client/processor but do NOT start ---
-            from logai.providers.mcp.client import MCPClientManager
-            from logai.providers.mcp.sanitization import ResultProcessor
-
-            mcp_env = build_mcp_env(settings)
-            mcp_client = MCPClientManager(
-                command=settings.mcp_server_command,
-                args=settings.mcp_server_args,
-                env=mcp_env,
-                log_file_path=str(settings.log_file) if settings.log_file is not None else None,
-            )
-            result_processor = ResultProcessor(sanitizer=sanitizer, cache=cache_manager)
-        else:
-            # --- Native path (--no-mcp or MCP unavailable): register immediately ---
-            _register_native_cloudwatch_tools(datasource, sanitizer, settings, cache_manager)
+        mcp_env = build_mcp_env(settings)
+        mcp_client = MCPClientManager(
+            command=settings.mcp_server_command,
+            args=settings.mcp_server_args,
+            env=mcp_env,
+            log_file_path=str(settings.log_file) if settings.log_file is not None else None,
+        )
+        result_processor = ResultProcessor(sanitizer=sanitizer, cache=cache_manager)
 
         # FetchCachedResultTool is always registered natively — it is application-
         # specific and has no MCP equivalent (design §4.4).
@@ -609,37 +575,6 @@ def _run_app(settings: LogAISettings) -> int:
         return 1
 
 
-def _register_native_cloudwatch_tools(
-    datasource: CloudWatchDataSource,
-    sanitizer: LogSanitizer,
-    settings: LogAISettings,
-    cache_manager: CacheManager,
-) -> None:
-    """
-    Register the native boto3-based CloudWatch tools in the ``ToolRegistry``.
-
-    .. deprecated::
-        The native boto3 tools are deprecated as of Phase 3 of the MCP migration.
-        MCP tools are now the default path. This function is retained only as the
-        fallback registered when MCP startup fails or when ``--no-mcp`` is passed.
-        It will be removed in a future release once the MCP path is fully proven.
-
-    Extracted into a helper so it can be called from both the ``--no-mcp`` path
-    and the MCP startup-failure fallback path without code duplication.
-
-    Args:
-        datasource: CloudWatch data source.
-        sanitizer: PII sanitizer.
-        settings: Application settings.
-        cache_manager: Query-level cache.
-    """
-    from logai.core.tools.cloudwatch_tools import FetchLogsTool, ListLogGroupsTool, SearchLogsTool
-
-    ToolRegistry.register(ListLogGroupsTool(datasource, settings, cache=cache_manager))
-    ToolRegistry.register(FetchLogsTool(datasource, sanitizer, settings, cache=cache_manager))
-    ToolRegistry.register(SearchLogsTool(datasource, sanitizer, settings, cache=cache_manager))
-
-
 def main() -> int:
     """Main CLI entry point."""
     parser = _build_parser()
@@ -692,15 +627,6 @@ def main() -> int:
         if args.aws_region is not None:
             settings.aws_region = args.aws_region
 
-        # Apply MCP mode flags to settings (CLI takes precedence over env/default).
-        # --no-mcp explicitly opts out; --use-mcp explicitly opts in.
-        if args.no_mcp:
-            settings.use_mcp_tools = False
-        elif args.use_mcp:
-            settings.use_mcp_tools = True
-        # If neither flag is given, settings.use_mcp_tools retains its value from
-        # the environment variable or the default (True as of Phase 3).
-
         # Override Ollama context window if explicitly provided via CLI.
         if args.ollama_num_ctx is not None:
             settings.ollama_num_ctx = args.ollama_num_ctx
@@ -722,23 +648,22 @@ def main() -> int:
         print(f"❌ Unexpected Error: {e}", file=sys.stderr)
         return 1
 
-    # Pre-flight check: if MCP is enabled, verify that the 'uvx' launcher is available.
-    # If not, fall back to native tools with a clear warning.
-    if settings.use_mcp_tools:
-        if not shutil.which(settings.mcp_server_command):
-            print(
-                f"⚠ MCP tools enabled but '{settings.mcp_server_command}' not found on PATH.",
-                file=sys.stderr,
-            )
-            print(
-                "  Install uv: curl -LsSf https://astral.sh/uv/install.sh | sh",
-                file=sys.stderr,
-            )
-            print(
-                "  Falling back to native CloudWatch tools (use --no-mcp to suppress this warning).",
-                file=sys.stderr,
-            )
-            settings.use_mcp_tools = False
+    # Pre-flight check: verify that the MCP launcher ('uvx') is available.
+    # MCP is the only supported tool mode; hard-exit if the launcher is missing.
+    if not shutil.which(settings.mcp_server_command):
+        print(
+            f"❌ '{settings.mcp_server_command}' not found on PATH.",
+            file=sys.stderr,
+        )
+        print(
+            "  LogAI requires 'uvx' to launch the AWS CloudWatch MCP server.",
+            file=sys.stderr,
+        )
+        print(
+            "  Install uv: curl -LsSf https://astral.sh/uv/install.sh | sh",
+            file=sys.stderr,
+        )
+        return 1
 
     # Print configuration summary
     print(f"LogAI v{__version__}")
@@ -756,12 +681,7 @@ def main() -> int:
 
     print(f"✓ PII Sanitization: {'Enabled' if settings.pii_sanitization_enabled else 'Disabled'}")
     print(f"✓ Cache Directory: {settings.cache_dir}")
-    if settings.use_mcp_tools:
-        print(
-            f"✓ Tool Mode: MCP ({settings.mcp_server_command} {' '.join(settings.mcp_server_args)})"
-        )
-    else:
-        print("✓ Tool Mode: Native boto3 (legacy — use --use-mcp to enable MCP)")
+    print(f"✓ Tool Mode: MCP ({settings.mcp_server_command} {' '.join(settings.mcp_server_args)})")
     print("\nInitializing components...")
 
     return _run_app(settings)

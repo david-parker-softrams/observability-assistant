@@ -6,7 +6,7 @@ import pytest
 from logai.config.settings import LogAISettings
 from logai.core.orchestrator import LLMOrchestrator
 from logai.core.sanitizer import LogSanitizer
-from logai.core.tools.cloudwatch_tools import FetchLogsTool, ListLogGroupsTool
+from logai.core.tools.base import BaseTool
 from logai.core.tools.registry import ToolRegistry
 from logai.providers.datasources.cloudwatch import CloudWatchDataSource
 from logai.providers.llm.base import LLMResponse
@@ -38,7 +38,8 @@ def mock_settings(tmp_path):
     settings.enable_auto_fetch_guidance = True
     settings.cache_sample_event_count = 5  # New setting for sample event count
     settings.enable_history_pruning = True
-    settings.emergency_prune_threshold = 0.95
+    settings.emergency_prune_threshold = 5000  # token count threshold (matches default)
+    settings.context_warning_threshold_pct = 80.0
     settings.orchestrator_retry_delays = "1.0,2.0,4.0"
     settings.orchestrator_retry_delays_list = [1.0, 2.0, 4.0]
     settings.tool_list_log_groups_default_limit = 50
@@ -46,10 +47,37 @@ def mock_settings(tmp_path):
     settings.tool_fetch_logs_default_limit = 100
     settings.tool_fetch_logs_max_limit = 1000
 
-    # MCP settings (Phase 1 — disabled by default in tests)
-    settings.use_mcp_tools = False
-
     return settings
+
+
+def _make_stub_tool(tool_name: str) -> BaseTool:
+    """Return a minimal concrete BaseTool stub with the given name.
+
+    Using a concrete subclass (rather than Mock) ensures the tool passes
+    ToolRegistry's ``isinstance(tool, BaseTool)`` checks and exercises the
+    real registry/orchestrator integration paths.  The ``execute`` method
+    is replaced with an ``AsyncMock`` so tests can configure return values.
+    """
+
+    class _StubTool(BaseTool):
+        @property
+        def name(self) -> str:  # type: ignore[override]
+            return tool_name
+
+        @property
+        def description(self) -> str:  # type: ignore[override]
+            return f"Stub tool: {tool_name}"
+
+        @property
+        def parameters(self) -> dict:  # type: ignore[override]
+            return {"type": "object", "properties": {}, "required": []}
+
+        async def execute(self, **kwargs):  # type: ignore[override]
+            return {}  # pragma: no cover — overridden per-test via mock
+
+    stub = _StubTool()
+    stub.execute = AsyncMock(return_value={})  # type: ignore[method-assign]
+    return stub
 
 
 @pytest.fixture
@@ -58,18 +86,32 @@ def setup_tools():
     # Clear registry before test
     ToolRegistry.clear()
 
-    # Create mock datasource
+    # Create mock datasource and sanitizer (kept for test assertions)
     datasource = AsyncMock(spec=CloudWatchDataSource)
     sanitizer = LogSanitizer(enabled=True)
-    settings = Mock(spec=LogAISettings)
-    settings.tool_list_log_groups_default_limit = 50
-    settings.tool_list_log_groups_max_limit = 100
-    settings.tool_fetch_logs_default_limit = 100
-    settings.tool_fetch_logs_max_limit = 1000
 
-    # Register tools
-    list_tool = ListLogGroupsTool(datasource=datasource, settings=settings)
-    fetch_tool = FetchLogsTool(datasource=datasource, sanitizer=sanitizer, settings=settings)
+    # Register lightweight stub tools that mirror the names used in the test
+    # LLM responses.  The concrete BaseTool subclass avoids importing the
+    # deleted native cloudwatch_tools module.
+    list_tool = _make_stub_tool("list_log_groups")
+    fetch_tool = _make_stub_tool("fetch_logs")
+
+    # Wire stub execute to the datasource mocks so existing test assertions
+    # (datasource.list_log_groups.called / datasource.fetch_logs.called) still work.
+    # The orchestrator's _analyze_tool_results expects each tool result to be a
+    # dict of the form {"success": True, ...}, so we wrap the datasource responses
+    # in that structure.  Use async side_effect functions (not lambdas) so the
+    # coroutines from the underlying AsyncMocks are properly awaited.
+    async def _list_execute(**kw):
+        raw = await datasource.list_log_groups(**kw)
+        return {"success": True, "log_groups": raw}
+
+    async def _fetch_execute(**kw):
+        raw = await datasource.fetch_logs(**kw)
+        return {"success": True, "events": raw}
+
+    list_tool.execute = AsyncMock(side_effect=_list_execute)  # type: ignore[method-assign]
+    fetch_tool.execute = AsyncMock(side_effect=_fetch_execute)  # type: ignore[method-assign]
 
     ToolRegistry.register(list_tool)
     ToolRegistry.register(fetch_tool)

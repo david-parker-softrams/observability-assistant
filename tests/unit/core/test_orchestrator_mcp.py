@@ -1,8 +1,8 @@
 """Unit tests for MCP-related behaviour in LLMOrchestrator._get_system_prompt().
 
-Verifies that MCP guidance strings are injected when ``use_mcp_tools=True`` and
-absent when ``use_mcp_tools=False``.  The orchestrator fixture pattern mirrors
-``tests/unit/test_orchestrator.py``; only the ``use_mcp_tools`` toggle differs.
+Verifies that MCP guidance strings are always present (MCP is now the only
+supported tool mode).  The orchestrator fixture pattern mirrors
+``tests/unit/test_orchestrator.py``.
 """
 
 from pathlib import Path
@@ -41,10 +41,10 @@ def _make_settings(**overrides) -> Mock:
     settings.enable_auto_fetch_guidance = True
     settings.cache_sample_event_count = 5
     settings.enable_history_pruning = True
-    settings.emergency_prune_threshold = 0.95
+    settings.emergency_prune_threshold = 5000  # token count threshold (matches default)
+    settings.context_warning_threshold_pct = 80.0
     settings.orchestrator_retry_delays = "1.0,2.0,4.0"
     settings.orchestrator_retry_delays_list = [1.0, 2.0, 4.0]
-    settings.use_mcp_tools = False  # safe default; individual tests override this
 
     for key, value in overrides.items():
         setattr(settings, key, value)
@@ -95,60 +95,36 @@ def _make_orchestrator(mock_llm_provider, mock_tool_registry, mock_sanitizer, **
 class TestGetSystemPromptMcpGuidance:
     """Tests for the MCP guidance block injected by ``_get_system_prompt()``."""
 
-    def test_mcp_guidance_present_when_use_mcp_tools_true(
+    def test_mcp_guidance_always_present(
         self,
         mock_llm_provider,
         mock_tool_registry,
         mock_sanitizer,
     ) -> None:
-        """When use_mcp_tools=True, the system prompt must include all three MCP tool names.
+        """The system prompt must always include all three MCP tool names.
 
-        The orchestrator appends ``_MCP_LOGS_INSIGHTS_GUIDANCE`` to the base prompt
-        only when MCP tools are active.  That block names the three tools the LLM
-        needs to interact with the AWS CloudWatch MCP server.
+        MCP is now the only supported tool mode, so ``_MCP_LOGS_INSIGHTS_GUIDANCE``
+        is unconditionally appended to every system prompt.  The block names the
+        three tools the LLM needs to interact with the AWS CloudWatch MCP server.
         """
         orchestrator = _make_orchestrator(
             mock_llm_provider,
             mock_tool_registry,
             mock_sanitizer,
-            use_mcp_tools=True,
         )
 
         prompt = orchestrator._get_system_prompt()
 
         assert (
             "execute_log_insights_query" in prompt
-        ), "System prompt must mention execute_log_insights_query when MCP tools are active"
-        assert (
-            "get_logs_insight_query_results" in prompt
-        ), "System prompt must mention get_logs_insight_query_results when MCP tools are active"
+        ), "System prompt must always mention execute_log_insights_query"
+        assert "get_logs_insight_query_results" in prompt, (
+            "System prompt must warn the LLM not to call get_logs_insight_query_results "
+            "(execute_log_insights_query already polls for results internally)"
+        )
         assert (
             "describe_log_groups" in prompt
-        ), "System prompt must mention describe_log_groups when MCP tools are active"
-
-    def test_mcp_guidance_absent_when_use_mcp_tools_false(
-        self,
-        mock_llm_provider,
-        mock_tool_registry,
-        mock_sanitizer,
-    ) -> None:
-        """When use_mcp_tools=False, the system prompt must NOT include execute_log_insights_query.
-
-        The two-step Logs Insights guidance is MCP-specific; injecting it on the
-        native boto3 path would mislead the LLM about which tools are available.
-        """
-        orchestrator = _make_orchestrator(
-            mock_llm_provider,
-            mock_tool_registry,
-            mock_sanitizer,
-            use_mcp_tools=False,
-        )
-
-        prompt = orchestrator._get_system_prompt()
-
-        assert (
-            "execute_log_insights_query" not in prompt
-        ), "execute_log_insights_query must NOT appear in the system prompt on the native path"
+        ), "System prompt must always mention describe_log_groups"
 
 
 # ---------------------------------------------------------------------------
