@@ -13,6 +13,7 @@ from logai.ui.screens.chat import ChatScreen
 
 if TYPE_CHECKING:
     from logai.core.log_group_manager import LogGroupManager
+    from logai.providers.datasources.cloudwatch import CloudWatchDataSource
     from logai.providers.mcp.client import MCPClientManager
     from logai.providers.mcp.sanitization import ResultProcessor
 
@@ -36,6 +37,7 @@ class LogAIApp(App[None]):
         log_group_manager: "LogGroupManager | None" = None,
         mcp_client: "MCPClientManager | None" = None,
         result_processor: "ResultProcessor | None" = None,
+        datasource: "CloudWatchDataSource | None" = None,
     ) -> None:
         """
         Initialize LogAI application.
@@ -50,6 +52,9 @@ class LogAIApp(App[None]):
                 MCP tools into the ``ToolRegistry``.
             result_processor: Optional MCP result post-processor (sanitization,
                 caching).  Must be supplied alongside ``mcp_client``.
+            datasource: Optional CloudWatch data source instance.  Threaded
+                through to ``ChatScreen`` so log preview works in MCP mode
+                without relying on the tool registry.
 
         Raises:
             FileNotFoundError: If CSS file does not exist
@@ -60,6 +65,7 @@ class LogAIApp(App[None]):
         self.log_group_manager = log_group_manager
         self.mcp_client = mcp_client
         self.result_processor = result_processor
+        self.datasource = datasource
 
         # Validate CSS file exists after initialization
         try:
@@ -84,6 +90,7 @@ class LogAIApp(App[None]):
                 log_group_manager=self.log_group_manager,
                 mcp_client=self.mcp_client,
                 result_processor=self.result_processor,
+                datasource=self.datasource,
             )
         )
 

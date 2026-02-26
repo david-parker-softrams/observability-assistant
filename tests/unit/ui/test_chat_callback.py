@@ -17,18 +17,12 @@ class TestCallbackPattern:
         """Verify that the callback function is defined when handling preview request."""
         orchestrator = MagicMock()
         cache_manager = MagicMock()
-        chat_screen = ChatScreen(orchestrator, cache_manager)
+        mock_datasource = AsyncMock()
+        chat_screen = ChatScreen(orchestrator, cache_manager, datasource=mock_datasource)
 
         # Mock the app using patch
         mock_app = MagicMock()
         mock_app.push_screen = MagicMock()
-
-        # Create a mock tool with datasource
-        mock_tool = MagicMock()
-        mock_tool.datasource = AsyncMock()
-
-        # Mock the orchestrator's tool registry
-        orchestrator.tool_registry.get_tool.return_value = mock_tool
 
         # Create the event
         event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
@@ -52,7 +46,8 @@ class TestCallbackPattern:
         """Test that callback receives result dictionary when modal dismisses."""
         orchestrator = MagicMock()
         cache_manager = MagicMock()
-        chat_screen = ChatScreen(orchestrator, cache_manager)
+        mock_datasource = AsyncMock()
+        chat_screen = ChatScreen(orchestrator, cache_manager, datasource=mock_datasource)
 
         # Mock _inject_log_entries_to_context
         chat_screen._inject_log_entries_to_context = AsyncMock()
@@ -79,11 +74,6 @@ class TestCallbackPattern:
 
         mock_app.push_screen = capture_callback
 
-        # Create a mock tool with datasource
-        mock_tool = MagicMock()
-        mock_tool.datasource = AsyncMock()
-        orchestrator.tool_registry.get_tool.return_value = mock_tool
-
         # Create the event
         event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
 
@@ -108,7 +98,8 @@ class TestCallbackPattern:
         """Test that callback handles None result (user cancelled)."""
         orchestrator = MagicMock()
         cache_manager = MagicMock()
-        chat_screen = ChatScreen(orchestrator, cache_manager)
+        mock_datasource = AsyncMock()
+        chat_screen = ChatScreen(orchestrator, cache_manager, datasource=mock_datasource)
 
         # Mock _inject_log_entries_to_context
         chat_screen._inject_log_entries_to_context = AsyncMock()
@@ -125,11 +116,6 @@ class TestCallbackPattern:
             callback_func = callback
 
         mock_app.push_screen = capture_callback
-
-        # Create a mock tool with datasource
-        mock_tool = MagicMock()
-        mock_tool.datasource = AsyncMock()
-        orchestrator.tool_registry.get_tool.return_value = mock_tool
 
         # Create the event
         event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
@@ -150,7 +136,8 @@ class TestCallbackPattern:
         """Test that callback handles empty dict (no selections)."""
         orchestrator = MagicMock()
         cache_manager = MagicMock()
-        chat_screen = ChatScreen(orchestrator, cache_manager)
+        mock_datasource = AsyncMock()
+        chat_screen = ChatScreen(orchestrator, cache_manager, datasource=mock_datasource)
 
         # Mock _inject_log_entries_to_context
         chat_screen._inject_log_entries_to_context = AsyncMock()
@@ -167,11 +154,6 @@ class TestCallbackPattern:
             callback_func = callback
 
         mock_app.push_screen = capture_callback
-
-        # Create a mock tool with datasource
-        mock_tool = MagicMock()
-        mock_tool.datasource = AsyncMock()
-        orchestrator.tool_registry.get_tool.return_value = mock_tool
 
         # Create the event
         event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
@@ -192,7 +174,8 @@ class TestCallbackPattern:
         """Verify callback function has descriptive name."""
         orchestrator = MagicMock()
         cache_manager = MagicMock()
-        chat_screen = ChatScreen(orchestrator, cache_manager)
+        mock_datasource = AsyncMock()
+        chat_screen = ChatScreen(orchestrator, cache_manager, datasource=mock_datasource)
 
         # Mock the app
         mock_app = MagicMock()
@@ -203,11 +186,6 @@ class TestCallbackPattern:
             callback_func = callback
 
         mock_app.push_screen = capture_callback
-
-        # Create a mock tool with datasource
-        mock_tool = MagicMock()
-        mock_tool.datasource = AsyncMock()
-        orchestrator.tool_registry.get_tool.return_value = mock_tool
 
         # Create the event
         event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
@@ -226,7 +204,8 @@ class TestCallbackDataFlow:
 
     def _setup_chat_screen_with_callback(self, orchestrator, cache_manager):
         """Helper to setup chat screen and capture callback."""
-        chat_screen = ChatScreen(orchestrator, cache_manager)
+        mock_datasource = AsyncMock()
+        chat_screen = ChatScreen(orchestrator, cache_manager, datasource=mock_datasource)
         chat_screen._inject_log_entries_to_context = AsyncMock()
 
         # Mock call_later to capture scheduled async calls
@@ -240,10 +219,6 @@ class TestCallbackDataFlow:
             callback_func = callback
 
         mock_app.push_screen = capture_callback
-
-        mock_tool = MagicMock()
-        mock_tool.datasource = AsyncMock()
-        orchestrator.tool_registry.get_tool.return_value = mock_tool
 
         return chat_screen, mock_app, lambda: callback_func
 
@@ -412,7 +387,8 @@ class TestCallbackEdgeCases:
 
     def _setup_chat_screen_with_callback(self, orchestrator, cache_manager):
         """Helper to setup chat screen and capture callback."""
-        chat_screen = ChatScreen(orchestrator, cache_manager)
+        mock_datasource = AsyncMock()
+        chat_screen = ChatScreen(orchestrator, cache_manager, datasource=mock_datasource)
         chat_screen._inject_log_entries_to_context = AsyncMock()
 
         # Mock call_later to capture scheduled async calls
@@ -426,10 +402,6 @@ class TestCallbackEdgeCases:
             callback_func = callback
 
         mock_app.push_screen = capture_callback
-
-        mock_tool = MagicMock()
-        mock_tool.datasource = AsyncMock()
-        orchestrator.tool_registry.get_tool.return_value = mock_tool
 
         return chat_screen, mock_app, lambda: callback_func
 
@@ -466,7 +438,8 @@ class TestCallbackEdgeCases:
         """Test callback behavior when result dict is missing log_group_name."""
         orchestrator = MagicMock()
         cache_manager = MagicMock()
-        chat_screen = ChatScreen(orchestrator, cache_manager)
+        mock_datasource = AsyncMock()
+        chat_screen = ChatScreen(orchestrator, cache_manager, datasource=mock_datasource)
 
         async def inject_with_error(result):
             _ = result["log_group_name"]  # Will raise KeyError
@@ -484,10 +457,6 @@ class TestCallbackEdgeCases:
             callback_func = callback
 
         mock_app.push_screen = capture_callback
-
-        mock_tool = MagicMock()
-        mock_tool.datasource = AsyncMock()
-        orchestrator.tool_registry.get_tool.return_value = mock_tool
 
         event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
 
@@ -579,7 +548,8 @@ class TestCallbackErrorHandling:
         """Test that exceptions in _inject_log_entries_to_context are handled."""
         orchestrator = MagicMock()
         cache_manager = MagicMock()
-        chat_screen = ChatScreen(orchestrator, cache_manager)
+        mock_datasource = AsyncMock()
+        chat_screen = ChatScreen(orchestrator, cache_manager, datasource=mock_datasource)
 
         chat_screen._inject_log_entries_to_context = AsyncMock(
             side_effect=Exception("Injection failed")
@@ -593,10 +563,6 @@ class TestCallbackErrorHandling:
             callback_func = callback
 
         mock_app.push_screen = capture_callback
-
-        mock_tool = MagicMock()
-        mock_tool.datasource = AsyncMock()
-        orchestrator.tool_registry.get_tool.return_value = mock_tool
 
         event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
 
@@ -622,7 +588,8 @@ class TestCallbackErrorHandling:
         """Test that callback logs the result it receives."""
         orchestrator = MagicMock()
         cache_manager = MagicMock()
-        chat_screen = ChatScreen(orchestrator, cache_manager)
+        mock_datasource = AsyncMock()
+        chat_screen = ChatScreen(orchestrator, cache_manager, datasource=mock_datasource)
 
         chat_screen._inject_log_entries_to_context = AsyncMock()
 
@@ -634,10 +601,6 @@ class TestCallbackErrorHandling:
             callback_func = callback
 
         mock_app.push_screen = capture_callback
-
-        mock_tool = MagicMock()
-        mock_tool.datasource = AsyncMock()
-        orchestrator.tool_registry.get_tool.return_value = mock_tool
 
         event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
 

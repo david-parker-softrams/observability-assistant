@@ -559,12 +559,16 @@ def _run_app(settings: LogAISettings) -> int:
         # Pass the unstarted MCP client (and its result processor) into the
         # app.  LogAIApp will forward them to ChatScreen, which starts the
         # MCP server asynchronously inside on_mount.
+        # datasource is also threaded through so ChatScreen can power log
+        # preview directly, bypassing the tool registry (which only holds
+        # MCPToolAdapter instances in MCP mode).
         app = LogAIApp(
             orchestrator,
             cache_manager,
             log_group_manager,
             mcp_client=mcp_client,
             result_processor=result_processor,
+            datasource=datasource,
         )
         app.run()
 
