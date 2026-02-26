@@ -23,7 +23,7 @@ from .base import (
 )
 from .github_copilot_models import (
     DEFAULT_MODEL,
-    get_available_models_sync,
+    get_available_models,
     get_model_metadata,
     validate_model,
 )
@@ -140,7 +140,7 @@ class GitHubCopilotProvider(BaseLLMProvider):
         Returns:
             List of model names (without github-copilot/ prefix)
         """
-        return get_available_models_sync()
+        return get_available_models()
 
     @property
     def full_model_name(self) -> str:

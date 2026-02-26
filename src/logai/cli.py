@@ -506,7 +506,7 @@ def _run_app(settings: LogAISettings) -> int:
             env=mcp_env,
             log_file_path=str(settings.log_file) if settings.log_file is not None else None,
         )
-        result_processor = ResultProcessor(sanitizer=sanitizer, cache=cache_manager)
+        result_processor = ResultProcessor(sanitizer=sanitizer)
 
         # FetchCachedResultTool is always registered natively — it is application-
         # specific and has no MCP equivalent (design §4.4).

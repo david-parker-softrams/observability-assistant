@@ -5,67 +5,6 @@ from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 from logai.ui.screens.log_preview import LogEntryItem, LogPreviewScreen
-from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
-
-
-class TestClickableLogGroupItem:
-    """Tests for the clickable log group item widget."""
-
-    def test_stores_log_group_name(self):
-        """Item should store the log group name."""
-        item = ClickableLogGroupItem("/aws/lambda/test")
-        assert item.log_group_name == "/aws/lambda/test"
-
-    def test_single_click_does_not_emit_message(self):
-        """Single click should not trigger preview request."""
-        item = ClickableLogGroupItem("/aws/lambda/test")
-        messages = []
-        item.post_message = lambda m: messages.append(m)
-
-        # Simulate single click
-        click_event = MagicMock(button=1)
-        item.on_click(click_event)
-
-        assert len(messages) == 0
-
-    def test_double_click_emits_preview_request(self):
-        """Double-click should emit LogGroupPreviewRequested message."""
-        item = ClickableLogGroupItem("/aws/lambda/test")
-        messages = []
-        item.post_message = lambda m: messages.append(m)
-
-        # Simulate double-click (two clicks within threshold)
-        click_event = MagicMock(button=1)
-        item.on_click(click_event)
-        item.on_click(click_event)  # Second click immediately
-
-        assert len(messages) == 1
-        assert isinstance(messages[0], ClickableLogGroupItem.LogGroupPreviewRequested)
-        assert messages[0].log_group_name == "/aws/lambda/test"
-
-    def test_slow_double_click_does_not_emit(self):
-        """Clicks spaced more than 500ms should not trigger preview."""
-        item = ClickableLogGroupItem("/aws/lambda/test")
-        messages = []
-        item.post_message = lambda m: messages.append(m)
-
-        # Simulate slow double-click
-        click_event = MagicMock(button=1)
-        item.on_click(click_event)
-        item._last_click_time -= 1.0  # Simulate 1 second passing
-        item.on_click(click_event)
-
-        assert len(messages) == 0
-
-    def test_right_click_ignored(self):
-        """Right-click should not affect double-click detection."""
-        item = ClickableLogGroupItem("/aws/lambda/test")
-
-        right_click = MagicMock(button=3)
-        item.on_click(right_click)
-
-        # Last click time should not be updated
-        assert item._last_click_time == 0.0
 
 
 class TestLogEntryItem:

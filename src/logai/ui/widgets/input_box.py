@@ -1,10 +1,10 @@
-"""Chat input widget with history support."""
+"""Chat input widget."""
 
 from textual.widgets import Input
 
 
 class ChatInput(Input):
-    """Enhanced input widget for chat with command history."""
+    """Input widget for chat."""
 
     DEFAULT_CSS = """
     ChatInput {
@@ -20,9 +20,6 @@ class ChatInput(Input):
         super().__init__(
             placeholder="Type your question... (Ctrl+Q to quit, Cmd+V/Ctrl+Shift+V to paste)"
         )
-        self._history: list[str] = []
-        self._history_index: int = -1
-        self._current_input: str = ""
 
     def add_to_history(self, message: str) -> None:
         """
@@ -32,16 +29,5 @@ class ChatInput(Input):
             message: Message to add to history
         """
         if message.strip():
-            self._history.append(message)
-            self._history_index = len(self._history)
-
-    def on_key(self, event: object) -> None:
-        """
-        Handle key events for history navigation.
-
-        Args:
-            event: Key event
-        """
-        # Note: For MVP, basic input history can be added post-MVP
-        # Textual Input doesn't expose key events easily, so we'll keep it simple
-        pass
+            # TODO: Implement history navigation (deferred to future milestone)
+            pass

@@ -6,6 +6,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock, PropertyMock, call, patch
 
 import pytest
 from logai.ui.screens.chat import ChatScreen
+from logai.ui.widgets.log_groups_sidebar import SelectableLogGroupItem
 
 
 class TestCallbackPattern:
@@ -30,9 +31,7 @@ class TestCallbackPattern:
         orchestrator.tool_registry.get_tool.return_value = mock_tool
 
         # Create the event
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
-
-        event = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
+        event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
 
         # Handle the event with patched app
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
@@ -86,9 +85,7 @@ class TestCallbackPattern:
         orchestrator.tool_registry.get_tool.return_value = mock_tool
 
         # Create the event
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
-
-        event = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
+        event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
 
         # Handle the event to capture callback
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
@@ -135,9 +132,7 @@ class TestCallbackPattern:
         orchestrator.tool_registry.get_tool.return_value = mock_tool
 
         # Create the event
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
-
-        event = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
+        event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
 
         # Handle the event to capture callback
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
@@ -179,9 +174,7 @@ class TestCallbackPattern:
         orchestrator.tool_registry.get_tool.return_value = mock_tool
 
         # Create the event
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
-
-        event = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
+        event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
 
         # Handle the event to capture callback
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
@@ -217,9 +210,7 @@ class TestCallbackPattern:
         orchestrator.tool_registry.get_tool.return_value = mock_tool
 
         # Create the event
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
-
-        event = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
+        event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
 
         # Handle the event to capture callback
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
@@ -265,9 +256,7 @@ class TestCallbackDataFlow:
             orchestrator, cache_manager
         )
 
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
-
-        event = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
+        event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
 
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
             mock_app_prop.return_value = mock_app
@@ -297,9 +286,7 @@ class TestCallbackDataFlow:
             orchestrator, cache_manager
         )
 
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
-
-        event = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
+        event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
 
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
             mock_app_prop.return_value = mock_app
@@ -331,9 +318,7 @@ class TestCallbackDataFlow:
             orchestrator, cache_manager
         )
 
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
-
-        event = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
+        event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
 
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
             mock_app_prop.return_value = mock_app
@@ -365,9 +350,7 @@ class TestCallbackDataFlow:
             orchestrator, cache_manager
         )
 
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
-
-        event = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/my-special-function")
+        event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/my-special-function")
 
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
             mock_app_prop.return_value = mock_app
@@ -394,9 +377,7 @@ class TestCallbackDataFlow:
             orchestrator, cache_manager
         )
 
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
-
-        event = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
+        event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
 
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
             mock_app_prop.return_value = mock_app
@@ -461,9 +442,7 @@ class TestCallbackEdgeCases:
             orchestrator, cache_manager
         )
 
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
-
-        event = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
+        event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
 
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
             mock_app_prop.return_value = mock_app
@@ -510,9 +489,7 @@ class TestCallbackEdgeCases:
         mock_tool.datasource = AsyncMock()
         orchestrator.tool_registry.get_tool.return_value = mock_tool
 
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
-
-        event = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
+        event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
 
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
             mock_app_prop.return_value = mock_app
@@ -539,9 +516,7 @@ class TestCallbackEdgeCases:
             orchestrator, cache_manager
         )
 
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
-
-        event = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
+        event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
 
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
             mock_app_prop.return_value = mock_app
@@ -562,9 +537,7 @@ class TestCallbackEdgeCases:
             orchestrator, cache_manager
         )
 
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
-
-        event = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
+        event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
 
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
             mock_app_prop.return_value = mock_app
@@ -585,9 +558,7 @@ class TestCallbackEdgeCases:
             orchestrator, cache_manager
         )
 
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
-
-        event = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
+        event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
 
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
             mock_app_prop.return_value = mock_app
@@ -627,9 +598,7 @@ class TestCallbackErrorHandling:
         mock_tool.datasource = AsyncMock()
         orchestrator.tool_registry.get_tool.return_value = mock_tool
 
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
-
-        event = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
+        event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
 
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
             mock_app_prop.return_value = mock_app
@@ -670,9 +639,7 @@ class TestCallbackErrorHandling:
         mock_tool.datasource = AsyncMock()
         orchestrator.tool_registry.get_tool.return_value = mock_tool
 
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
-
-        event = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
+        event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
 
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
             mock_app_prop.return_value = mock_app

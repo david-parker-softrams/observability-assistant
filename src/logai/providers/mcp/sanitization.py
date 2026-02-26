@@ -16,7 +16,6 @@ from __future__ import annotations
 import logging
 from typing import Any, cast
 
-from logai.cache.manager import CacheManager
 from logai.core.sanitizer import LogSanitizer
 
 logger = logging.getLogger(__name__)
@@ -61,8 +60,7 @@ class ResultProcessor:
     Post-processing pipeline for MCP tool results.
 
     Applies sanitization and format normalisation to raw MCP server responses
-    before they reach the LLM.  Caching support is reserved for future use —
-    ``CacheManager`` is accepted but not yet applied (see design §5.3).
+    before they reach the LLM.
 
     Sanitization is skipped gracefully when:
     - No ``LogSanitizer`` was supplied.
@@ -73,7 +71,6 @@ class ResultProcessor:
     def __init__(
         self,
         sanitizer: LogSanitizer | None = None,
-        cache: CacheManager | None = None,
     ) -> None:
         """
         Initialise the result processor.
@@ -82,11 +79,8 @@ class ResultProcessor:
             sanitizer: Optional ``LogSanitizer`` instance.  When ``None`` or
                        when ``sanitizer.enabled`` is ``False``, no sanitization
                        is applied.
-            cache: Optional ``CacheManager``.  Reserved for future query-level
-                   caching of MCP results (Phase 2 work).
         """
         self._sanitizer = sanitizer
-        self._cache = cache  # TODO: apply query-level caching of MCP results (design §5.3)
 
     # ------------------------------------------------------------------
     # Public API

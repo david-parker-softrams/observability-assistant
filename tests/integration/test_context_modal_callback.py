@@ -36,9 +36,9 @@ class TestModalCallbackIntegration:
 
         mock_app.push_screen = capture_push_screen
 
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
+        from logai.ui.widgets.log_groups_sidebar import SelectableLogGroupItem
 
-        event = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
+        event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
 
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
             mock_app_prop.return_value = mock_app
@@ -95,9 +95,9 @@ class TestModalCallbackIntegration:
 
         mock_app.push_screen = capture_push_screen
 
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
+        from logai.ui.widgets.log_groups_sidebar import SelectableLogGroupItem
 
-        event = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
+        event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
 
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
             mock_app_prop.return_value = mock_app
@@ -129,10 +129,10 @@ class TestModalCallbackIntegration:
 
         mock_app.push_screen = capture_push_screen
 
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
+        from logai.ui.widgets.log_groups_sidebar import SelectableLogGroupItem
 
-        event1 = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/function1")
-        event2 = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/function2")
+        event1 = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/function1")
+        event2 = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/function2")
 
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
             mock_app_prop.return_value = mock_app
@@ -184,12 +184,12 @@ class TestModalCallbackIntegration:
 
         mock_app.push_screen = capture_push_screen
 
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
+        from logai.ui.widgets.log_groups_sidebar import SelectableLogGroupItem
 
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
             mock_app_prop.return_value = mock_app
             for i in range(5):
-                event = ClickableLogGroupItem.LogGroupPreviewRequested(f"/aws/lambda/function{i}")
+                event = SelectableLogGroupItem.LogGroupPreviewRequested(f"/aws/lambda/function{i}")
                 await chat_screen.on_log_group_preview_requested(event)
 
         assert len(callbacks) == 5
@@ -231,9 +231,9 @@ class TestModalCallbackIntegration:
 
         mock_app.push_screen = capture_push_screen
 
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
+        from logai.ui.widgets.log_groups_sidebar import SelectableLogGroupItem
 
-        event = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
+        event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
 
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
             mock_app_prop.return_value = mock_app
@@ -291,9 +291,9 @@ class TestCallbackErrorRecovery:
 
         mock_app.push_screen = capture_push_screen
 
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
+        from logai.ui.widgets.log_groups_sidebar import SelectableLogGroupItem
 
-        event = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
+        event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
 
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
             mock_app_prop.return_value = mock_app
@@ -342,10 +342,10 @@ class TestCallbackErrorRecovery:
 
         mock_app.push_screen = capture_push_screen
 
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
+        from logai.ui.widgets.log_groups_sidebar import SelectableLogGroupItem
 
-        event1 = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test1")
-        event2 = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test2")
+        event1 = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test1")
+        event2 = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test2")
 
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
             mock_app_prop.return_value = mock_app
@@ -395,9 +395,9 @@ class TestCallbackTimingAndPerformance:
 
         mock_app.push_screen = capture_push_screen
 
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
+        from logai.ui.widgets.log_groups_sidebar import SelectableLogGroupItem
 
-        event = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
+        event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
 
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
             mock_app_prop.return_value = mock_app
@@ -428,9 +428,9 @@ class TestCallbackTimingAndPerformance:
 
         mock_app.push_screen = capture_push_screen
 
-        from logai.ui.widgets.log_groups_sidebar import ClickableLogGroupItem
+        from logai.ui.widgets.log_groups_sidebar import SelectableLogGroupItem
 
-        event = ClickableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
+        event = SelectableLogGroupItem.LogGroupPreviewRequested("/aws/lambda/test")
 
         with patch.object(type(chat_screen), "app", new_callable=PropertyMock) as mock_app_prop:
             mock_app_prop.return_value = mock_app

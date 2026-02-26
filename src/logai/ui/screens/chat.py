@@ -22,7 +22,6 @@ from logai.ui.commands import CommandHandler
 from logai.ui.screens.context_viewer import ContextParser, ContextViewerScreen
 from logai.ui.widgets.input_box import ChatInput
 from logai.ui.widgets.log_groups_sidebar import (
-    ClickableLogGroupItem,
     LogGroupsSidebar,
     SelectableLogGroupItem,
 )
@@ -417,12 +416,10 @@ class ChatScreen(Screen[None]):
         finally:
             self._current_assistant_message = None
 
-    @on(ClickableLogGroupItem.LogGroupPreviewRequested)
     @on(SelectableLogGroupItem.LogGroupPreviewRequested)
     async def on_log_group_preview_requested(
         self,
-        event: ClickableLogGroupItem.LogGroupPreviewRequested
-        | SelectableLogGroupItem.LogGroupPreviewRequested,
+        event: SelectableLogGroupItem.LogGroupPreviewRequested,
     ) -> None:
         """
         Handle request to preview logs from a log group.
@@ -486,7 +483,7 @@ class ChatScreen(Screen[None]):
         """
         try:
             # Get current staged context from orchestrator
-            staged_context = self.orchestrator._pending_context_injection
+            staged_context = self.orchestrator.pending_context_injection
 
             # Get full context snapshot from orchestrator (includes system prompt)
             conversation_history = self.orchestrator.get_full_context_snapshot()

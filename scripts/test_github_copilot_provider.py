@@ -40,7 +40,7 @@ async def test_model_fetching():
     print("=" * 60)
 
     try:
-        models = await get_available_models()
+        models = get_available_models()
         print(f"✓ Found {len(models)} models")
         print(f"  Sample models: {', '.join(models[:5])}...")
         return True

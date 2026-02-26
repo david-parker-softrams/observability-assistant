@@ -91,25 +91,3 @@ def validate_ttl(ttl_seconds: int) -> bool:
     """
     # Minimum 1 minute, maximum 30 days
     return 60 <= ttl_seconds <= (30 * 24 * 60 * 60)
-
-
-def validate_ollama_base_url(url: str) -> bool:
-    """
-    Validate Ollama base URL format.
-
-    Args:
-        url: Ollama base URL to validate
-
-    Returns:
-        True if valid
-
-    Raises:
-        ValueError: If URL format is invalid
-    """
-    if not url:
-        raise ValueError("Ollama base URL cannot be empty")
-
-    if not url.startswith(("http://", "https://")):
-        raise ValueError("Ollama base URL must start with http:// or https://")
-
-    return True

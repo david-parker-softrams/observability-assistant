@@ -588,6 +588,11 @@ Use this tool to find available log groups before querying logs."""
         self._pending_context_injection = context_message
         logger.debug(f"Orchestrator stored context: {len(context_message)} chars")
 
+    @property
+    def pending_context_injection(self) -> str | None:
+        """Current staged context injection, or None if nothing is pending."""
+        return self._pending_context_injection
+
     def _get_pending_context_injection(self) -> str | None:
         """
         Get and clear any pending context injection.

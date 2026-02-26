@@ -30,8 +30,8 @@ def mock_cache_manager() -> CacheManager:
         }
     )
     cache_manager.clear = AsyncMock(return_value=10)
-    cache_manager._max_size_mb = 500
-    cache_manager._max_entries = 10000
+    cache_manager.max_size_mb = 500
+    cache_manager.max_entries = 10000
     return cache_manager  # type: ignore
 
 

@@ -29,53 +29,6 @@ class CachedResultSummary:
     cached_at: int
     expires_at: int
 
-    def to_context_dict(self) -> dict[str, Any]:
-        """
-        Convert to dict optimized for LLM comprehension.
-
-        .. deprecated::
-            This method is no longer used in production. The orchestrator now builds
-            the cache summary directly via ``_create_enhanced_cache_summary()`` which
-            produces a flat structure better suited for LLM consumption.
-            This method is retained because existing tests cover its behaviour and it
-            may still be useful for debugging / offline tooling.
-
-        Design principles (Phase 1 - Separate Message Timing):
-        - 5 top-level keys maximum
-        - Clear "what you have" vs "how to get more" separation
-        - Preview events clearly marked as samples
-        - Actionable fetch instructions
-        - No premature guidance injection (follows Option A)
-
-        Returns:
-            Dictionary suitable for LLM context
-        """
-        chunk_size = 100  # Could be made configurable
-        total_chunks = (self.total_events + chunk_size - 1) // chunk_size
-
-        return {
-            # Key 1: What type of result this is
-            "result_type": "cached_preview",
-            # Key 2: Full dataset information
-            "full_dataset": {
-                "total_events": self.total_events,
-                "cache_id": self.cache_id,
-                "statistics": self.event_statistics,
-                "time_range": self.time_range,
-            },
-            # Key 3: Preview events (clearly samples)
-            "preview_events": self.sample_events,
-            # Key 4: How to fetch more data (clear, actionable)
-            "fetch_more": {
-                "tool": "fetch_cached_result_chunk",
-                "example": f"fetch_cached_result_chunk(cache_id='{self.cache_id}', offset=0, limit={chunk_size})",
-                "total_chunks": total_chunks,
-                "chunk_size": chunk_size,
-            },
-            # Key 5: Expiration info (important for agent decision-making)
-            "expires_in_seconds": max(0, self.expires_at - int(time.time())),
-        }
-
 
 class ResultCacheManager:
     """

@@ -201,8 +201,8 @@ Cache Misses: {total_misses}
 Hit Rate: {hit_rate:.1f}%
 
 Cache Directory: {self.settings.cache_dir}
-Max Size: {self.cache_manager._max_size_mb} MB
-Max Entries: {self.cache_manager._max_entries}
+Max Size: {self.cache_manager.max_size_mb} MB
+Max Entries: {self.cache_manager.max_entries}
 """
 
     async def _cache_clear(self) -> str:

@@ -33,6 +33,16 @@ class CacheManager:
         self._eviction_batch = settings.cache_eviction_batch
         self._cleanup_interval = settings.cache_cleanup_interval
 
+    @property
+    def max_size_mb(self) -> int:
+        """Maximum cache size in megabytes."""
+        return self._max_size_mb
+
+    @property
+    def max_entries(self) -> int:
+        """Maximum number of cache entries."""
+        return self._max_entries
+
     async def initialize(self) -> None:
         """Initialize cache manager and start background tasks."""
         if self._initialized:
