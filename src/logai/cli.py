@@ -652,21 +652,29 @@ def main() -> int:
         print(f"❌ Unexpected Error: {e}", file=sys.stderr)
         return 1
 
-    # Pre-flight check: verify that the MCP launcher ('uvx') is available.
+    # Pre-flight check: verify that the MCP launcher is available.
     # MCP is the only supported tool mode; hard-exit if the launcher is missing.
-    if not shutil.which(settings.mcp_server_command):
-        print(
-            f"❌ '{settings.mcp_server_command}' not found on PATH.",
-            file=sys.stderr,
-        )
-        print(
-            "  LogAI requires 'uvx' to launch the AWS CloudWatch MCP server.",
-            file=sys.stderr,
-        )
-        print(
-            "  Install uv: curl -LsSf https://astral.sh/uv/install.sh | sh",
-            file=sys.stderr,
-        )
+    launcher = settings.mcp_server_command.split()[0]
+    if not shutil.which(launcher):
+        print(f"❌ '{launcher}' not found on PATH.", file=sys.stderr)
+        if launcher == "uvx":
+            print(
+                "  LogAI requires 'uvx' to launch the AWS CloudWatch MCP server.",
+                file=sys.stderr,
+            )
+            print(
+                "  Install uv: curl -LsSf https://astral.sh/uv/install.sh | sh",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"  LogAI requires '{launcher}' to launch the MCP server.",
+                file=sys.stderr,
+            )
+            print(
+                f"  Please ensure '{launcher}' is installed and available on your PATH.",
+                file=sys.stderr,
+            )
         return 1
 
     # Print configuration summary

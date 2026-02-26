@@ -11,7 +11,8 @@ This document provides a complete inventory of all tools/functions available to 
 
 ### Key Statistics
 
-- **Total Tools**: 4
+- **MCP Tools**: Dynamic — the full set of tools exposed by the connected MCP server at runtime (number varies by server version)
+- **Native/Built-in Tools**: 1 (`fetch_cached_result_chunk` — always present, no MCP equivalent)
 - **Tool Categories**: 2 (Inventory, Search & Fetch) + 1 (Cache)
 - **Data Source**: AWS CloudWatch Logs (via MCP server)
 - **Common Features**: Caching, PII Sanitization, Time Range Filtering
