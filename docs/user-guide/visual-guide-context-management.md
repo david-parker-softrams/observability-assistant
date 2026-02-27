@@ -139,8 +139,8 @@ Result: Smooth investigation, no intervention needed! 🎉
 **What you'll see:**
 - The status footer turns **yellow** at 71% utilization
 - At **85%**, a toast notification appears: *"Context window is 85% full. Older messages may be pruned to make room."*
-- At **90%**, another toast: *"Context window is 90% full. Consider starting a new session with `/clear`."*
-- At **95%**, a critical toast: *"Context window is 95% full. History pruning is active."*
+- At **90%**, another toast: *"Context window 90% full (!)"*
+- At **95%**, a critical toast: *"Context window critically full (95%). Conversation may need to be cleared soon."*
 - Each notification appears **once per conversation session**.
 
 **What happens automatically:**
@@ -274,7 +274,7 @@ Result: Without management, fails after 3-4 large queries
         ┌─────────────────┼─────────────────┐
         │                 │                  │
     🟢 GREEN          🟡 YELLOW           🔴 RED
-     (0-70%)          (71-85%)          (85-100%)
+     (0-70%)          (71-84%)          (85-100%)
         │                 │                  │
         ▼                 ▼                  ▼
   ╔══════════╗      ╔══════════╗      ╔══════════╗
@@ -322,7 +322,7 @@ Result: Without management, fails after 3-4 large queries
 | **⚠️ Context window is 85% full...** | ⚠️ Plan to wrap up or start new chat soon |
 | **✂️ Pruned X old messages...** | ⚠️ If you need history, start new chat |
 | **⚠️ Context window 92% full (!)** | 🛑 Finish query, then `/clear` |
-| **⚠️ Failed to cache...** | ⚠️ Check disk space, consider restart |
+| **ℹ️ Some older context is no longer visible** | 📄 Ask the agent to restate key assumptions or summaries |
 
 ### Commands to Know
 
