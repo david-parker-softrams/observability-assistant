@@ -204,6 +204,22 @@ LOGAI_OLLAMA_MODEL=llama3.1:8b
 
 **Important:** Only use models with function calling support. Llama 3.1 and newer Mistral models work well.
 
+#### Context Window Size
+
+**Variable:** `LOGAI_OLLAMA_NUM_CTX`
+**Required:** No
+**Default:** None (auto-detected)
+
+By default, the system automatically detects the correct context window size for your Ollama model from the built-in model registry. Set this only if your model is not in the registry or you need to force a specific value.
+
+```bash
+LOGAI_OLLAMA_NUM_CTX=131072
+```
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LOGAI_OLLAMA_NUM_CTX` | `None` | Override the context window size sent to Ollama (tokens). By default, the system auto-detects the correct value from the model registry. Only set this if you need to force a specific value. |
+
 #### Setup Ollama
 
 1. Install Ollama:
@@ -424,6 +440,16 @@ LOGAI_CACHE_MAX_SIZE_MB=500
 
 When cache reaches max size, oldest entries are automatically removed.
 
+#### Deprecated Result Caching Settings
+
+The following settings were used to control large result caching. **Result caching has been removed** — all tool results now pass through to the model in full. These settings are accepted but have no effect.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LOGAI_ENABLE_RESULT_CACHING` | — | *(deprecated)* Result caching has been removed. This setting is accepted but has no effect. |
+| `LOGAI_CACHE_LARGE_RESULTS_THRESHOLD` | — | *(deprecated)* Result caching has been removed. This setting is accepted but has no effect. |
+| `LOGAI_MAX_RESULT_TOKENS` | — | *(deprecated)* Result caching has been removed. This setting is accepted but has no effect. |
+
 #### Cache TTL (Time To Live)
 
 **Variable:** `LOGAI_CACHE_TTL_SECONDS`
@@ -609,6 +635,31 @@ LOGAI_TIME_EXPANSION_FACTOR=4.0
 - Factor `6.0`: 1h → 6h → 36h
 
 **Recommended:** Keep at `4.0` for balanced behavior.
+
+### Emergency Pruning Threshold
+
+**Variable:** `LOGAI_EMERGENCY_PRUNE_THRESHOLD_PCT`
+**Required:** No
+**Default:** `4.0`
+**Type:** Float (range 1–20)
+
+```bash
+LOGAI_EMERGENCY_PRUNE_THRESHOLD_PCT=4.0
+```
+
+**Purpose:** Sets the percentage of context window remaining that triggers emergency history pruning. When available context drops below this percentage, the system aggressively prunes older conversation messages to prevent overflow.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LOGAI_EMERGENCY_PRUNE_THRESHOLD_PCT` | `4.0` | Percentage of context window remaining that triggers emergency history pruning (float, range 1–20). Replaces the deprecated `LOGAI_EMERGENCY_PRUNE_THRESHOLD`. |
+
+**Note:** This replaces the deprecated `LOGAI_EMERGENCY_PRUNE_THRESHOLD` (absolute token count). If you previously set `LOGAI_EMERGENCY_PRUNE_THRESHOLD`, switch to this percentage-based setting.
+
+**Guidelines:**
+- **1–2%**: Very late pruning, maximizes context use but risks overflow
+- **4%**: Default, good balance for most context window sizes
+- **10%**: Conservative, more aggressive pruning headroom
+- **20%**: Maximum conservatism (prunes very early)
 
 ---
 

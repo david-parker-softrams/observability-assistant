@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 from logai.cache.manager import CacheManager
 from logai.config.settings import LogAISettings
 from logai.core.context.budget_tracker import ContextBudgetTracker
-from logai.core.context.result_cache import CachedResultSummary, ResultCacheManager
+from logai.core.context.result_cache import ResultCacheManager
 from logai.core.context.token_counter import TokenCounter
 from logai.core.intent_detector import IntentDetector
 from logai.core.metrics import MetricsCollector, MetricsTimer
@@ -505,6 +505,12 @@ Current time: {current_time}
         # Context notification callback for UI updates
         self._context_notification_callback: Callable[[str, str], None] | None = None
 
+        # Track which utilization tiers have already fired a toast notification so we
+        # don't spam the user with repeated warnings on every LLM turn (Issue 3).
+        # A higher-severity tier reaching "notified" also suppresses re-notification
+        # of lower tiers, because the user has already seen the more important alert.
+        self._notified_tiers: set[str] = set()
+
         logger.info("LLM Orchestrator initialized with context management")
 
     def _get_system_prompt(self) -> str:
@@ -770,250 +776,34 @@ Do NOT answer based only on preview samples."""
         tool_name: str,
     ) -> dict[str, Any]:
         """
-        Process a tool result, caching large results with improved clarity.
+        Process a tool result — pass through in full, tracking token cost.
 
-        This method now implements smart caching that:
-        1. Caches large results (>5000 tokens) to preserve context budget
-        2. Returns a clear summary that makes it obvious logs WERE retrieved
-        3. Includes cache instructions directly in the result (not system prompt)
-        4. Provides representative samples for immediate value
-
-        The key improvement: Cache guidance is delivered WITH the tool result,
-        not merged into the system prompt beforehand. This prevents the agent
-        from getting confused about whether logs were actually returned.
+        Tool results are no longer cached or truncated. They are added to context
+        in full and subject to normal history pruning if context becomes full.
 
         Args:
             tool_result: Raw tool result with tool_call_id and result
             tool_name: Name of the tool that produced this result
 
         Returns:
-            Processed result (possibly cached with enhanced summary) for context
+            The tool result, unmodified
         """
-        # DIAGNOSTIC: Log what tool we're processing
-        result_data_temp = tool_result.get("result", {})
-        event_count = 0
-        if isinstance(result_data_temp, dict):
-            event_count = len(result_data_temp.get("events", [])) or len(
-                result_data_temp.get("logs", [])
-            )
+        result_data = tool_result.get("result", {})
 
-        logger.debug(
-            f"Processing tool result: tool_name={tool_name}, "
-            f"event_count={event_count}, "
-            f"has_result={bool(result_data_temp)}"
+        # Count tokens for budget tracking
+        token_count = TokenCounter.estimate_json_tokens(
+            result_data, self.settings.current_llm_model
         )
+        self.budget_tracker.add_result_tokens(token_count)
 
-        # Never cache fetch_cached_result_chunk - agent requested full events, not summary
-        if tool_name == "fetch_cached_result_chunk":
-            result_data = tool_result["result"]
-            token_count = TokenCounter.estimate_json_tokens(
-                result_data, self.settings.current_llm_model
-            )
-            self.budget_tracker.add_result_tokens(token_count)
-            logger.debug(
-                f"Bypassing cache for fetch_cached_result_chunk, "
-                f"result keys: {list(result_data.keys())}, "
-                f"event count: {len(result_data.get('events', []))}, "
-                f"tokens: {token_count}"
-            )
-            return tool_result  # Return as-is, no caching!
+        logger.debug(f"Tool result passed through: tool_name={tool_name}, tokens={token_count}")
 
-        result_data = tool_result["result"]
-        tool_call_id = tool_result["tool_call_id"]
+        return tool_result
 
-        # Skip caching if disabled
-        if not self.settings.enable_result_caching:
-            # Just track tokens and return
-            token_count = TokenCounter.estimate_json_tokens(
-                result_data, self.settings.current_llm_model
-            )
-            self.budget_tracker.add_result_tokens(token_count)
-            return tool_result
-
-        # Check if result should be cached based on size
-        should_cache, token_count = self.budget_tracker.should_cache_result(
-            result_data,
-            threshold=self.settings.cache_large_results_threshold,
-        )
-
-        logger.debug(
-            f"Cache decision: tool_name={tool_name}, "
-            f"should_cache={should_cache}, tokens={token_count}, "
-            f"threshold={self.settings.cache_large_results_threshold}"
-        )
-
-        # Enforce max_result_tokens limit
-        max_allowed = self.settings.max_result_tokens
-        force_cache_due_to_size = token_count > max_allowed
-
-        if force_cache_due_to_size:
-            logger.info(
-                f"Tool result exceeds max_result_tokens: {token_count} > {max_allowed}, "
-                f"forcing cache for {tool_name}",
-                extra={
-                    "tool_name": tool_name,
-                    "token_count": token_count,
-                    "max_result_tokens": max_allowed,
-                },
-            )
-            self._notify_context_event(
-                "info",
-                f"Large result ({token_count} tokens) exceeds limit, caching...",
-            )
-            should_cache = True
-
-        if should_cache:
-            try:
-                # Extract query parameters for cache key
-                query_params = {
-                    "tool": tool_name,
-                    "timestamp": int(datetime.now(UTC).timestamp()),
-                }
-
-                # Cache the result and get summary
-                summary = await self.result_cache.cache_result(
-                    tool_name=tool_name,
-                    query_params=query_params,
-                    result=result_data,
-                )
-
-                logger.debug(
-                    f"CACHED: tool_name={tool_name}, "
-                    f"cache_id={summary.cache_id}, "
-                    f"total_events={summary.total_events}, "
-                    f"samples={len(summary.sample_events)}"
-                )
-
-                # Create an ENHANCED summary that makes success clear
-                enhanced_summary = self._create_enhanced_cache_summary(
-                    summary, result_data, tool_name
-                )
-
-                # Track the enhanced summary tokens
-                summary_tokens = TokenCounter.estimate_json_tokens(
-                    enhanced_summary, self.settings.current_llm_model
-                )
-                self.budget_tracker.add_result_tokens(summary_tokens)
-
-                # Notify UI
-                event_count = result_data.get("count", len(result_data.get("events", [])))
-                self._notify_context_event(
-                    "info",
-                    f"Cached large result: {event_count} events, "
-                    f"{token_count} tokens → {summary_tokens} token summary",
-                )
-
-                logger.info(
-                    f"Result cached with enhanced summary: {tool_name}, "
-                    f"{token_count} tokens → {summary_tokens} token summary",
-                    extra={
-                        "cache_id": summary.cache_id,
-                        "original_tokens": token_count,
-                        "summary_tokens": summary_tokens,
-                        "event_count": event_count,
-                    },
-                )
-
-                # Record metric
-                cache_reason = (
-                    "max_tokens_exceeded" if force_cache_due_to_size else "size_threshold"
-                )
-                self.metrics.increment(
-                    "result_cached",
-                    labels={"tool": tool_name, "reason": cache_reason},
-                )
-
-                # Track active cache for follow-up detection (Phase 1: Separate Message Timing)
-                # No immediate guidance injection - let the enhanced tool result speak for itself
-                self._active_cache = ActiveCacheContext(
-                    cache_id=summary.cache_id,
-                    total_events=summary.total_events,
-                    created_at=time.time(),
-                    tool_name=tool_name,
-                )
-                logger.debug(
-                    f"Tracking active cache for follow-up: cache_id={summary.cache_id}, "
-                    f"total_events={summary.total_events}"
-                )
-
-                return {
-                    "tool_call_id": tool_call_id,
-                    "result": enhanced_summary,
-                }
-
-            except Exception as e:
-                # Cache failure should not break the workflow
-                logger.error(
-                    f"Failed to cache result, using full result: {e}",
-                    exc_info=True,
-                    extra={"tool_name": tool_name, "token_count": token_count},
-                )
-                self._notify_context_event(
-                    "warning", "Failed to cache large result, context may fill quickly"
-                )
-                # Fall through to use full result
-                self.budget_tracker.add_result_tokens(token_count)
-                return tool_result
-        else:
-            # Result fits in context, use as-is
-            self.budget_tracker.add_result_tokens(token_count)
-            return tool_result
-
-    def _create_enhanced_cache_summary(
-        self,
-        summary: CachedResultSummary,
-        original_result: dict[str, Any],
-        tool_name: str,
-    ) -> dict[str, Any]:
-        """
-        Create an enhanced summary optimized for LLM consumption.
-
-        Phase 1 (Separate Message Timing) approach:
-        - Returns flat structure that LLMs can parse efficiently
-        - Events visible at top level, not buried in nested structure
-        - Cache info and fetch instructions included but clearly separated
-        - No premature guidance injection (that comes on follow-up)
-
-        The key improvements from Phase 1 design:
-        - Flat structure for LLM parsing (not nested 3 levels deep)
-        - Events at top-level "events" key for agent visibility
-        - Clear total_events vs sample_events distinction
-        - Fetch instructions at top level
-        - Success message clearly indicates preview vs total
-
-        Args:
-            summary: Cached result summary from cache manager
-            original_result: Original full result (for metadata)
-            tool_name: Name of the tool
-
-        Returns:
-            Enhanced summary dictionary flattened for LLM consumption
-        """
-        # Return flat structure for LLM parsing
-        # The 5-key structure is used internally but must be unwrapped for tool messages
-        enhanced = {
-            "success": True,
-            "events": summary.sample_events,  # ✅ Flat top-level key
-            "count": len(summary.sample_events),  # Number of sample events
-            "total_events": summary.total_events,  # Total events in cache
-            "sample_note": f"Showing {len(summary.sample_events)} representative samples of {summary.total_events} total events",
-            "statistics": summary.event_statistics,  # Event breakdown by level
-            "time_range": summary.time_range,  # Time span of events
-            # Cache information (top-level for clarity)
-            "cached": True,
-            "cache_id": summary.cache_id,
-            "expires_at": summary.expires_at,
-            # Fetch instructions (clear and actionable)
-            "fetch_instructions": {
-                "available": True,
-                "tool": "fetch_cached_result_chunk",
-                "cache_id": summary.cache_id,
-                "example": f"fetch_cached_result_chunk(cache_id='{summary.cache_id}', offset=0, limit={self.settings.initial_chunk_size})",
-                "note": "Use to retrieve additional events from the full cached dataset",
-            },
-        }
-
-        return enhanced
+    # TODO: Remove _create_enhanced_cache_summary, _should_inject_cache_guidance,
+    # _get_follow_up_cache_injection, _reset_cache_fetch_count, and the
+    # fetch_cached_result_chunk limit-checking block in _execute_tool_calls when
+    # caching is fully deprecated. See design-context-window-scaling.md (REQ-2).
 
     def _should_prune_history(self) -> bool:
         """
@@ -1128,13 +918,52 @@ Do NOT answer based only on preview samples."""
             f"results={usage.result_tokens}",
         )
 
-        # Warn if getting full
-        if usage.utilization_pct >= 90:
-            self._notify_context_event(
-                "warning", f"Context window {usage.utilization_pct:.0f}% full (!)"
-            )
-        elif usage.utilization_pct >= 70:
-            self._notify_context_event("info", f"Context window {usage.utilization_pct:.0f}% full")
+        # Determine which tier (if any) this utilization falls into.
+        # Tiers are ordered from most-severe to least-severe so we always record
+        # the highest applicable tier and skip lower ones that the user has already
+        # seen — this avoids toast spam when utilization is stable above a threshold.
+        pct = usage.utilization_pct
+        if pct >= 95:
+            new_tier = "critical"
+        elif pct >= 90:
+            new_tier = "high"
+        elif pct >= 85:
+            new_tier = "warning"
+        elif pct >= 70:
+            new_tier = "info"
+        else:
+            new_tier = ""
+
+        # Only fire a notification the first time each tier is crossed.
+        # Once a higher-severity tier has been notified, lower tiers are
+        # implicitly covered — suppress re-notification for those too.
+        TIER_RANK = {"info": 1, "warning": 2, "high": 3, "critical": 4}
+        new_rank = TIER_RANK.get(new_tier, 0)
+        highest_notified = max((TIER_RANK.get(t, 0) for t in self._notified_tiers), default=0)
+
+        if new_tier and new_rank > highest_notified:
+            self._notified_tiers.add(new_tier)
+
+            # Notify if getting full — tiers from most severe to least.
+            # Each tier fires a visible toast notification to the user via _notify_context_event().
+            if new_tier == "critical":
+                self._notify_context_event(
+                    "error",
+                    f"Context window critically full ({pct:.0f}%). "
+                    "Conversation may need to be cleared soon.",
+                )
+            elif new_tier == "high":
+                self._notify_context_event("warning", f"Context window {pct:.0f}% full (!)")
+            elif new_tier == "warning":
+                # REQ-3: User-visible warning at 85% — explicit toast so the user is
+                # aware before history pruning silently removes older messages.
+                self._notify_context_event(
+                    "warning",
+                    f"Context window is {pct:.0f}% full. "
+                    "Older messages may be pruned to make room.",
+                )
+            elif new_tier == "info":
+                self._notify_context_event("info", f"Context window {pct:.0f}% full")
 
     def _check_mid_loop_budget(self, messages: list[dict[str, Any]]) -> tuple[bool, int]:
         """
@@ -1157,8 +986,16 @@ Do NOT answer based only on preview samples."""
         # Calculate remaining budget
         remaining = usage.remaining_tokens
 
-        # Determine threshold (use setting or default to context_window_buffer)
-        emergency_threshold = self.settings.emergency_prune_threshold
+        # Calculate emergency threshold as a percentage of usable context, scaling
+        # correctly for all model sizes.
+        #   200K model (190K usable): 4% ≈ 7,600 tokens  — adequate buffer
+        #   128K model (121K usable): 4% ≈ 4,864 tokens  — comparable to old default
+        #    32K model ( 30K usable): 4% ≈ 1,216 tokens  — reasonable
+        #     8K model (  7.6K usable): 4% ≈ 304 tokens  — triggers only when truly full
+        emergency_threshold = int(
+            self.budget_tracker.allocation.usable_tokens
+            * (self.settings.emergency_prune_threshold_pct / 100.0)
+        )
 
         # Log current state at debug level
         logger.debug(
@@ -1516,7 +1353,11 @@ Do NOT answer based only on preview samples."""
                         self.conversation_history.append(assistant_message)
                         messages.append(assistant_message)
 
-                        # Append each tool result and track its token cost
+                        # Append each tool result to history and messages.
+                        # Token tracking is already handled inside _process_tool_result()
+                        # (called via _execute_tool_calls()), so we must NOT call
+                        # add_result_tokens() again here — doing so would double-count
+                        # _pending_results_tokens and trigger spurious emergency pruning.
                         for tool_result in tool_results:
                             tool_message: dict[str, Any] = {
                                 "role": "tool",
@@ -1530,18 +1371,21 @@ Do NOT answer based only on preview samples."""
                                 tool_message, tool_result, "_run_conversation_loop"
                             )
 
-                            result_content = tool_message["content"]
-                            result_tokens = TokenCounter.count_tokens(
-                                result_content, self.settings.current_llm_model
-                            )
-                            self.budget_tracker.add_result_tokens(result_tokens)
-
                         # Mid-loop budget check — prune if context is critically low
                         needs_prune, _ = self._check_mid_loop_budget(messages)
                         if needs_prune:
                             self._emergency_prune_history(messages)
                             _, remaining_after = self._check_mid_loop_budget(messages)
-                            if remaining_after < 0:
+                            # Check whether pruning actually freed enough space.
+                            # remaining_tokens is always >= 0 (clamped in BudgetUsage),
+                            # so "< 0" is unreachable — compare against the emergency
+                            # threshold instead: if we're still below it, pruning failed
+                            # to make room and we must end the conversation gracefully.
+                            emergency_threshold = int(
+                                self.budget_tracker.allocation.usable_tokens
+                                * (self.settings.emergency_prune_threshold_pct / 100.0)
+                            )
+                            if remaining_after < emergency_threshold:
                                 error_msg = (
                                     "I've reached my context limit and cannot continue "
                                     "this conversation. Please use /clear to start a "

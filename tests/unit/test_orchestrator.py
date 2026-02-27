@@ -44,6 +44,7 @@ def mock_settings(tmp_path):
     # History pruning settings
     settings.enable_history_pruning = True
     settings.emergency_prune_threshold = 5000  # token count threshold (matches default)
+    settings.emergency_prune_threshold_pct = 4.0  # percentage-based threshold (REQ-4)
     settings.context_warning_threshold_pct = 80.0
 
     # Phase 2 orchestrator settings
@@ -111,6 +112,7 @@ def create_mock_settings(**overrides):
     settings.cache_sample_event_count = 5  # New setting for sample event count
     settings.enable_history_pruning = True
     settings.emergency_prune_threshold = 5000  # token count threshold (matches default)
+    settings.emergency_prune_threshold_pct = 4.0  # percentage-based threshold (REQ-4)
     settings.context_warning_threshold_pct = 80.0
     settings.orchestrator_retry_delays = "1.0,2.0,4.0"
     settings.orchestrator_retry_delays_list = [1.0, 2.0, 4.0]

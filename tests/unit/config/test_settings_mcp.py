@@ -97,10 +97,10 @@ class TestMCPSettingsOverrides:
 class TestOllamaNumCtxSettings:
     """Tests for the ollama_num_ctx field introduced by the num_ctx fix."""
 
-    def test_ollama_num_ctx_default_is_32768(self) -> None:
-        """ollama_num_ctx must default to 32768 (not Ollama's built-in 4096)."""
+    def test_ollama_num_ctx_default_is_none(self) -> None:
+        """ollama_num_ctx must default to None (auto-detected from model registry at runtime)."""
         settings = LogAISettings(_env_file=None)  # type: ignore[call-arg]
-        assert settings.ollama_num_ctx == 32768
+        assert settings.ollama_num_ctx is None
 
     def test_ollama_num_ctx_env_var_override(self) -> None:
         """LOGAI_OLLAMA_NUM_CTX env var must override the default."""
@@ -141,11 +141,11 @@ class TestOllamaNumCtxSettings:
             )
 
     def test_ollama_num_ctx_above_max_is_rejected(self) -> None:
-        """ollama_num_ctx > 131072 must raise a validation error (le=131072 constraint)."""
+        """ollama_num_ctx > 1048576 must raise a validation error (le=1048576 constraint)."""
         with pytest.raises(ValidationError):
             LogAISettings(  # type: ignore[call-arg]
                 _env_file=None,
-                ollama_num_ctx=131073,
+                ollama_num_ctx=1048577,
             )
 
     def test_ollama_num_ctx_does_not_affect_other_providers(self) -> None:

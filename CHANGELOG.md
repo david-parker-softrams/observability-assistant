@@ -138,17 +138,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Context window scaling**: Ollama provider no longer hardcodes a 32,768-token context window. The system now auto-detects the correct context window size from the model registry at runtime. Users can still override this with `LOGAI_OLLAMA_NUM_CTX`.
+- **Tool result pass-through**: Large tool results are no longer cached and replaced with a truncated preview. All tool results now pass through to the model in full.
+- **Emergency pruning threshold**: The emergency pruning threshold is now percentage-based (`LOGAI_EMERGENCY_PRUNE_THRESHOLD_PCT`, default `4`%) instead of an absolute token count.
+
 ### Added
-- Initial project setup
-- AI-powered observability assistant for AWS CloudWatch logs
-- Natural language query interface using LiteLLM
-- Interactive TUI built with Textual
-- Multi-log group support with selection interface
-- Context management system for conversation history
-- Text selection and copying capabilities
-- Automated release system using Release Please
-- Pre-commit hooks for code quality
-- Comprehensive test suite with pytest
-- Type checking with mypy
-- Code linting and formatting with ruff
-- Test coverage reporting
+- **Context utilization warnings**: Users now see a toast notification when context window utilization reaches 85%, 90%, and 95%. Each tier fires at most once per conversation session.
+- New setting `LOGAI_EMERGENCY_PRUNE_THRESHOLD_PCT` (float, default `4.0`, range `1–20`) replaces `LOGAI_EMERGENCY_PRUNE_THRESHOLD`.
+
+### Deprecated
+- `LOGAI_ENABLE_RESULT_CACHING` — result caching has been removed; this setting is accepted but has no effect.
+- `LOGAI_CACHE_LARGE_RESULTS_THRESHOLD` — same as above.
+- `LOGAI_MAX_RESULT_TOKENS` — same as above.
+- `LOGAI_EMERGENCY_PRUNE_THRESHOLD` (absolute token count) — replaced by `LOGAI_EMERGENCY_PRUNE_THRESHOLD_PCT`.

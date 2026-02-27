@@ -56,14 +56,15 @@ class LogAISettings(BaseSettings):
         description="Ollama model to use (must support function calling)",
     )
 
-    ollama_num_ctx: int = Field(
-        default=32768,
+    ollama_num_ctx: int | None = Field(
+        default=None,
         description=(
-            "Ollama context window size (num_ctx). Overrides Ollama's default of 4096 to ensure "
-            "full prompt and tool definitions are processed."
+            "Ollama context window size override (num_ctx). If None, auto-detected from model "
+            "registry. Set explicitly to override auto-detection (e.g., to reduce VRAM usage). "
+            "If neither set nor found in registry, falls back to 8192."
         ),
         gt=0,
-        le=131072,
+        le=1048576,  # Raised to 1M to support future large-context models
     )
 
     llm_request_timeout: float = Field(
@@ -390,7 +391,10 @@ class LogAISettings(BaseSettings):
 
     max_result_tokens: int = Field(
         default=10000,
-        description="Maximum tokens for a single tool result before caching",
+        description=(
+            "DEPRECATED: No longer used. Tool results always pass through in full. "
+            "Kept for backward compatibility only."
+        ),
         ge=1000,
         le=100000,
     )
@@ -418,9 +422,24 @@ class LogAISettings(BaseSettings):
 
     emergency_prune_threshold: int = Field(
         default=5000,
-        description="Trigger emergency pruning when remaining tokens below this value",
+        description=(
+            "DEPRECATED: Use emergency_prune_threshold_pct instead. "
+            "Absolute token count trigger for emergency pruning. "
+            "Kept for backward compatibility only."
+        ),
         ge=1000,
         le=20000,
+    )
+
+    emergency_prune_threshold_pct: float = Field(
+        default=4.0,
+        description=(
+            "Trigger emergency pruning when remaining tokens fall below this percentage "
+            "of the usable context window. Default 4% (~8K tokens on a 200K model, "
+            "~1.6K tokens on a 40K model). Replaces the absolute emergency_prune_threshold."
+        ),
+        ge=1.0,
+        le=20.0,
     )
 
     context_warning_threshold_pct: float = Field(
@@ -433,7 +452,10 @@ class LogAISettings(BaseSettings):
     # === Result Handling ===
     enable_result_caching: bool = Field(
         default=True,
-        description="Enable caching of large tool results outside context window",
+        description=(
+            "DEPRECATED: No longer used. Tool results always pass through in full. "
+            "Kept for backward compatibility only."
+        ),
     )
 
     enable_incremental_fetch: bool = Field(
@@ -443,7 +465,10 @@ class LogAISettings(BaseSettings):
 
     cache_large_results_threshold: int = Field(
         default=10000,
-        description="Token threshold for caching tool results",
+        description=(
+            "DEPRECATED: No longer used. Tool results always pass through in full. "
+            "Kept for backward compatibility only."
+        ),
         ge=1000,
         le=100000,
     )

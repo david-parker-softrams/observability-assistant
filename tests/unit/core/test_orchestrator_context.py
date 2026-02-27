@@ -164,154 +164,6 @@ class TestBudgetTracking:
         assert usage.result_tokens > 0
 
 
-class TestAutomaticResultCaching:
-    """Test automatic result caching."""
-
-    @pytest.mark.asyncio
-    async def test_large_result_is_cached(self, orchestrator, mock_llm_provider, mock_result_cache):
-        """Test that large results are automatically cached."""
-        # Create a large result (exceeds threshold)
-        large_result = {
-            "success": True,
-            "events": [{"message": f"Event {i}", "timestamp": i} for i in range(1000)],
-            "count": 1000,
-        }
-
-        # Register test tool
-        test_tool = Mock()
-        test_tool.name = "fetch_logs"
-        test_tool.execute = AsyncMock(return_value=large_result)
-        test_tool.to_function_definition = Mock(
-            return_value={
-                "name": "fetch_logs",
-                "description": "Fetch logs",
-                "parameters": {"type": "object", "properties": {}},
-            }
-        )
-        ToolRegistry.register(test_tool)
-
-        # Setup LLM responses
-        tool_calls = [
-            {
-                "id": "call_123",
-                "type": "function",
-                "function": {"name": "fetch_logs", "arguments": "{}"},
-            }
-        ]
-        mock_llm_provider.chat.side_effect = [
-            LLMResponse(content="", tool_calls=tool_calls),
-            LLMResponse(content="Analysis complete", tool_calls=None),
-        ]
-
-        # Execute
-        await orchestrator.chat("Fetch logs")
-
-        # Check that the result was processed (would be cached if size exceeds threshold)
-        # We verify by checking the conversation history contains the tool result
-        tool_messages = [
-            msg for msg in orchestrator.conversation_history if msg.get("role") == "tool"
-        ]
-        assert len(tool_messages) > 0
-
-        # Parse the tool result
-        tool_result = json.loads(tool_messages[0]["content"])
-
-        # If it was cached, it should have flat structure with cache_id and fetch_instructions
-        if "cached" in tool_result and tool_result["cached"]:
-            assert "cache_id" in tool_result
-            assert "fetch_instructions" in tool_result
-            assert "tool" in tool_result["fetch_instructions"]
-            assert "fetch_cached_result_chunk" in tool_result["fetch_instructions"]["tool"]
-
-    @pytest.mark.asyncio
-    async def test_small_result_not_cached(self, orchestrator, mock_llm_provider):
-        """Test that small results are not cached."""
-        # Small result (below threshold)
-        small_result = {"success": True, "count": 5, "events": []}
-
-        # Register test tool
-        test_tool = Mock()
-        test_tool.name = "test_tool"
-        test_tool.execute = AsyncMock(return_value=small_result)
-        test_tool.to_function_definition = Mock(
-            return_value={
-                "name": "test_tool",
-                "description": "Test",
-                "parameters": {"type": "object", "properties": {}},
-            }
-        )
-        ToolRegistry.register(test_tool)
-
-        # Setup responses
-        tool_calls = [
-            {
-                "id": "call_123",
-                "type": "function",
-                "function": {"name": "test_tool", "arguments": "{}"},
-            }
-        ]
-        mock_llm_provider.chat.side_effect = [
-            LLMResponse(content="", tool_calls=tool_calls),
-            LLMResponse(content="Done", tool_calls=None),
-        ]
-
-        # Execute
-        await orchestrator.chat("Test")
-
-        # Verify small result not cached (no cache_id in result)
-        tool_messages = [
-            msg for msg in orchestrator.conversation_history if msg.get("role") == "tool"
-        ]
-        assert len(tool_messages) > 0
-        tool_result = json.loads(tool_messages[0]["content"])
-        assert "cached" not in tool_result or not tool_result["cached"]
-
-    @pytest.mark.asyncio
-    async def test_caching_failure_graceful(
-        self, orchestrator, mock_llm_provider, mock_result_cache
-    ):
-        """Test that caching failures don't break workflow."""
-        # Make cache_result raise an exception
-        mock_result_cache.cache_result = AsyncMock(side_effect=Exception("Cache failure"))
-
-        # Large result that would trigger caching
-        large_result = {
-            "success": True,
-            "events": [{"message": f"Event {i}"} for i in range(1000)],
-            "count": 1000,
-        }
-
-        # Register tool
-        test_tool = Mock()
-        test_tool.name = "test_tool"
-        test_tool.execute = AsyncMock(return_value=large_result)
-        test_tool.to_function_definition = Mock(
-            return_value={
-                "name": "test_tool",
-                "description": "Test",
-                "parameters": {"type": "object", "properties": {}},
-            }
-        )
-        ToolRegistry.register(test_tool)
-
-        # Setup responses
-        tool_calls = [
-            {
-                "id": "call_123",
-                "type": "function",
-                "function": {"name": "test_tool", "arguments": "{}"},
-            }
-        ]
-        mock_llm_provider.chat.side_effect = [
-            LLMResponse(content="", tool_calls=tool_calls),
-            LLMResponse(content="Done", tool_calls=None),
-        ]
-
-        # Execute - should not raise exception
-        result = await orchestrator.chat("Test")
-        assert result == "Done"
-
-
 class TestHistoryPruning:
     """Test automatic history pruning."""
 
@@ -720,22 +572,18 @@ class TestIntegration:
 
 
 class TestCachedResultGuidance:
-    """Test enhanced cache summaries with inline guidance."""
+    """Test that tool results pass through unmodified (caching removed in REQ-2)."""
 
     @pytest.mark.asyncio
-    async def test_cached_result_has_inline_guidance(
+    async def test_large_result_passes_through_unmodified(
         self, settings, mock_llm_provider, mock_sanitizer, mock_result_cache
     ):
-        """Test that caching a result embeds fetch guidance inline in the cached payload.
+        """Test that large tool results are returned unmodified (no caching).
 
-        Phase 1 (Separate Message Timing) behaviour: guidance is NOT injected into
-        the system prompt immediately after caching. Instead, fetch instructions are
-        carried inside the cached result itself so the LLM sees them when it reads
-        the tool response, without any extra system-prompt round-trip.
+        REQ-2: Tool result caching has been removed. Results now always pass
+        through in full and are subject to normal history pruning if context
+        becomes full.
         """
-        settings.enable_result_caching = True
-        settings.cache_large_results_threshold = 1000
-
         orchestrator = LLMOrchestrator(
             llm_provider=mock_llm_provider,
             tool_registry=ToolRegistry,
@@ -744,7 +592,6 @@ class TestCachedResultGuidance:
             result_cache=mock_result_cache,
         )
 
-        # Simulate a large tool result that gets cached
         large_result = {
             "success": True,
             "events": [{"message": f"log {i}"} for i in range(1000)],
@@ -757,33 +604,28 @@ class TestCachedResultGuidance:
 
         processed = await orchestrator._process_tool_result(tool_result, "query_logs")
 
-        # Result should have enhanced summary format
-        result = processed["result"]
-        assert result["success"] is True
-        assert result["cached"] is True
+        # Result must be the original tool_result, completely unmodified
+        assert processed is tool_result
+        assert processed["result"] is large_result
 
-        # Should have flat structure with cache_id and fetch_instructions
-        assert "cache_id" in result
-        assert "fetch_instructions" in result
-        assert "fetch_cached_result_chunk" in result["fetch_instructions"]["tool"]
+        # No caching metadata should be present
+        assert "cached" not in processed["result"]
+        assert "cache_id" not in processed["result"]
+        assert "fetch_instructions" not in processed["result"]
+        assert "sample_note" not in processed["result"]
 
-        # Should have sample events
-        assert "events" in result
-        assert len(result["events"]) > 0  # Has samples
-        assert "sample_note" in result
-
-        # Should track active cache for follow-up detection (Phase 1: Separate Message Timing)
-        assert orchestrator._active_cache is not None
-        assert orchestrator._active_cache.cache_id == result["cache_id"]
+        # _active_cache must NOT be set (nothing was cached)
+        assert orchestrator._active_cache is None
 
     @pytest.mark.asyncio
-    async def test_cache_guidance_not_in_system_prompt(
+    async def test_no_cache_guidance_injected_into_system_prompt(
         self, settings, mock_llm_provider, mock_sanitizer, mock_result_cache
     ):
-        """Test that cache guidance is NOT injected into system prompt immediately."""
-        settings.enable_result_caching = True
-        settings.cache_large_results_threshold = 1000
+        """Test that no cache guidance is ever injected into the system prompt.
 
+        REQ-2: With caching removed, there is no pending cache guidance of any
+        kind — neither via _pending_cache_guidance nor via _active_cache.
+        """
         orchestrator = LLMOrchestrator(
             llm_provider=mock_llm_provider,
             tool_registry=ToolRegistry,
@@ -792,7 +634,6 @@ class TestCachedResultGuidance:
             result_cache=mock_result_cache,
         )
 
-        # Simulate large result
         large_result = {
             "success": True,
             "events": [{"message": f"log {i}"} for i in range(1000)],
@@ -805,28 +646,27 @@ class TestCachedResultGuidance:
 
         await orchestrator._process_tool_result(tool_result, "query_logs")
 
-        # Phase 1: No longer uses _pending_cache_guidance
-        # Instead, tracks active cache for follow-up detection
-        assert (
-            not hasattr(orchestrator, "_pending_cache_guidance")
-            or orchestrator._pending_cache_guidance is None
+        # No legacy _pending_cache_guidance should be set
+        assert not hasattr(orchestrator, "_pending_cache_guidance") or not getattr(
+            orchestrator, "_pending_cache_guidance", None
         )
 
-        # Should track active cache instead (for follow-up guidance)
-        assert orchestrator._active_cache is not None
+        # No active cache should be tracking anything
+        assert orchestrator._active_cache is None
 
-        # Get pending injection - should be None (no immediate cache guidance injected)
+        # Context injection queue should be empty (no cache guidance)
         injection = orchestrator._get_pending_context_injection()
         assert injection is None
 
     @pytest.mark.asyncio
-    async def test_enhanced_summary_includes_statistics(
+    async def test_token_budget_tracked_for_large_result(
         self, settings, mock_llm_provider, mock_sanitizer, mock_result_cache
     ):
-        """Test that enhanced summary includes event statistics."""
-        settings.enable_result_caching = True
-        settings.cache_large_results_threshold = 1000
+        """Test that token budget is tracked even though result is not cached.
 
+        REQ-2: The result passes through unmodified, but token counting still
+        runs so the budget tracker stays accurate.
+        """
         orchestrator = LLMOrchestrator(
             llm_provider=mock_llm_provider,
             tool_registry=ToolRegistry,
@@ -835,28 +675,30 @@ class TestCachedResultGuidance:
             result_cache=mock_result_cache,
         )
 
-        # Trigger cache
         large_result = {
             "success": True,
             "events": [{"message": f"log {i}", "level": "INFO"} for i in range(1000)],
             "count": 1000,
         }
         tool_result = {"tool_call_id": "call_123", "result": large_result}
-        processed = await orchestrator._process_tool_result(tool_result, "query_logs")
 
-        result = processed["result"]
+        usage_before = orchestrator.budget_tracker.get_usage()
+        await orchestrator._process_tool_result(tool_result, "query_logs")
+        usage_after = orchestrator.budget_tracker.get_usage()
 
-        # Should include statistics in the summary
-        assert "statistics" in result
-        assert isinstance(result["statistics"], dict)
+        # Token tracking must have fired — result tokens should have increased
+        assert usage_after.result_tokens > usage_before.result_tokens
 
     @pytest.mark.asyncio
-    async def test_cache_includes_clear_success_message(
+    async def test_result_contains_no_caching_artefacts(
         self, settings, mock_llm_provider, mock_sanitizer, mock_result_cache
     ):
-        """Test that cache summary has clear sample note."""
-        settings.enable_result_caching = True
+        """Test that processed result contains none of the old caching artefacts.
 
+        REQ-2: Keys such as 'cached', 'cache_id', 'statistics', and 'sample_note'
+        were part of the old enhanced-cache-summary format. None of them should
+        appear in pass-through results.
+        """
         orchestrator = LLMOrchestrator(
             llm_provider=mock_llm_provider,
             tool_registry=ToolRegistry,
@@ -865,7 +707,6 @@ class TestCachedResultGuidance:
             result_cache=mock_result_cache,
         )
 
-        # Trigger cache
         large_result = {
             "success": True,
             "events": [{"message": f"log {i}"} for i in range(1000)],
@@ -876,13 +717,11 @@ class TestCachedResultGuidance:
 
         result = processed["result"]
 
-        # Sample note should clearly indicate this is a preview
-        assert "sample_note" in result
-        assert "1000" in result["sample_note"]
-        assert (
-            "representative samples" in result["sample_note"]
-            or "samples" in result["sample_note"].lower()
-        )
+        # None of the old cache-summary artefacts should be present
+        for stale_key in ("cached", "cache_id", "statistics", "sample_note", "fetch_instructions"):
+            assert (
+                stale_key not in result
+            ), f"Stale caching key '{stale_key}' found in pass-through result"
 
     @pytest.mark.asyncio
     async def test_user_context_injection_still_works(
@@ -1460,16 +1299,19 @@ class TestChunkSizePromptContent:
             worst_case_tokens <= settings.max_result_tokens
         ), f"Worst case {worst_case_tokens} tokens exceeds max_result_tokens={settings.max_result_tokens}"
 
-    def test_enhanced_cache_summary_fetch_instructions_uses_small_chunk(
+    def test_initial_chunk_size_reflected_in_system_prompt(
         self,
         settings,
         mock_llm_provider,
         mock_sanitizer,
         mock_result_cache,
     ) -> None:
-        """Test that _create_enhanced_cache_summary embeds limit= from initial_chunk_size."""
-        import time as _time
+        """Test that the configured initial_chunk_size is embedded in the system prompt.
 
+        REQ-2: _create_enhanced_cache_summary has been removed. The chunk size
+        is now communicated to the model solely via the system prompt, so we
+        verify that the system prompt picks up the configured value.
+        """
         settings.initial_chunk_size = 25
 
         orchestrator = LLMOrchestrator(
@@ -1480,28 +1322,9 @@ class TestChunkSizePromptContent:
             result_cache=mock_result_cache,
         )
 
-        # Build a minimal CachedResultSummary stub (all required fields)
-        from logai.core.context.result_cache import CachedResultSummary
-
-        summary = CachedResultSummary(
-            cache_id="result_abc123",
-            total_events=200,
-            time_range={"start": "2024-01-01T00:00:00Z", "end": "2024-01-01T01:00:00Z"},
-            sample_events=[{"message": f"log {i}"} for i in range(5)],
-            event_statistics={"INFO": 180, "ERROR": 20},
-            original_tool="fetch_logs",
-            original_query={"log_group": "/aws/lambda/my-function"},
-            cached_at=int(_time.time()),
-            expires_at=int(_time.time()) + 3600,
-        )
-
-        result = orchestrator._create_enhanced_cache_summary(
-            summary, {"success": True}, "fetch_logs"
-        )
-
-        example = result["fetch_instructions"]["example"]
+        prompt = orchestrator._get_system_prompt()
 
         # Must contain the small chunk size from settings
-        assert "limit=25" in example, f"Expected limit=25 in example, got: {example!r}"
+        assert "limit=25" in prompt, f"Expected 'limit=25' in system prompt, got: {prompt[:500]!r}"
         # Must NOT contain the old hard-coded large chunk size
-        assert "limit=100" not in example, f"Unexpected limit=100 found in example: {example!r}"
+        assert "limit=100)" not in prompt, "Unexpected 'limit=100)' found in system prompt"

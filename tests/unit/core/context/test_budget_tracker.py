@@ -210,70 +210,53 @@ class TestContextBudgetTracker:
         assert tracker._messages[0].role == "tool"
         assert '"result"' in tracker._messages[0].content
 
-    def test_can_fit_result_small(self, tracker):
-        """Test that a small result can fit."""
-        result = {"events": [{"message": "Test log"}]}
+    def test_result_tokens_tracked_via_add_result_tokens(self, tracker):
+        """Test that result token cost is tracked directly via add_result_tokens.
 
-        can_fit, tokens = tracker.can_fit_result(result)
+        REQ-2: can_fit_result has been removed. Token tracking for tool results
+        now happens by calling add_result_tokens() with the pre-counted token
+        value in _process_tool_result().
+        """
+        tracker.add_result_tokens(1500)
 
-        assert can_fit is True
-        assert tokens > 0
+        usage = tracker.get_usage()
+        assert usage.result_tokens == 1500
 
-    def test_can_fit_result_large(self, tracker):
-        """Test that a very large result doesn't fit."""
-        # Create a huge result
-        result = {"events": [{"message": f"Log message {i}"} for i in range(10_000)]}
+    def test_result_tokens_accumulate(self, tracker):
+        """Test that multiple add_result_tokens calls accumulate correctly."""
+        tracker.add_result_tokens(1000)
+        tracker.add_result_tokens(500)
 
-        can_fit, tokens = tracker.can_fit_result(result)
+        usage = tracker.get_usage()
+        assert usage.result_tokens == 1500
 
-        # Should not fit in result budget
-        assert can_fit is False
-        assert tokens > tracker.allocation.results
+    def test_no_can_fit_result_api(self, tracker):
+        """Test that can_fit_result no longer exists on ContextBudgetTracker.
 
-    def test_should_cache_result_small(self, tracker):
-        """Test that small results are not cached."""
-        result = {"events": [{"message": "Test"}]}
+        REQ-2: The caching decision helper was removed because tool results are
+        no longer cached — they always pass through in full.
+        """
+        assert not hasattr(tracker, "can_fit_result")
 
-        should_cache, tokens = tracker.should_cache_result(result, threshold=10000)
+    def test_no_should_cache_result_api(self, tracker):
+        """Test that should_cache_result no longer exists on ContextBudgetTracker.
 
-        assert should_cache is False
-        assert tokens < 10000
+        REQ-2: The caching decision helper was removed because tool results are
+        no longer cached — they always pass through in full.
+        """
+        assert not hasattr(tracker, "should_cache_result")
 
-    def test_should_cache_result_large(self, tracker):
-        """Test that large results are cached."""
-        # Create a large result (need ~15K tokens to exceed 10K threshold)
-        result = {
-            "events": [{"message": f"Event message with lots of details: {i}"} for i in range(1500)]
-        }
+    def test_result_tokens_appear_in_total_token_count(self, tracker):
+        """Test that result tokens are included in the total token usage.
 
-        should_cache, tokens = tracker.should_cache_result(result, threshold=10000)
-
-        # Should cache if tokens exceed threshold
-        if tokens > 10000:
-            assert should_cache is True
-        else:
-            # If it's under threshold, we can't guarantee it will be cached
-            pass
-
-    def test_should_cache_result_doesnt_fit(self, tracker):
-        """Test that results that don't fit are cached regardless of threshold."""
-        # First fill most of the result budget (50K tokens allocated)
-        tracker.add_result_tokens(48000)  # Use 96% of the result budget
-
-        # Create a result that exceeds remaining budget (~5K tokens)
-        result = {
-            "events": [{"message": f"Event message number {i} with details"} for i in range(500)]
-        }
-
-        should_cache, tokens = tracker.should_cache_result(result, threshold=100000)
-
-        # Should cache because it won't fit in remaining result budget (only ~2K left)
-        can_fit, _ = tracker.can_fit_result(result)
-        if not can_fit:
-            assert should_cache is True
-        else:
-            # If it fits, caching depends on threshold
-            pass
+        REQ-2: Even without caching, every token that flows through must be
+        counted so that budget management decisions (pruning, etc.) remain
+        accurate.
+        """
+        tracker.add_result_tokens(2000)
+        usage = tracker.get_usage()
+        # Total tokens must include the result tokens we just added
+        assert usage.total_tokens >= 2000
 
     def test_add_result_tokens(self, tracker):
         """Test tracking result tokens."""
@@ -564,10 +547,9 @@ class TestContextBudgetTrackerPerformance:
 
         assert result.total_tokens > 0
 
-    def test_benchmark_should_cache_result(self, benchmark, tracker):
-        """Benchmark checking if result should be cached."""
-        result = {"events": [{"message": f"Event {i}"} for i in range(100)]}
+    def test_benchmark_add_result_tokens(self, benchmark, tracker):
+        """Benchmark tracking result token cost (REQ-2: replaces should_cache_result benchmark)."""
+        cache_decision = benchmark(tracker.add_result_tokens, 1000)
 
-        cache_decision, tokens = benchmark(tracker.should_cache_result, result)
-
-        assert isinstance(cache_decision, bool)
+        # add_result_tokens returns None; just verify the benchmark ran
+        assert cache_decision is None

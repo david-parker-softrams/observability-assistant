@@ -328,7 +328,9 @@ class StatusFooter(Widget):
         if self.context_utilization >= 95:
             context_color = "red bold"
             context_prefix = "(!!) "
-        elif self.context_utilization >= 86:
+        elif self.context_utilization >= 85:
+            # Aligned with the 85% toast notification in _log_budget_status():
+            # both the visual color change and the user-facing warning fire together.
             context_color = "red"
             context_prefix = "(!) "
         elif self.context_utilization >= 71:

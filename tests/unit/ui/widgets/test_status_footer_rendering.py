@@ -201,17 +201,30 @@ class TestRenderContextInfo:
         styles = [str(span.style) for span in result.spans]
         assert any("yellow" in style for style in styles)
 
-    def test_render_context_info_boundary_86_percent(self):
-        """Test color coding at exactly 86% boundary."""
+    def test_render_context_info_boundary_85_percent(self):
+        """Test color coding at exactly 85% — the boundary where red/warning color activates."""
         footer = StatusFooter()
-        footer.context_utilization = 86.0
+        footer.context_utilization = 85.0
 
         result = footer._render_context_info()
 
-        # At exactly 86%, should be red
+        # At exactly 85%, should be red (boundary is >= 85)
         styles = [str(span.style) for span in result.spans]
         assert any("red" in style for style in styles)
         assert "(!) " in result.plain
+
+    def test_render_context_info_boundary_84_percent(self):
+        """Test color coding at exactly 84% — just below the red/warning boundary."""
+        footer = StatusFooter()
+        footer.context_utilization = 84.0
+
+        result = footer._render_context_info()
+
+        # At exactly 84%, should be yellow (just below the >= 85 red threshold)
+        styles = [str(span.style) for span in result.spans]
+        assert any("yellow" in style for style in styles)
+        assert "(!) " not in result.plain
+        assert "(!!)" not in result.plain
 
     def test_render_context_info_boundary_95_percent(self):
         """Test color coding at exactly 95% boundary."""
