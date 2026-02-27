@@ -1,8 +1,8 @@
 # LogAI Context Management System - User Documentation
 
-**Version:** 1.0
-**Last Updated:** February 12, 2026
-**Status:** Draft for Review
+**Version:** 1.1
+**Last Updated:** February 26, 2026
+**Status:** Updated for context window scaling changes
 
 ---
 

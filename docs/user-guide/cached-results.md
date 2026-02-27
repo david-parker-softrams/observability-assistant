@@ -1,5 +1,10 @@
 # Cached Result Agent Guidance
 
+> **⚠️ DEPRECATED — This feature has been removed.**
+> As of the current version, tool results are no longer cached. All tool results pass through to the model in full.
+> The `fetch_cached_result_chunk` tool is retained for backward compatibility to allow retrieval of data cached in prior sessions, but no new results will be cached.
+> This document is preserved for historical reference only.
+
 **Feature Version:** 1.0
 **Last Updated:** February 12, 2026
 **Status:** Production Ready

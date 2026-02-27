@@ -140,12 +140,28 @@ class LiteLLMProvider(BaseLLMProvider):
                 request_timeout=settings.llm_request_timeout,
             )
         elif settings.llm_provider == "ollama":
+            # Resolve num_ctx: explicit user override > model registry > fallback.
+            # This ensures the context window sent to Ollama matches what the budget
+            # tracker uses (both derive from the same model registry source).
+            num_ctx = settings.ollama_num_ctx  # None if not explicitly set by user
+            if num_ctx is None:
+                from logai.config.model_config import get_context_window
+
+                logger_ = logging.getLogger(__name__)
+                num_ctx = get_context_window(settings.ollama_model)
+                logger_.info(
+                    f"Auto-detected Ollama context window for '{settings.ollama_model}': "
+                    f"{num_ctx} tokens (from model registry)"
+                )
+            else:
+                logger_ = logging.getLogger(__name__)
+                logger_.info(f"Using explicit Ollama context window override: {num_ctx} tokens")
             return cls(
                 provider="ollama",
                 api_key="",  # Ollama doesn't need API key
                 model=settings.ollama_model,
                 api_base=settings.ollama_base_url,
-                num_ctx=settings.ollama_num_ctx,
+                num_ctx=num_ctx,
                 request_timeout=settings.llm_request_timeout,
             )
         elif settings.llm_provider == "github-copilot":

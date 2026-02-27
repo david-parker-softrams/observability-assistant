@@ -99,6 +99,18 @@ Try a simple query:
 
 If everything is working, you should see your CloudWatch log groups!
 
+## Context Window Auto-Detection
+
+By default, the system automatically determines the correct context window size for your Ollama model by looking it up in the built-in model registry. You do not need to configure this manually.
+
+If your model is not in the registry, or you want to force a specific context window size, set:
+
+```
+LOGAI_OLLAMA_NUM_CTX=131072
+```
+
+This overrides the auto-detected value. Set it to match your model's actual context window size for best results.
+
 ## Troubleshooting
 
 ### Issue: Function calling not working

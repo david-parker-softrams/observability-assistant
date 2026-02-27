@@ -87,6 +87,23 @@ logai --aws-region us-west-2
 logai --aws-region eu-west-1
 ```
 
+### `--ollama-num-ctx TOKENS`
+
+Override the context window size for Ollama models. Defaults to auto-detection from the built-in model registry.
+
+```bash
+logai --ollama-num-ctx 131072
+```
+
+**Use Cases:**
+- Your Ollama model is not in the model registry
+- You want to force a specific context window size regardless of what the registry reports
+- Testing with a reduced context window
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--ollama-num-ctx` | `None` | Override the context window size for Ollama models (integer, tokens). Defaults to auto-detection from the model registry. |
+
 ### Combining AWS Options
 
 You can combine both AWS options for maximum flexibility:

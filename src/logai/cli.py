@@ -257,8 +257,8 @@ For more information, visit: https://github.com/logai/logai
         default=None,
         help=(
             "Override the Ollama context window size (num_ctx). "
-            "Defaults to 32768 when using Ollama (overrides Ollama's built-in default of 4096). "
-            "Increase for larger prompts/tool definitions; decrease to reduce VRAM usage. "
+            "If not set, auto-detected from the model registry (default_models.yaml). "
+            "Set explicitly to reduce VRAM usage or override auto-detection. "
             "Ignored for non-Ollama providers. (overrides LOGAI_OLLAMA_NUM_CTX)"
         ),
         metavar="TOKENS",

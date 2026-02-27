@@ -253,49 +253,9 @@ class ContextBudgetTracker:
         self._messages.append(ctx_msg)
         return True
 
-    def can_fit_result(self, result: dict[str, Any]) -> tuple[bool, int]:
-        """
-        Check if a tool result can fit in the context.
-
-        Args:
-            result: Tool result dictionary
-
-        Returns:
-            Tuple of (can_fit, token_count)
-        """
-        tokens = TokenCounter.estimate_json_tokens(result, self.model)
-        current_usage = self.get_usage()
-
-        # Check against result budget specifically
-        result_budget_remaining = self.allocation.results - current_usage.result_tokens
-
-        can_fit = tokens <= result_budget_remaining
-        return can_fit, tokens
-
-    def should_cache_result(
-        self, result: dict[str, Any], threshold: int = 10000
-    ) -> tuple[bool, int]:
-        """
-        Determine if a result should be cached based on size.
-
-        Args:
-            result: Tool result dictionary
-            threshold: Token threshold for caching
-
-        Returns:
-            Tuple of (should_cache, token_count)
-        """
-        tokens = TokenCounter.estimate_json_tokens(result, self.model)
-
-        # Cache if exceeds threshold OR if it won't fit in budget
-        can_fit, _ = self.can_fit_result(result)
-
-        should_cache = tokens > threshold or not can_fit
-        return should_cache, tokens
-
     def add_result_tokens(self, tokens: int) -> None:
         """
-        Track tokens from a tool result (used after caching decision).
+        Track tokens from a tool result for mid-loop budget accounting.
 
         Args:
             tokens: Number of tokens to track

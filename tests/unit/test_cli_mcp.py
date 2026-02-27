@@ -377,11 +377,16 @@ class TestOllamaNumCtxCLIFlag:
         # The env var value should still be present (not overwritten by CLI)
         assert settings.ollama_num_ctx == 16384
 
-    def test_ollama_num_ctx_default_32768_when_no_env_or_cli(
+    def test_ollama_num_ctx_default_none_when_no_env_or_cli(
         self, clean_env: None, mock_components: None
     ) -> None:
-        """When neither LOGAI_OLLAMA_NUM_CTX nor --ollama-num-ctx are set, default is 32768."""
+        """When neither LOGAI_OLLAMA_NUM_CTX nor --ollama-num-ctx are set, default is None.
+
+        None means auto-detect from the model registry (REQ-1: dynamic context window).
+        The old hardcoded default of 32768 has been replaced with dynamic lookup so
+        that each Ollama model uses its actual context window (e.g. llama3.1:70b = 128K).
+        """
         self._base_env()
         # No LOGAI_OLLAMA_NUM_CTX set
         settings = self._run_main_with_argv(["logai"])
-        assert settings.ollama_num_ctx == 32768
+        assert settings.ollama_num_ctx is None
