@@ -1,6 +1,6 @@
 """LogAI - AI-powered observability assistant for AWS CloudWatch logs."""
 
-__version__ = "0.3.2"
+__version__ = "0.4.0"
 __author__ = "LogAI Team"
 __description__ = "Query AWS CloudWatch logs using natural language with AI"
 
