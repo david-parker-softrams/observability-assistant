@@ -5,7 +5,7 @@ import json
 import logging
 import time
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal
 
 from textual import on, work
 from textual.app import ComposeResult
@@ -315,8 +315,7 @@ class ChatScreen(Screen[None]):
             return
 
         # Record in history before clearing so the user can recall it with Up.
-        # event.input is typed as Input by Textual's event; cast to our subtype.
-        cast(ChatInput, event.input).add_to_history(message)
+        self.query_one(ChatInput).add_to_history(message)
 
         # Clear the input
         event.input.value = ""

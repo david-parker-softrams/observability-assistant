@@ -63,7 +63,7 @@ class ChatInput(Input):
             self._history_index = -1
             self._draft = ""
 
-    async def on_key(self, event: events.Key) -> None:
+    def on_key(self, event: events.Key) -> None:
         """Handle Up/Down arrows for history navigation.
 
         Up  — move toward older entries (no wrap at the oldest).
