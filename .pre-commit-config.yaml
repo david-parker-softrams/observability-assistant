@@ -19,4 +19,4 @@ repos:
     hooks:
       - id: mypy
         files: ^src/
-        additional_dependencies: [types-aiofiles, types-python-dateutil]
+        additional_dependencies: [types-aiofiles, types-python-dateutil, textual>=0.47.0]

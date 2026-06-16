@@ -314,6 +314,9 @@ class ChatScreen(Screen[None]):
         if not message:
             return
 
+        # Record in history before clearing so the user can recall it with Up.
+        self.query_one(ChatInput).add_to_history(message)
+
         # Clear the input
         event.input.value = ""
 
