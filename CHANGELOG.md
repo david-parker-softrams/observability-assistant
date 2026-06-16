@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0](https://github.com/david-parker-softrams/observability-assistant/compare/logai-v0.4.0...logai-v0.5.0) (2026-06-16)
+
+
+### Features
+
+* chat input history navigation (Up/Down arrows) ([#23](https://github.com/david-parker-softrams/observability-assistant/issues/23)) ([4cff78f](https://github.com/david-parker-softrams/observability-assistant/commit/4cff78f2a3b5054bec56db99ebd1da6576b10c09))
+
 ## [0.4.0](https://github.com/david-parker-softrams/observability-assistant/compare/logai-v0.3.2...logai-v0.4.0) (2026-02-27)
 
 
